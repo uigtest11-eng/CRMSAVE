@@ -147,6 +147,8 @@ app.use(helmet({
 app.use(cors({
     origin: [
         'https://162-220-14-239.nip.io',
+        'https://portal.vigagency.com',
+        'https://vigagency.com',
         'http://localhost:3000',
         'http://localhost:3001'
     ],

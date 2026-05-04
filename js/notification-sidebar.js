@@ -10,7 +10,7 @@
 
     // Grant: all-users toggle state (persisted in localStorage, default ON)
     function isGrantAllUsersOn() {
-        return localStorage.getItem('grantAllUsersNotif') !== 'false';
+        return localStorage.getItem('grantAllUsersNotif') === 'true';
     }
 
     window.toggleGrantAllUsers = function() {

@@ -652,6 +652,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Handle nested routes on initial page load (deep-link support)
+    const _clientPolicyMatch = _initialHash.match(/^#clients\/([^/]+)\/policy\/([^/]+)$/);
+    const _clientMatch = !_clientPolicyMatch && _initialHash.match(/^#clients\/([^/]+)$/);
+    const _policyMatch = !_clientPolicyMatch && !_clientMatch && _initialHash.match(/^#policies\/([^/]+)$/);
+
+    if (_clientPolicyMatch || _clientMatch || _policyMatch) {
+        const _dc = document.querySelector('.dashboard-content');
+        if (_dc) _dc.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:400px;"><i class="fas fa-spinner fa-spin" style="font-size:48px;color:#3b82f6;"></i></div>';
+        // Delay to let scripts initialize, then the hashchange handler will route
+        setTimeout(() => {
+            window.dispatchEvent(new HashChangeEvent('hashchange'));
+        }, 500);
+        updateActiveMenuItem(_initialHash);
+        return; // skip normal loadContent
+    }
+
     // If not on dashboard, blank out the pre-rendered HTML immediately so
     // the static dashboard stats don't flash before the real view loads.
     if (_initialHash !== '#dashboard') {
@@ -4648,8 +4664,48 @@ function _directOpenPolicy(polNum) {
 
 // Handle browser back/forward navigation
 window.addEventListener('hashchange', function() {
+    // Skip if this hash change was set programmatically by viewClient/viewPolicy
+    if (window._skipHashRoute) {
+        window._skipHashRoute = false;
+        return;
+    }
+
     const hash = window.location.hash || '#dashboard';
     console.log('🔥 CRITICAL DEBUG: Hash changed to:', hash);
+
+    // === NESTED ROUTE: #clients/CLIENT_ID/policy/POLICY_ID ===
+    const clientPolicyMatch = hash.match(/^#clients\/([^/]+)\/policy\/([^/]+)$/);
+    if (clientPolicyMatch) {
+        const [, clientId, policyId] = clientPolicyMatch;
+        console.log('🔗 Route: client policy view |', clientId, '→', policyId);
+        window.currentViewingClientId = decodeURIComponent(clientId);
+        window._routeClientId = decodeURIComponent(clientId);
+        viewPolicy(decodeURIComponent(policyId));
+        updateActiveMenuItem('#clients');
+        return;
+    }
+
+    // === NESTED ROUTE: #clients/CLIENT_ID ===
+    const clientMatch = hash.match(/^#clients\/([^/]+)$/);
+    if (clientMatch) {
+        const clientId = decodeURIComponent(clientMatch[1]);
+        console.log('🔗 Route: client profile |', clientId);
+        window.currentViewingClientId = clientId;
+        viewClient(clientId);
+        updateActiveMenuItem('#clients');
+        return;
+    }
+
+    // === NESTED ROUTE: #policies/POLICY_ID ===
+    const policyMatch = hash.match(/^#policies\/([^/]+)$/);
+    if (policyMatch) {
+        const policyId = decodeURIComponent(policyMatch[1]);
+        console.log('🔗 Route: standalone policy view |', policyId);
+        window._routeClientId = null;
+        viewPolicy(policyId);
+        updateActiveMenuItem('#policies');
+        return;
+    }
 
     // Direct policy route: #policy/POLICYNUMBER → open policy profile directly
     if (hash.startsWith('#policy/')) {
@@ -4691,8 +4747,8 @@ window.addEventListener('hashchange', function() {
 
 // Update active menu item
 function updateActiveMenuItem(hash) {
-    // Normalize hash (handle empty or missing hash)
-    const normalizedHash = hash || '#dashboard';
+    // Normalize hash: #clients/ID/policy/X → #clients, #policies/ID → #policies
+    const normalizedHash = (hash || '#dashboard').replace(/^(#(?:clients|policies))\/.*$/, '$1');
 
     // Remove active class from all menu items
     document.querySelectorAll('.sidebar li').forEach(li => {
@@ -5070,7 +5126,10 @@ function loadContent(section) {
         dashboardContent.style.display = 'block';
     }
 
-    switch(section) {
+    // Normalize nested routes for the switch: #clients/ID → #clients, #policies/ID → #policies
+    const _baseSection = section.replace(/^(#(?:clients|policies))\/.*$/, '$1');
+
+    switch(_baseSection) {
         case '':
         case '#':
         case '#dashboard':
@@ -13123,6 +13182,7 @@ function renderMonthView(policies, isAdmin = false) {
                         </div>
                         <div class="renewal-footer">
                             ${isAdmin ? `<span class="premium">$${(policy.premium || 0).toLocaleString()}/yr</span>` : ''}
+                            <span class="agent-badge" title="Assigned to ${policy.agent || policy.assignedTo || 'Unassigned'}">${policy.agent || policy.assignedTo || 'Unassigned'}</span>
                             <span class="status-badge ${policy.status || ''}">${(policy.status || 'pending').replace('-', ' ')}</span>
                         </div>
                     </div>
@@ -13167,6 +13227,7 @@ function renderThreeMonthView(policies, isAdmin = false) {
                         </div>
                         <div class="renewal-footer">
                             ${isAdmin ? `<span class="premium">$${(policy.premium || 0).toLocaleString()}/yr</span>` : ''}
+                            <span class="agent-badge" title="Assigned to ${policy.agent || policy.assignedTo || 'Unassigned'}">${policy.agent || policy.assignedTo || 'Unassigned'}</span>
                             <span class="status-badge ${policy.status || ''}">${(policy.status || 'pending').replace('-', ' ')}</span>
                         </div>
                     </div>
@@ -14347,6 +14408,17 @@ function addRenewalStyles() {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
+        }
+
+        .agent-badge {
+            font-size: 11px;
+            font-weight: 600;
+            color: #4b5563;
+            background: #e5e7eb;
+            padding: 2px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
         }
         
         .premium {
@@ -21247,6 +21319,13 @@ async function viewClient(id) {
     // Store the current client ID globally for other functions to use
     window.currentViewingClientId = id;
 
+    // Update URL hash for deep-linking (use flag to prevent hashchange re-trigger)
+    const targetHash = '#clients/' + encodeURIComponent(id);
+    if (window.location.hash !== targetHash) {
+        window._skipHashRoute = true;
+        window.location.hash = targetHash;
+    }
+
     // Get actual client data from API first, then localStorage as fallback
     let client = null;
 
@@ -23389,6 +23468,19 @@ async function viewPolicy(policyId) {
         policy.clientId = window.currentViewingClientId;
     }
 
+    // Update URL hash for deep-linking — nested under client if we have context
+    const _clientCtx = window.currentViewingClientId || window._routeClientId || policy.clientId;
+    let targetHash;
+    if (_clientCtx) {
+        targetHash = '#clients/' + encodeURIComponent(_clientCtx) + '/policy/' + encodeURIComponent(policyId);
+    } else {
+        targetHash = '#policies/' + encodeURIComponent(policyId);
+    }
+    if (window.location.hash !== targetHash) {
+        window._skipHashRoute = true;
+        window.location.hash = targetHash;
+    }
+
     // Show the policy details in a tabbed modal
     showPolicyDetailsModal(policy);
 }
@@ -23412,8 +23504,8 @@ function showPolicyDetailsModal(policy) {
             <!-- Page Header -->
             <div class="pdp-header" style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
                 <div class="pdp-header-inner" style="display: flex; align-items: center; gap: 16px; height: 64px;">
-                    <button class="pdp-back-btn" onclick="${policy.clientId ? `viewClient('${policy.clientId}')` : 'loadPoliciesView()'}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                        <i class="fas fa-arrow-left"></i> ${policy.clientId ? 'Back to Client' : 'Back to Policies'}
+                    <button class="pdp-back-btn" onclick="${(window.currentViewingClientId || policy.clientId) ? `window.location.hash='#clients/${encodeURIComponent(window.currentViewingClientId || policy.clientId)}'` : `window.location.hash='#policies'`}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                        <i class="fas fa-arrow-left"></i> ${(window.currentViewingClientId || policy.clientId) ? 'Back to Client' : 'Back to Policies'}
                     </button>
                     ${policyTypeLabel ? `<span class="pdp-type-badge" style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
                     <h1 class="pdp-policy-num" style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
@@ -23938,11 +24030,14 @@ function generateViewTabContent(tabId, policy) {
                 let initRows = '';
                 console.log('📋 COVERAGE TAB RENDER:', _pId, '| CoveragesArray:', coveragesArray ? Object.keys(coveragesArray).length + ' entries' : 'NONE');
 
+                // Fix known wrong descriptions from legacy imports
+                const _descFix = {'Cargo Deductible':'Motor Truck Cargo','Cargo Limit':'Motor Truck Cargo','Comp Deductible':'Comprehensive','Collision Deductible':'Collision','Liability Limits':'Combined Single Limit','General Liability':'GL Combined Bodily Injury'};
                 if (coveragesArray && typeof coveragesArray === 'object' && Object.keys(coveragesArray).length > 0) {
                     Object.values(coveragesArray).filter(c => c && c.Code).forEach(cov => {
                         const _isGL = window._isGLCode && window._isGLCode(cov.Code);
-                        initRows += `<tr data-code="${_eQ(cov.Code)}" data-desc="${_eQ(cov.Description||'')}">
-                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${cov.Code}</span>${cov.Description?`<br><span style="font-size:11px;color:#6b7280;">${cov.Description}</span>`:''}</td>
+                        const _desc = _descFix[cov.Description] || cov.Description || '';
+                        initRows += `<tr data-code="${_eQ(cov.Code)}" data-desc="${_eQ(_desc)}">
+                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${cov.Code}</span>${_desc?`<br><span style="font-size:11px;color:#6b7280;">${_desc}</span>`:''}</td>
                             <td style="padding:3px 4px;"><input class="vcov-limit" placeholder="${_isGL?'Limit':''}" value="${_eQ(cov.Amount)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-deduct" placeholder="${_isGL?'Aggregate':''}" value="${_eQ(_isGL ? (cov.Aggregate||cov.Deductible) : cov.Deductible)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-prem" value="${_eQ(cov.Premium)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
@@ -23950,25 +24045,52 @@ function generateViewTabContent(tabId, policy) {
                         </tr>`;
                     });
                 } else {
-                    // Legacy fields → editable rows
-                    const LMAP = {'coverage-liability-limits':'Liability Limits','coverage-general-aggregate':'General Liability','coverage-comp-deduct':'Comp Deductible','coverage-coll-deduct':'Collision Deductible','coverage-cargo-limit':'Cargo Limit','coverage-cargo-deduct':'Cargo Deductible','coverage-medical':'Medical Payments','coverage-um-uim':'UM/UIM','Liability Limits':'Liability Limits','General Liability':'General Liability','Comp Deductible':'Comp Deductible','Collision Deductible':'Collision Deductible','Cargo Limit':'Cargo Limit','Cargo Deductible':'Cargo Deductible','UM/UIM':'UM/UIM','Medical Payments':'Medical Payments','CSL':'Combined Single Limit','BISPL':'Bodily Injury Split Limit','MEDPM':'Medical Payments','UMCSL':'Uninsured Motorist CSL','COMP':'Comprehensive','COLL':'Collision','MTCARGO':'Motor Truck Cargo','GLCBI':'GL Bodily Injury','GLCPD':'GL Property Damage'};
-                    const LCODE = {'Liability Limits':'CSL','General Liability':'GLCBI','Comp Deductible':'COMP','Collision Deductible':'COLL','Cargo Limit':'MTCARGO','Cargo Deductible':'MTCARGO','UM/UIM':'UMCSL','Medical Payments':'MEDPM'};
-                    const LSKIP = new Set(['additionalCoverages','CoveragesArray','automotiveLiability']);
-                    const lSeen = new Set();
-                    Object.entries(coverageData).forEach(([key, val]) => {
-                        if (LSKIP.has(key) || typeof val !== 'string' || !val.trim() || val.toLowerCase() === 'n/a') return;
-                        const label = LMAP[key] || key;
-                        if (lSeen.has(label)) return;
-                        lSeen.add(label);
-                        const code = LCODE[label] || key.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,8) || 'COV';
-                        initRows += `<tr data-code="${_eQ(code)}" data-desc="${_eQ(label)}">
-                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${code}</span><br><span style="font-size:11px;color:#6b7280;">${label}</span></td>
-                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(val.trim())}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
-                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                    // Legacy flat-key fields → editable rows
+                    // First pass: collect limit+deductible pairs for coverages that have both
+                    const _cd = coverageData;
+                    const _gv = k => { const v = _cd[k] || _cd[k.replace(/ /g,'-').toLowerCase()] || ''; return (typeof v === 'string' && v.trim() && v.toLowerCase() !== 'n/a') ? v.trim() : ''; };
+                    const mergedCovs = [];
+                    const handled = new Set(['additionalCoverages','CoveragesArray','automotiveLiability']);
+                    // Merged pairs: limit key, deductible key, code, description
+                    const pairs = [
+                        ['Liability Limits','coverage-liability-limits', null, null, 'CSL', 'Combined Single Limit'],
+                        ['General Liability','coverage-general-aggregate', null, null, 'GLCBI', 'GL Combined Bodily Injury'],
+                        ['Cargo Limit','coverage-cargo-limit', 'Cargo Deductible','coverage-cargo-deduct', 'MTCARGO', 'Motor Truck Cargo'],
+                        ['Comp Deductible','coverage-comp-deduct', null, null, 'COMP', 'Comprehensive'],
+                        ['Collision Deductible','coverage-coll-deduct', null, null, 'COLL', 'Collision'],
+                        ['UM/UIM','coverage-um-uim', null, null, 'UMCSL', 'Uninsured Motorist CSL'],
+                        ['Medical Payments','coverage-medical', null, null, 'MEDPM', 'Medical Payments'],
+                    ];
+                    for (const [lk1, lk2, dk1, dk2, code, desc] of pairs) {
+                        const limit = _gv(lk1) || _gv(lk2);
+                        const deduct = dk1 ? (_gv(dk1) || _gv(dk2 || '')) : '';
+                        if (limit || deduct) {
+                            // For COMP/COLL the flat key IS the deductible, not the limit
+                            if (code === 'COMP' || code === 'COLL') {
+                                mergedCovs.push({ code, desc, limit: '', deduct: limit }); // value is actually deductible
+                            } else {
+                                mergedCovs.push({ code, desc, limit, deduct });
+                            }
+                        }
+                        [lk1, lk2, dk1, dk2].filter(Boolean).forEach(k => handled.add(k));
+                    }
+                    // Remaining unhandled flat keys
+                    Object.entries(_cd).forEach(([key, val]) => {
+                        if (handled.has(key) || typeof val !== 'string' || !val.trim() || val.toLowerCase() === 'n/a') return;
+                        handled.add(key);
+                        const code = key.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,8) || 'COV';
+                        mergedCovs.push({ code, desc: key, limit: val.trim(), deduct: '' });
+                    });
+                    // Render merged rows
+                    for (const c of mergedCovs) {
+                        initRows += `<tr data-code="${_eQ(c.code)}" data-desc="${_eQ(c.desc)}">
+                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${c.code}</span><br><span style="font-size:11px;color:#6b7280;">${c.desc}</span></td>
+                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(c.limit)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="${_eQ(c.deduct)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-prem" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
                             <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>
                         </tr>`;
-                    });
+                    }
                 }
 
                 const coverageTableHTML = `

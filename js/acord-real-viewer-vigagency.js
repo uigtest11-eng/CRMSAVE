@@ -761,11 +761,13 @@ function createRealFormFields(policyId, policyData) {
     const _compCov = _findCov('COMP');
     const _collCov = _findCov('COLL');
 
-    const _cargoLimitRaw = policyData?.coverage?.cargo_limit || policyData?.coverage?.['Cargo Limit'] || (_mtcCov?.Amount || _mtcCov?.Limit || '') || '';
-    const _cargoDeductRaw = policyData?.coverage?.cargo_deductible || policyData?.coverage?.['Cargo Deductible'] || (_mtcCov?.Deductible || '') || '';
+    // CoveragesArray/override values take priority over flat keys (user edits override IVANS imports)
+    const _cargoLimitRaw = (_mtcCov?.Amount || _mtcCov?.Limit || '') || policyData?.coverage?.cargo_limit || policyData?.coverage?.['Cargo Limit'] || '';
+    const _cargoDeductRaw = (_mtcCov?.Deductible || '') || policyData?.coverage?.cargo_deductible || policyData?.coverage?.['Cargo Deductible'] || '';
     const hasCargoRow = !!_cargoLimitRaw && _cargoLimitRaw !== '0' && _cargoLimitRaw !== 'None';
-    const _compDedRaw = policyData?.coverage?.comprehensive_deductible || policyData?.coverage?.['Comprehensive Deductible'] || (_compCov?.Deductible || '') || '0';
-    const _collDedRaw = policyData?.coverage?.collision_deductible || policyData?.coverage?.['Collision Deductible'] || (_collCov?.Deductible || '') || '0';
+    console.log('📦 CARGO DEBUG: _cargoLimitRaw =', JSON.stringify(_cargoLimitRaw), '| _cargoDeductRaw =', JSON.stringify(_cargoDeductRaw), '| hasCargoRow =', hasCargoRow, '| _mtcCov =', _mtcCov);
+    const _compDedRaw = (_compCov?.Deductible || '') || policyData?.coverage?.comprehensive_deductible || policyData?.coverage?.['Comprehensive Deductible'] || '0';
+    const _collDedRaw = (_collCov?.Deductible || '') || policyData?.coverage?.collision_deductible || policyData?.coverage?.['Collision Deductible'] || '0';
     const hasPhysDmg = _compDedRaw !== 'None' && _collDedRaw !== 'None' &&
                        parseFloat(String(_compDedRaw).replace(/[$,]/g,'')) > 0 &&
                        parseFloat(String(_collDedRaw).replace(/[$,]/g,'')) > 0;
