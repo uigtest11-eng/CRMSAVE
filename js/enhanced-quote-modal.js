@@ -787,13 +787,13 @@ window.createQuoteApplicationSimple = function(leadId) {
                             <option value="$30,000/$1,000 Ded.">$30,000/$1,000 Ded.</option>
                             <option value="$40,000/$1,000 Ded.">$40,000/$1,000 Ded.</option>
                             <option value="$40,000/$2,000 Ded.">$40,000/$2,000 Ded.</option>
-                            <option value="$50,000" selected>$50,000</option>
+                            <option value="$50,000">$50,000</option>
                             <option value="$60,000/$2,000 Ded.">$60,000/$2,000 Ded.</option>
                             <option value="$75,000">$75,000</option>
                             <option value="$100,000">$100,000</option>
                             <option value="$145,000/$1,000 Ded.">$145,000/$1,000 Ded.</option>
                             <option value="$150,000">$150,000</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -801,11 +801,11 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="$25,000">$25,000</option>
                             <option value="$30,000/$1,000 Ded.">$30,000/$1,000 Ded.</option>
-                            <option value="$50,000" selected>$50,000</option>
+                            <option value="$50,000">$50,000</option>
                             <option value="$75,000">$75,000</option>
                             <option value="$100,000">$100,000</option>
                             <option value="$150,000">$150,000</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -813,7 +813,7 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="Included">Included</option>
                             <option value="$250 DED.">$250 DED.</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -856,12 +856,12 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="$5,000">$5,000</option>
                             <option value="$10,000">$10,000</option>
-                            <option value="$15,000" selected>$15,000</option>
+                            <option value="$15,000">$15,000</option>
                             <option value="$25,000">$25,000</option>
                             <option value="$50,000">$50,000</option>
                             <option value="Included DED. $2500">Included DED. $2500</option>
                             <option value="$150,000/$2,500 DED.">$150,000/$2,500 DED.</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -2314,19 +2314,19 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Non-Owned Trailer Phys Dam:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$20,000/$1,000 Ded.', '$20,000/$2,000 Ded.', '$25,000', '$30,000/$1,000 Ded.', '$40,000/$1,000 Ded.', '$40,000/$2,000 Ded.', '$50,000', '$60,000/$2,000 Ded.', '$75,000', '$100,000', '$145,000/$1,000 Ded.', '$150,000', 'Not Included'], getSavedValue('Non-Owned Trailer Phys Dam', '$50,000'))}
+                            ${generateDropdownOptions(['$20,000/$1,000 Ded.', '$20,000/$2,000 Ded.', '$25,000', '$30,000/$1,000 Ded.', '$40,000/$1,000 Ded.', '$40,000/$2,000 Ded.', '$50,000', '$60,000/$2,000 Ded.', '$75,000', '$100,000', '$145,000/$1,000 Ded.', '$150,000', 'Not Included'], getSavedValue('Non-Owned Trailer Phys Dam', 'Not Included'))}
                         </select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Trailer Interchange:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$25,000', '$30,000/$1,000 Ded.', '$50,000', '$75,000', '$100,000', '$150,000', 'Not Included'], getSavedValue('Trailer Interchange', '$50,000'))}
+                            ${generateDropdownOptions(['$25,000', '$30,000/$1,000 Ded.', '$50,000', '$75,000', '$100,000', '$150,000', 'Not Included'], getSavedValue('Trailer Interchange', 'Not Included'))}
                         </select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Roadside Assistance:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['Included', '$250 DED.', 'Not Included'], getSavedValue('Roadside Assistance', 'Included'))}
+                            ${generateDropdownOptions(['Included', '$250 DED.', 'Not Included'], getSavedValue('Roadside Assistance', 'Not Included'))}
                         </select>
                     </div>
                     <div>
@@ -2350,7 +2350,7 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Reefer Breakdown:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$5,000', '$10,000', '$15,000', '$25,000', '$50,000', 'Included DED. $2500', '$150,000/$2,500 DED.', 'Not Included'], getSavedValue('Reefer Breakdown', '$15,000'))}
+                            ${generateDropdownOptions(['$5,000', '$10,000', '$15,000', '$25,000', '$50,000', 'Included DED. $2500', '$150,000/$2,500 DED.', 'Not Included'], getSavedValue('Reefer Breakdown', 'Not Included'))}
                         </select>
                     </div>
                     <div>
@@ -3184,15 +3184,15 @@ function generateApplicationPDF(lead, formData) {
             </div>
             <div class="field">
                 <div class="field-label">Non-Owned Trailer Phys Dam:</div>
-                <div class="field-value">${formData['Non-Owned Trailer Phys Dam'] || formData['Non-Owned Trailer Physical Damage'] || '$50,000'}</div>
+                <div class="field-value">${formData['Non-Owned Trailer Phys Dam'] || formData['Non-Owned Trailer Physical Damage'] || 'Not Included'}</div>
             </div>
             <div class="field">
                 <div class="field-label">Trailer Interchange:</div>
-                <div class="field-value">${formData['Trailer Interchange'] || '$50,000'}</div>
+                <div class="field-value">${formData['Trailer Interchange'] || 'Not Included'}</div>
             </div>
             <div class="field">
                 <div class="field-label">Roadside Assistance:</div>
-                <div class="field-value">${formData['Roadside Assistance'] || '$1,000 (If applicable)'}</div>
+                <div class="field-value">${formData['Roadside Assistance'] || 'Not Included'}</div>
             </div>
             <div class="field">
                 <div class="field-label">General Liability:</div>
@@ -3208,7 +3208,7 @@ function generateApplicationPDF(lead, formData) {
             </div>
             <div class="field">
                 <div class="field-label">Reefer Breakdown:</div>
-                <div class="field-value">${formData['Reefer Breakdown'] || '$15,000'}</div>
+                <div class="field-value">${formData['Reefer Breakdown'] || 'Not Included'}</div>
             </div>
         </div>
     </div>
