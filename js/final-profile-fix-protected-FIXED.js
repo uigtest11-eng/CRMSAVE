@@ -235,25 +235,32 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
                     <!-- Callback Date/Time Input -->
                     <div style="display: flex; flex-direction: column; gap: 15px;">
-                        <div style="display: flex; gap: 15px; align-items: end;">
-                            <div style="flex: 1;">
-                                <label for="callback-date-${lead.id}" style="font-weight: 600; font-size: 12px; color: #374151;">Date:</label>
-                                <input type="date"
-                                       id="callback-date-${lead.id}"
-                                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;"
-                                       min="${new Date().toISOString().split('T')[0]}">
+                        <!-- Hidden inputs for scheduleCallback() compatibility -->
+                        <input type="hidden" id="callback-date-${lead.id}" />
+                        <input type="hidden" id="callback-time-${lead.id}" />
+
+                        <!-- Inline calendar + time picker -->
+                        <div style="border: 2px solid #bae6fd; border-radius: 10px; padding: 12px; background: #f0f9ff;">
+                            <div style="display: flex; gap: 10px;">
+                                <div id="inline-cb-calendar-${lead.id}" style="flex: 1; min-width: 0;"></div>
+                                <div style="width: 1px; background: #bae6fd;"></div>
+                                <div id="inline-cb-timeslots-${lead.id}" style="width: 135px; max-height: 240px; overflow-y: auto; padding-right: 4px;"></div>
                             </div>
-                            <div style="flex: 1;">
-                                <label for="callback-time-${lead.id}" style="font-weight: 600; font-size: 12px; color: #374151;">Time:</label>
-                                <input type="time"
-                                       id="callback-time-${lead.id}"
-                                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                            <div id="inline-cb-selected-${lead.id}" style="margin-top: 8px; text-align: center; font-weight: 600; color: #0277bd; font-size: 13px;"></div>
+                            <div style="display:flex;align-items:center;gap:12px;margin-top:4px;justify-content:center;">
+                                <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;">
+                                    <div style="width:8px;height:8px;background:#fffbeb;border:2px solid #fbbf24;border-radius:3px;"></div> Has callbacks
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;">
+                                    <div style="width:8px;height:8px;background:#fef3c7;border:2px solid #f59e0b;border-radius:3px;"></div> Time booked
+                                </div>
                             </div>
-                            <button onclick="scheduleCallback('${lead.id}')"
-                                    style="background: #0277bd; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap;">
-                                <i class="fas fa-plus"></i> Schedule
-                            </button>
                         </div>
+
+                        <button onclick="scheduleCallback('${lead.id}')"
+                                style="background: #0277bd; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap; align-self: flex-end;">
+                            <i class="fas fa-plus"></i> Schedule Callback
+                        </button>
 
                         <!-- Notes for callback -->
                         <div>
@@ -902,6 +909,13 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
     // Activate DOM protection to prevent hardcoded ID overwrites
     protectedFunctions.protectModalIDs(lead.id, modalContainer);
+
+    // Initialize inline callback calendar for this lead
+    setTimeout(() => {
+        if (typeof window.initInlineCallbackCal === 'function') {
+            window.initInlineCallbackCal(lead.id);
+        }
+    }, 150);
 
     // Initialize callback display for this lead
     setTimeout(async () => {
@@ -5598,6 +5612,202 @@ function completeAllCallbacksForLead(leadId) {
     }, 500);
 }
 
+// Inline calendar+time picker for the lead profile Schedule Callback section
+window.initInlineCallbackCal = function(leadId) {
+    const calContainer = document.getElementById('inline-cb-calendar-' + leadId);
+    const tsContainer  = document.getElementById('inline-cb-timeslots-' + leadId);
+    if (!calContainer || !tsContainer) return;
+
+    const _sessD = JSON.parse(localStorage.getItem('session') || '{}');
+    const _usr = (_sessD.username || '').toLowerCase();
+
+    const today = new Date();
+    const tmrw = new Date(today);
+    tmrw.setDate(tmrw.getDate() + 1);
+    tmrw.setHours(10, 0, 0, 0);
+
+    let cM = tmrw.getMonth(), cY = tmrw.getFullYear();
+    let sDate = new Date(tmrw), sH = 10, sM = 0;
+    let uCBs = {};
+    const mN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const dN = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+    function _setInputs() {
+        const dateInp = document.getElementById('callback-date-' + leadId);
+        const timeInp = document.getElementById('callback-time-' + leadId);
+        if (dateInp) dateInp.value = sDate.getFullYear() + '-' + String(sDate.getMonth()+1).padStart(2,'0') + '-' + String(sDate.getDate()).padStart(2,'0');
+        if (timeInp) timeInp.value = String(sH).padStart(2,'0') + ':' + String(sM).padStart(2,'0');
+        _showSel();
+    }
+
+    function _showSel() {
+        const el = document.getElementById('inline-cb-selected-' + leadId);
+        if (!el) return;
+        const opts = { weekday:'short', month:'short', day:'numeric', year:'numeric' };
+        const ds = sDate.toLocaleDateString('en-US', opts);
+        const h12 = sH % 12 || 12, ap = sH < 12 ? 'AM' : 'PM';
+        el.textContent = ds + ' at ' + h12 + ':' + String(sM).padStart(2,'0') + ' ' + ap;
+    }
+
+    function _ft(h, m) {
+        return (h % 12 || 12) + ':' + String(m).padStart(2,'0') + ' ' + (h < 12 ? 'AM' : 'PM');
+    }
+
+    function _rCal() {
+        const first = new Date(cY, cM, 1);
+        const last = new Date(cY, cM + 1, 0);
+        const sd = first.getDay();
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<button type="button" class="icb-prev" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#0277bd;"><i class="fas fa-chevron-left"></i></button>' +
+            '<span style="font-weight:600;font-size:13px;color:#0277bd;">' + mN[cM] + ' ' + cY + '</span>' +
+            '<button type="button" class="icb-next" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#0277bd;"><i class="fas fa-chevron-right"></i></button>' +
+            '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;">';
+
+        dN.forEach(function(dn) {
+            html += '<div style="font-size:10px;font-weight:600;color:#9ca3af;padding:3px 0;">'+dn+'</div>';
+        });
+        for (let i = 0; i < sd; i++) html += '<div></div>';
+
+        for (let dd = 1; dd <= last.getDate(); dd++) {
+            const dk = cY+'-'+String(cM+1).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+            const hasCB = uCBs[dk] && uCBs[dk].length > 0;
+            const cnt = hasCB ? uCBs[dk].length : 0;
+            const isSel = sDate.getDate()===dd && sDate.getMonth()===cM && sDate.getFullYear()===cY;
+            const isTd = today.getDate()===dd && today.getMonth()===cM && today.getFullYear()===cY;
+            const isPast = new Date(cY, cM, dd, 23, 59) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+            let bg='transparent',clr='#374151',brd='2px solid transparent',fw='400',op='1';
+            if (isPast) { clr='#d1d5db'; op='0.5'; }
+            if (isTd && !isSel) { bg='#e0f2fe'; fw='700'; brd='2px solid #7dd3fc'; }
+            if (hasCB && !isSel) { bg='#fffbeb'; brd='2px solid #fbbf24'; }
+            if (isSel) { bg='#0277bd'; clr='white'; brd='2px solid #0277bd'; fw='600'; }
+
+            let dot = '';
+            if (hasCB) {
+                const dc = isSel ? 'white' : '#f59e0b';
+                dot = '<div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);display:flex;gap:1px;">';
+                for (let i = 0; i < Math.min(cnt, 3); i++) dot += '<div style="width:4px;height:4px;background:'+dc+';border-radius:50%;"></div>';
+                if (cnt > 3) dot += '<span style="font-size:7px;color:'+dc+';line-height:4px;">+</span>';
+                dot += '</div>';
+            }
+
+            html += '<div class="icb-day" data-date="'+dk+'" style="padding:4px 2px;cursor:'+(isPast?'default':'pointer')+';border-radius:6px;position:relative;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+fw+';font-size:12px;opacity:'+op+';min-height:28px;display:flex;align-items:center;justify-content:center;transition:background 0.15s;'+(isPast?'pointer-events:none;':'')+'"'+(hasCB?' title="'+cnt+' callback'+(cnt>1?'s':'')+'"':'')+'>'+dd+dot+'</div>';
+        }
+        html += '</div>';
+        calContainer.innerHTML = html;
+
+        calContainer.querySelectorAll('.icb-day').forEach(function(el) {
+            el.addEventListener('click', function() {
+                const p = el.dataset.date.split('-');
+                sDate = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]), sH, sM);
+                _setInputs();
+                _rCal();
+                _rTime();
+            });
+        });
+        var prevB = calContainer.querySelector('.icb-prev');
+        var nextB = calContainer.querySelector('.icb-next');
+        if (prevB) prevB.addEventListener('click', function(e) { e.preventDefault(); cM--; if(cM<0){cM=11;cY--;} _rCal(); });
+        if (nextB) nextB.addEventListener('click', function(e) { e.preventDefault(); cM++; if(cM>11){cM=0;cY++;} _rCal(); });
+    }
+
+    function _rTime() {
+        const dk = sDate.getFullYear()+'-'+String(sDate.getMonth()+1).padStart(2,'0')+'-'+String(sDate.getDate()).padStart(2,'0');
+        const dCBs = uCBs[dk] || [];
+
+        let html = '';
+        for (let h = 7; h <= 19; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                if (h === 19 && m > 0) break;
+                const isSel = sH===h && sM===m;
+                const match = dCBs.find(function(cb) {
+                    const ct = new Date(cb.dateTime);
+                    const ss = h*60+m, cm = ct.getHours()*60+ct.getMinutes();
+                    return cm >= ss && cm < ss+30;
+                });
+
+                let bg='#ffffff',clr='#374151',brd='1px solid #d1d5db';
+                if (isSel) { bg='#0277bd'; clr='white'; brd='1px solid #0277bd'; }
+                else if (match) { bg='#fef3c7'; brd='2px solid #f59e0b'; clr='#92400e'; }
+
+                let badge = '';
+                if (match && !isSel) {
+                    const nm = match.leadName || 'Booked';
+                    const sh = nm.length > 12 ? nm.substring(0,12)+'…' : nm;
+                    badge = '<div style="font-size:9px;color:#b45309;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;" title="'+nm.replace(/"/g,'&quot;')+'"><i class="fas fa-exclamation-triangle" style="font-size:8px;margin-right:2px;"></i>'+sh+'</div>';
+                }
+
+                html += '<div class="icts" data-h="'+h+'" data-m="'+m+'" style="padding:4px 8px;cursor:pointer;border-radius:5px;font-size:11px;margin-bottom:2px;background:'+bg+';color:'+clr+';border:'+brd+';transition:background 0.15s;"><div style="font-weight:'+(isSel||match?'600':'400')+';">'+_ft(h,m)+'</div>'+badge+'</div>';
+            }
+        }
+        tsContainer.innerHTML = html;
+
+        var selEl = tsContainer.querySelector('.icts[data-h="'+sH+'"][data-m="'+sM+'"]');
+        if (selEl) selEl.scrollIntoView({ block:'center', behavior:'smooth' });
+
+        tsContainer.querySelectorAll('.icts').forEach(function(el) {
+            el.addEventListener('click', function() {
+                sH = parseInt(el.dataset.h);
+                sM = parseInt(el.dataset.m);
+                sDate.setHours(sH, sM, 0, 0);
+                _setInputs();
+                _rTime();
+            });
+        });
+    }
+
+    // Fetch current user's callbacks
+    (async function() {
+        try {
+            const resp = await fetch('/api/callbacks');
+            const data = await resp.json();
+            const cbs = Array.isArray(data) ? data : (data.callbacks || []);
+            cbs.forEach(function(cb) {
+                const agent = (cb.assigned_agent || '').toLowerCase();
+                if (_usr && agent && agent !== _usr) return;
+                const dt = new Date(cb.date_time || cb.dateTime);
+                if (isNaN(dt.getTime())) return;
+                const dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                if (!uCBs[dk]) uCBs[dk] = [];
+                uCBs[dk].push({ dateTime: dt.toISOString(), leadName: cb.lead_name || 'Unknown', leadId: cb.lead_id });
+            });
+        } catch(e) { console.error('Error fetching callbacks for inline picker:', e); }
+
+        try {
+            var localCBs = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
+            var allLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            Object.entries(localCBs).forEach(function(entry) {
+                var lid = entry[0], cbs = entry[1];
+                var ld = allLeads.find(function(l) { return String(l.id) === String(lid); });
+                var agent = ld ? (ld.assignedTo || '').toLowerCase() : '';
+                if (_usr && agent && agent !== _usr) return;
+                (Array.isArray(cbs) ? cbs : []).forEach(function(cb) {
+                    if (cb.completed) return;
+                    var dt = new Date(cb.dateTime);
+                    if (isNaN(dt.getTime())) return;
+                    var dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                    if (!uCBs[dk]) uCBs[dk] = [];
+                    var exists = uCBs[dk].some(function(x) {
+                        return x.leadId === lid && Math.abs(new Date(x.dateTime) - dt) < 60000;
+                    });
+                    if (!exists) {
+                        uCBs[dk].push({ dateTime: dt.toISOString(), leadName: ld ? ld.name : 'Unknown', leadId: lid });
+                    }
+                });
+            });
+        } catch(e) { console.error('Error reading local callbacks for inline picker:', e); }
+
+        _rCal();
+        _rTime();
+    })();
+
+    // Initial render
+    _rCal();
+    _rTime();
+    _setInputs();
+};
+
 // Function to show callback scheduler
 function showCallbackScheduler(leadId) {
     console.log('📅 CALLBACK SCHEDULER: Opening scheduler for lead', leadId);
@@ -5633,54 +5843,210 @@ function showCallbackScheduler(leadId) {
         border-radius: 12px;
         padding: 30px;
         box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-        max-width: 450px;
+        max-width: 620px;
         margin: 0 20px;
     `;
 
-    // Get current date/time for default
+    // Calendar state
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0); // Default to 10 AM tomorrow
+    tomorrow.setHours(10, 0, 0, 0);
+    let calMonth = tomorrow.getMonth();
+    let calYear = tomorrow.getFullYear();
+    let selDate = new Date(tomorrow);
+    let selHour = 10;
+    let selMin = 0;
+    let userCBs = {};
+    const _monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const _dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
 
-    const dateStr = tomorrow.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM format
+    // Get current user for filtering callbacks
+    const _sessData = JSON.parse(localStorage.getItem('session') || '{}');
+    const _curUser = (_sessData.username || '').toLowerCase();
+
+    function _updateHidden() {
+        const y = selDate.getFullYear(), mo = String(selDate.getMonth()+1).padStart(2,'0'),
+              d = String(selDate.getDate()).padStart(2,'0'), h = String(selHour).padStart(2,'0'),
+              mi = String(selMin).padStart(2,'0');
+        const inp = modal.querySelector('#callback-datetime');
+        if (inp) inp.value = y+'-'+mo+'-'+d+'T'+h+':'+mi;
+        _updateDisplay();
+    }
+
+    function _updateDisplay() {
+        const el = modal.querySelector('#cb-selected-display');
+        if (!el) return;
+        const opts = { weekday:'short', month:'short', day:'numeric', year:'numeric' };
+        const ds = selDate.toLocaleDateString('en-US', opts);
+        const h12 = selHour % 12 || 12, ampm = selHour < 12 ? 'AM' : 'PM';
+        el.textContent = ds + ' at ' + h12 + ':' + String(selMin).padStart(2,'0') + ' ' + ampm;
+    }
+
+    function _fmtTime(h, m) {
+        return (h % 12 || 12) + ':' + String(m).padStart(2,'0') + ' ' + (h < 12 ? 'AM' : 'PM');
+    }
+
+    function _renderCal() {
+        const cal = modal.querySelector('#cb-calendar');
+        if (!cal) return;
+        const first = new Date(calYear, calMonth, 1);
+        const last = new Date(calYear, calMonth + 1, 0);
+        const startDay = first.getDay();
+        const today = new Date();
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<button type="button" class="cal-prev-btn" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#6b7280;"><i class="fas fa-chevron-left"></i></button>' +
+            '<span style="font-weight:600;font-size:14px;color:#1f2937;">' + _monthNames[calMonth] + ' ' + calYear + '</span>' +
+            '<button type="button" class="cal-next-btn" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#6b7280;"><i class="fas fa-chevron-right"></i></button>' +
+            '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;">';
+
+        _dayNames.forEach(function(dn) {
+            html += '<div style="font-size:11px;font-weight:600;color:#9ca3af;padding:4px 0;">'+dn+'</div>';
+        });
+        for (let i = 0; i < startDay; i++) html += '<div></div>';
+
+        for (let dd = 1; dd <= last.getDate(); dd++) {
+            const dk = calYear+'-'+String(calMonth+1).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+            const hasCB = userCBs[dk] && userCBs[dk].length > 0;
+            const cbCount = hasCB ? userCBs[dk].length : 0;
+            const isSel = selDate.getDate()===dd && selDate.getMonth()===calMonth && selDate.getFullYear()===calYear;
+            const isToday = today.getDate()===dd && today.getMonth()===calMonth && today.getFullYear()===calYear;
+            const isPast = new Date(calYear, calMonth, dd, 23, 59) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+            let bg='transparent',clr='#374151',brd='2px solid transparent',fw='400',op='1';
+            if (isPast) { clr='#d1d5db'; op='0.5'; }
+            if (isToday && !isSel) { bg='#f0f9ff'; fw='700'; brd='2px solid #93c5fd'; }
+            if (hasCB && !isSel) { bg='#fffbeb'; brd='2px solid #fbbf24'; }
+            if (isSel) { bg='#3b82f6'; clr='white'; brd='2px solid #3b82f6'; fw='600'; }
+
+            let dot = '';
+            if (hasCB) {
+                const dotClr = isSel ? 'white' : '#f59e0b';
+                dot = '<div style="position:absolute;bottom:0px;left:50%;transform:translateX(-50%);display:flex;gap:1px;">';
+                for (let i = 0; i < Math.min(cbCount, 3); i++) dot += '<div style="width:4px;height:4px;background:'+dotClr+';border-radius:50%;"></div>';
+                if (cbCount > 3) dot += '<span style="font-size:7px;color:'+dotClr+';line-height:4px;">+</span>';
+                dot += '</div>';
+            }
+
+            html += '<div class="cal-day" data-date="'+dk+'" style="padding:4px 2px;cursor:'+(isPast?'default':'pointer')+';border-radius:6px;position:relative;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+fw+';font-size:13px;opacity:'+op+';min-height:30px;display:flex;align-items:center;justify-content:center;transition:background 0.15s;'+(isPast?'pointer-events:none;':'')+'"'+(hasCB?' title="'+cbCount+' callback'+(cbCount>1?'s':'')+' scheduled"':'')+'>'+dd+dot+'</div>';
+        }
+        html += '</div>';
+        cal.innerHTML = html;
+
+        cal.querySelectorAll('.cal-day').forEach(function(el) {
+            el.addEventListener('click', function() {
+                const p = el.dataset.date.split('-');
+                selDate = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]), selHour, selMin);
+                _updateHidden();
+                _renderCal();
+                _renderTime();
+            });
+        });
+        cal.querySelector('.cal-prev-btn').addEventListener('click', function(e) {
+            e.preventDefault(); calMonth--; if(calMonth<0){calMonth=11;calYear--;} _renderCal();
+        });
+        cal.querySelector('.cal-next-btn').addEventListener('click', function(e) {
+            e.preventDefault(); calMonth++; if(calMonth>11){calMonth=0;calYear++;} _renderCal();
+        });
+    }
+
+    function _renderTime() {
+        const container = modal.querySelector('#cb-timeslots');
+        if (!container) return;
+        const dk = selDate.getFullYear()+'-'+String(selDate.getMonth()+1).padStart(2,'0')+'-'+String(selDate.getDate()).padStart(2,'0');
+        const dayCBs = userCBs[dk] || [];
+
+        let html = '';
+        for (let h = 7; h <= 19; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                if (h === 19 && m > 0) break;
+                const isSel = selHour===h && selMin===m;
+
+                // Check for callback in this 30-min window
+                const match = dayCBs.find(function(cb) {
+                    const ct = new Date(cb.dateTime);
+                    const slotStart = h*60+m, cbMin = ct.getHours()*60+ct.getMinutes();
+                    return cbMin >= slotStart && cbMin < slotStart+30;
+                });
+
+                let bg='#f9fafb',clr='#374151',brd='1px solid #e5e7eb';
+                if (isSel) { bg='#3b82f6'; clr='white'; brd='1px solid #3b82f6'; }
+                else if (match) { bg='#fef3c7'; brd='2px solid #f59e0b'; clr='#92400e'; }
+
+                let badge = '';
+                if (match && !isSel) {
+                    const nm = match.leadName || 'Booked';
+                    const short = nm.length > 14 ? nm.substring(0,14)+'…' : nm;
+                    badge = '<div style="font-size:9px;color:#b45309;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;" title="'+nm.replace(/"/g,'&quot;')+'"><i class="fas fa-exclamation-triangle" style="font-size:8px;margin-right:2px;"></i>'+short+'</div>';
+                }
+
+                html += '<div class="ts" data-h="'+h+'" data-m="'+m+'" style="padding:5px 8px;cursor:pointer;border-radius:5px;font-size:12px;margin-bottom:3px;background:'+bg+';color:'+clr+';border:'+brd+';transition:background 0.15s;"><div style="font-weight:'+(isSel||match?'600':'400')+';">'+_fmtTime(h,m)+'</div>'+badge+'</div>';
+            }
+        }
+        container.innerHTML = html;
+
+        // Scroll to selected time
+        const selEl = container.querySelector('.ts[data-h="'+selHour+'"][data-m="'+selMin+'"]');
+        if (selEl) selEl.scrollIntoView({ block:'center', behavior:'smooth' });
+
+        container.querySelectorAll('.ts').forEach(function(el) {
+            el.addEventListener('click', function() {
+                selHour = parseInt(el.dataset.h);
+                selMin = parseInt(el.dataset.m);
+                selDate.setHours(selHour, selMin, 0, 0);
+                _updateHidden();
+                _renderTime();
+            });
+        });
+    }
+
+    const dateStr = tomorrow.toISOString().slice(0, 16);
 
     modal.innerHTML = `
-        <div style="margin-bottom: 25px; text-align: center;">
-            <div style="width: 60px; height: 60px; background: #dbeafe; border-radius: 50%; margin: 0 auto 15px; display: flex; align-items: center; justify-content: center;">
-                <i class="fas fa-calendar-alt" style="font-size: 24px; color: #3b82f6;"></i>
+        <div style="margin-bottom: 16px; text-align: center;">
+            <div style="width: 50px; height: 50px; background: #dbeafe; border-radius: 50%; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-calendar-alt" style="font-size: 20px; color: #3b82f6;"></i>
             </div>
-            <h3 style="margin: 0 0 10px 0; color: #1f2937; font-size: 20px; font-weight: 600;">Schedule Next Call</h3>
-            <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px;">
+            <h3 style="margin: 0 0 6px 0; color: #1f2937; font-size: 18px; font-weight: 600;">Schedule Next Call</h3>
+            <p style="margin: 0; color: #6b7280; font-size: 13px;">
                 Lead: <strong>${lead.name}</strong>
             </p>
         </div>
 
-        <div style="margin-bottom: 15px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                Quick Schedule:
-            </label>
-            <div style="display: flex; gap: 8px;">
-                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+1);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+1 Day</button>
-                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+2);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+2 Days</button>
-                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+3);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+3 Days</button>
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 13px;">Quick Schedule:</label>
+            <div style="display: flex; gap: 6px;">
+                <button type="button" class="qs-btn" data-days="1" style="flex:1;padding:7px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;background:#f3f4f6;color:#374151;transition:background 0.15s;">+1 Day</button>
+                <button type="button" class="qs-btn" data-days="2" style="flex:1;padding:7px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;background:#f3f4f6;color:#374151;transition:background 0.15s;">+2 Days</button>
+                <button type="button" class="qs-btn" data-days="3" style="flex:1;padding:7px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;background:#f3f4f6;color:#374151;transition:background 0.15s;">+3 Days</button>
             </div>
         </div>
 
-        <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                Callback Date & Time:
-            </label>
-            <input type="datetime-local" id="callback-datetime" value="${dateStr}"
-                   style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />
+        <input type="hidden" id="callback-datetime" value="${dateStr}" />
+
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 13px;">Callback Date & Time:</label>
+            <div style="display: flex; gap: 10px; border: 2px solid #e5e7eb; border-radius: 10px; padding: 10px; background: #fafafa;">
+                <div id="cb-calendar" style="flex: 1; min-width: 0;"></div>
+                <div style="width: 1px; background: #e5e7eb;"></div>
+                <div id="cb-timeslots" style="width: 140px; max-height: 250px; overflow-y: auto; padding-right: 4px;"></div>
+            </div>
+            <div id="cb-selected-display" style="margin-top: 8px; text-align: center; font-weight: 600; color: #3b82f6; font-size: 14px;"></div>
+            <div id="cb-legend" style="display:flex;align-items:center;gap:14px;margin-top:5px;justify-content:center;">
+                <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;">
+                    <div style="width:10px;height:10px;background:#fffbeb;border:2px solid #fbbf24;border-radius:3px;"></div> Has callbacks
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;">
+                    <div style="width:10px;height:10px;background:#fef3c7;border:2px solid #f59e0b;border-radius:3px;"></div> Time booked
+                </div>
+            </div>
         </div>
 
-        <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                Notes (optional):
-            </label>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 13px;">Notes (optional):</label>
             <textarea id="callback-notes" placeholder="Add any notes for the callback..."
-                      style="width: 100%; height: 60px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+                      style="width: 100%; height: 50px; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 13px; resize: vertical; box-sizing: border-box;"></textarea>
         </div>
 
         <div style="display: flex; gap: 12px; justify-content: center;">
@@ -5701,8 +6067,82 @@ function showCallbackScheduler(leadId) {
     modalOverlay.appendChild(modal);
     document.body.appendChild(modalOverlay);
 
+    // Quick schedule buttons
+    modal.querySelectorAll('.qs-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const days = parseInt(this.dataset.days);
+            const d = new Date();
+            d.setDate(d.getDate() + days);
+            d.setHours(10, 0, 0, 0);
+            selDate = d;
+            selHour = 10;
+            selMin = 0;
+            calMonth = d.getMonth();
+            calYear = d.getFullYear();
+            _updateHidden();
+            _renderCal();
+            _renderTime();
+            modal.querySelectorAll('.qs-btn').forEach(function(b) { b.style.background='#f3f4f6'; });
+            this.style.background = '#dbeafe';
+        });
+    });
+
+    // Fetch current user's callbacks then render calendar
+    (async function() {
+        try {
+            const resp = await fetch('/api/callbacks');
+            const data = await resp.json();
+            const cbs = Array.isArray(data) ? data : (data.callbacks || []);
+            cbs.forEach(function(cb) {
+                const agent = (cb.assigned_agent || '').toLowerCase();
+                // Only show callbacks for the current signed-in user
+                if (_curUser && agent && agent !== _curUser) return;
+                const dt = new Date(cb.date_time || cb.dateTime);
+                if (isNaN(dt.getTime())) return;
+                const dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                if (!userCBs[dk]) userCBs[dk] = [];
+                userCBs[dk].push({ dateTime: dt.toISOString(), leadName: cb.lead_name || 'Unknown', leadId: cb.lead_id });
+            });
+        } catch(e) { console.error('Error fetching callbacks for picker:', e); }
+
+        // Also check localStorage for any unsynced callbacks
+        try {
+            const localCBs = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
+            const allLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            Object.entries(localCBs).forEach(function(entry) {
+                const lid = entry[0], cbs = entry[1];
+                const ld = allLeads.find(function(l) { return String(l.id) === String(lid); });
+                const agent = ld ? (ld.assignedTo || '').toLowerCase() : '';
+                // Only include if assigned to current user (or unassigned)
+                if (_curUser && agent && agent !== _curUser) return;
+                (Array.isArray(cbs) ? cbs : []).forEach(function(cb) {
+                    if (cb.completed) return;
+                    const dt = new Date(cb.dateTime);
+                    if (isNaN(dt.getTime())) return;
+                    const dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                    if (!userCBs[dk]) userCBs[dk] = [];
+                    const exists = userCBs[dk].some(function(x) {
+                        return x.leadId === lid && Math.abs(new Date(x.dateTime) - dt) < 60000;
+                    });
+                    if (!exists) {
+                        userCBs[dk].push({ dateTime: dt.toISOString(), leadName: ld ? ld.name : 'Unknown', leadId: lid });
+                    }
+                });
+            });
+        } catch(e) { console.error('Error reading local callbacks:', e); }
+
+        // Re-render with callback data
+        _renderCal();
+        _renderTime();
+    })();
+
+    // Initial render (before callback data loads)
+    _renderCal();
+    _renderTime();
+    _updateDisplay();
+
     // Handle save callback
-    modal.querySelector('#save-callback').addEventListener('click', () => {
+    modal.querySelector('#save-callback').addEventListener('click', function() {
         const dateTime = modal.querySelector('#callback-datetime').value;
         const notes = modal.querySelector('#callback-notes').value;
 
@@ -5711,11 +6151,23 @@ function showCallbackScheduler(leadId) {
             return;
         }
 
-        // Save the callback
         saveCallbackToLocalStorageAndServer(leadId, dateTime, notes);
         document.body.removeChild(modalOverlay);
     });
 
+    // Escape key to close
+    const _handleEsc = function(e) {
+        if (e.key === 'Escape') {
+            if (document.body.contains(modalOverlay)) document.body.removeChild(modalOverlay);
+            document.removeEventListener('keydown', _handleEsc);
+        }
+    };
+    document.addEventListener('keydown', _handleEsc);
+
+    // Click outside to close
+    modalOverlay.addEventListener('click', function(e) {
+        if (e.target === modalOverlay) document.body.removeChild(modalOverlay);
+    });
 }
 
 // Function to save callback
