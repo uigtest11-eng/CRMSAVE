@@ -1027,24 +1027,32 @@ window.editClientPortalEmail = function(clientId, currentEmail) {
     try {
         // Update localStorage
         const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
-        const clientIndex = clients.findIndex(c => c.id === clientId);
+        const clientIndex = clients.findIndex(c => String(c.id) === String(clientId));
 
         if (clientIndex !== -1) {
             clients[clientIndex].email = newEmail;
+            // Sync: if no business email, copy portal email there
+            if (newEmail && !clients[clientIndex].businessEmail) {
+                clients[clientIndex].businessEmail = newEmail;
+            }
             localStorage.setItem('insurance_clients', JSON.stringify(clients));
             console.log('✅ Client email updated in localStorage:', newEmail);
         }
 
-        // Update database via API
+        // Also update the Business Email input if it's on the page and empty
+        const bizEmailInput = document.getElementById('biz-email');
+        if (bizEmailInput && !bizEmailInput.value && newEmail) {
+            bizEmailInput.value = newEmail;
+        }
+
+        // Update database via API — send full client object to avoid data loss
+        const payload = clientIndex !== -1 ? clients[clientIndex] : { id: clientId, email: newEmail };
         fetch('/api/clients', {
-            method: 'PUT',
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                id: clientId,
-                email: newEmail
-            })
+            body: JSON.stringify(payload)
         }).then(response => {
             if (response.ok) {
                 console.log('✅ Client email updated in database:', newEmail);
@@ -1430,10 +1438,11 @@ window._confirmSyncPolicies = async function(clientId) {
 
 window.saveClientBusiness = async function(clientId) {
     const g = id => (document.getElementById('biz-' + id) || {}).value || '';
+    const bizEmail = g('email');
     const updates = {
         company: g('name'), businessName: g('name'), dba: g('dba'),
         businessType: g('type'), fein: g('fein'),
-        website: g('website'), businessEmail: g('email'),
+        website: g('website'), businessEmail: bizEmail,
         glCode: g('glCode'), sicCode: g('sicCode'), naicsCode: g('naicsCode'),
     };
     // Update localStorage
@@ -1441,15 +1450,36 @@ window.saveClientBusiness = async function(clientId) {
     const idx = clients.findIndex(c => String(c.id) === String(clientId));
     if (idx !== -1) {
         Object.assign(clients[idx], updates);
+        // Sync: if business email set and no portal email, copy it over
+        if (bizEmail && !clients[idx].email) {
+            clients[idx].email = bizEmail;
+        }
         localStorage.setItem('insurance_clients', JSON.stringify(clients));
+    }
+    // Update Portal Email display on the page if it currently shows "No email set"
+    if (bizEmail) {
+        document.querySelectorAll('label').forEach(lbl => {
+            if (lbl.textContent.trim().toLowerCase() === 'portal email') {
+                const pEl = lbl.parentElement?.querySelector('p');
+                if (pEl && pEl.textContent.trim() === 'No email set') {
+                    pEl.textContent = bizEmail;
+                }
+                // Also update the edit button's onclick to pass the new email
+                const container = lbl.closest('[style*="padding: 16px"]') || lbl.closest('[style*="padding:16px"]');
+                const editBtn = container?.querySelector('button[onclick*="editClientPortalEmail"]');
+                if (editBtn) {
+                    editBtn.setAttribute('onclick', `window.editClientPortalEmail('${clientId}', '${bizEmail.replace(/'/g, "\\'")}')`);
+                }
+            }
+        });
     }
     // Sync to server
     try {
         const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
         const jwt = sessionStorage.getItem('vanguard_jwt') || '';
         const payload = idx !== -1 ? clients[idx] : { id: clientId, ...updates };
-        const r = await fetch(`${API}/api/clients/${clientId}`, {
-            method: 'PUT',
+        const r = await fetch(`${API}/api/clients`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
             body: JSON.stringify(payload)
         });
