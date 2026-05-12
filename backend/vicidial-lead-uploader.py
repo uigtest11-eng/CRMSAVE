@@ -209,6 +209,7 @@ def add_lead_to_vicidial(list_id, lead_data):
         script_addendum = f"""
 
 SELECT
+Custom:
 New:
 LR Req:
 LR Rec:

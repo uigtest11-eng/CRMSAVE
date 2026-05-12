@@ -175,7 +175,11 @@ function buildVicidialComments(lead, selectedStage, fieldUpdates = {}) {
     const basicInfo = `Dr: ${drivers} | Fl: ${fleetSize}`;
 
     // Build stage selection section with X marks - updated for new format
+    const predefinedStages = ['new', 'contact_attempted', 'info_requested', 'info_received', 'loss_runs_requested', 'loss_runs_received', 'app_prepared', 'app_sent', 'quote_sent', 'sale', 'closed', 'custom'];
+    const isCustomStage = selectedStage && !predefinedStages.includes(selectedStage);
+
     const stages = [
+        { display: 'Custom', key: 'custom' },
         { display: 'New', key: 'new' },
         { display: 'LR Req', key: 'info_requested' },  // New format combines info_requested and loss_runs_requested
         { display: 'LR Rec', key: 'loss_runs_received' }
@@ -183,10 +187,14 @@ function buildVicidialComments(lead, selectedStage, fieldUpdates = {}) {
     let stageSection = 'SELECT\n';
 
     stages.forEach(stage => {
-        const isSelected = selectedStage === stage.key ||
-                          (stage.key === 'info_requested' && selectedStage === 'loss_runs_requested'); // Handle both as same in new format
-
-        stageSection += `${stage.display}: ${isSelected ? 'X' : ''}\n`;
+        if (stage.key === 'custom') {
+            // For custom stage, write the custom text next to "Custom:"
+            stageSection += `Custom: ${isCustomStage ? selectedStage : ''}\n`;
+        } else {
+            const isSelected = selectedStage === stage.key ||
+                              (stage.key === 'info_requested' && selectedStage === 'loss_runs_requested');
+            stageSection += `${stage.display}: ${isSelected ? 'X' : ''}\n`;
+        }
     });
 
     // Build the complete comment structure

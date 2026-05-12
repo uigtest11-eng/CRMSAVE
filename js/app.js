@@ -8066,6 +8066,7 @@ function generateSimpleLeadRows(leads) {
             let totalMinutes = 0;
             lead.reachOut.callLogs.forEach(log => {
                 if (log.duration) {
+                    if (typeof log.duration !== 'string') log.duration = String(log.duration);
                     let logMinutes = 0;
                     if (log.duration === '< 1 min') {
                         logMinutes = 0.5;
@@ -8576,6 +8577,26 @@ async function loadLeadsView() {
         if (typeof window.performLeadCleanup === 'function') {
             window.performLeadCleanup();
         }
+
+        // Sanitize call log durations — ensure they are strings (fixes .includes crash)
+        try {
+            const _sLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            let _sDirty = false;
+            _sLeads.forEach(function(l) {
+                if (l && l.reachOut && Array.isArray(l.reachOut.callLogs)) {
+                    l.reachOut.callLogs.forEach(function(cl) {
+                        if (cl.duration != null && typeof cl.duration !== 'string') {
+                            cl.duration = String(cl.duration);
+                            _sDirty = true;
+                        }
+                    });
+                }
+            });
+            if (_sDirty) {
+                localStorage.setItem('insurance_leads', JSON.stringify(_sLeads));
+                console.log('🔧 Sanitized non-string call log durations');
+            }
+        } catch(e) { console.warn('Duration sanitize error:', e); }
 
         // Run deduplication first to clean up any duplicates
         if (window.deduplicateData) {
@@ -9147,6 +9168,7 @@ async function loadLeadsView() {
                                         let totalMinutes = 0;
                                         lead.reachOut.callLogs.forEach(log => {
                                             if (log.duration) {
+                                                if (typeof log.duration !== 'string') log.duration = String(log.duration);
                                                 let logMinutes = 0;
                                                 if (log.duration === '< 1 min') {
                                                     logMinutes = 0.5;
@@ -9194,6 +9216,7 @@ async function loadLeadsView() {
                                         let totalMinutes = 0;
                                         lead.reachOut.callLogs.forEach(log => {
                                             if (log.duration) {
+                                                if (typeof log.duration !== 'string') log.duration = String(log.duration);
                                                 let logMinutes = 0;
                                                 if (log.duration === '< 1 min') {
                                                     logMinutes = 0.5;
@@ -38079,6 +38102,7 @@ function generateTimeMeter(lead) {
         console.log(`📞 CALL LOGS for ${lead.name}:`, lead.reachOut.callLogs.map(log => `${log.duration} (connected: ${log.connected})`));
         lead.reachOut.callLogs.forEach(log => {
             if (log.duration) {
+                if (typeof log.duration !== 'string') log.duration = String(log.duration);
                 let logMinutes = 0;
 
                 // Parse different duration formats

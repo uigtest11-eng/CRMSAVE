@@ -2903,6 +2903,7 @@ window.handleCallDuration = function(leadId, duration) {
         if (leads[leadIndex].reachOut.callLogs && Array.isArray(leads[leadIndex].reachOut.callLogs)) {
             leads[leadIndex].reachOut.callLogs.forEach(log => {
                 if (log.duration) {
+                    if (typeof log.duration !== 'string') log.duration = String(log.duration);
                     if (log.duration === '< 1 min') {
                         totalMinutesBefore += 0.5;
                     } else if (log.duration.includes('min')) {
@@ -10498,7 +10499,31 @@ window.displayScheduledCallbacks = async function(leadId) {
     // Load from localStorage first (legacy storage)
     const callbacksKey = 'scheduled_callbacks';
     const localCallbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
-    const localLeadCallbacks = localCallbacks[leadId] || [];
+    let localLeadCallbacks = localCallbacks[leadId] || [];
+
+    // Also check the lead's own scheduledCallbacks array (set by ViciDial sync)
+    try {
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const lead = leads.find(l => String(l.id) === String(leadId));
+        if (lead && Array.isArray(lead.scheduledCallbacks) && lead.scheduledCallbacks.length > 0) {
+            lead.scheduledCallbacks.forEach(sc => {
+                // Convert ViciDial format to display format
+                const converted = {
+                    id: sc.id,
+                    dateTime: sc.datetime,
+                    notes: sc.notes || '',
+                    completed: false,
+                    importedFromVicidial: true,
+                    createdAt: sc.datetime
+                };
+                // Don't add duplicates
+                if (!localLeadCallbacks.find(lc => String(lc.id) === String(sc.id))) {
+                    localLeadCallbacks.push(converted);
+                    console.log(`📅 VICIDIAL CALLBACK: Found ViciDial-synced callback for lead ${leadId}: ${sc.date} ${sc.time}`);
+                }
+            });
+        }
+    } catch (e) { /* ignore parse errors */ }
 
     // Load from server/database
     let serverCallbacks = [];
@@ -12179,6 +12204,8 @@ protectedFunctions.calculateAndUpdateResponseRate = function(leadId) {
     console.log(`📈 Calculated ratio: ${ratio} (${attempts}:${connected})`);
 
     // Determine new response rate based on ratio
+    // When connected > 0: use attempts-per-connection ratio
+    // When connected === 0: use raw attempt count
     if (connected > 0 && ratio <= 2) {
         // 2 or fewer attempts per connection = High response rate
         newPriority = 'High';
@@ -12200,12 +12227,21 @@ protectedFunctions.calculateAndUpdateResponseRate = function(leadId) {
         newPriority = 'Low';
         shouldClose = true;
         console.log('🚨 VERY LOW response rate: ≥6:1 ratio - suggesting closure');
-    } else if (attempts >= 6 && connected === 0) {
+    } else if (connected === 0 && attempts >= 6) {
         // 6+ attempts with no connections = Very low pickup rate
         newPriority = 'Low';
         shouldClose = true;
         console.log('🚨 VERY LOW pickup rate: 6+ attempts with no connections');
+    } else if (connected === 0 && attempts >= 4) {
+        // 4-5 attempts with no connections = Low pickup rate
+        newPriority = 'Low';
+        console.log('🔴 Low pickup rate: 4-5 attempts with no connections');
+    } else if (connected === 0 && attempts >= 3) {
+        // 3 attempts with no connections = Lower pickup rate
+        newPriority = 'Lower';
+        console.log('⚠️ Lower pickup rate: 3 attempts with no connections');
     }
+    // 1-2 attempts with 0 connected = Mid (default, no change needed)
 
     // Update priority if it changed
     if (newPriority !== lead.priority) {
@@ -12237,6 +12273,74 @@ protectedFunctions.calculateAndUpdateResponseRate = function(leadId) {
         protectedFunctions.showLowPickupRatePopup(leadId, attempts);
     }
 };
+
+// Retroactive response rate migration — fix all leads whose priority doesn't match their ratio
+(function migrateResponseRates() {
+    const MIGRATION_KEY = 'response_rate_migration_v2';
+    if (sessionStorage.getItem(MIGRATION_KEY)) return; // Only run once per session
+    sessionStorage.setItem(MIGRATION_KEY, '1');
+
+    setTimeout(function() {
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        if (!leads.length) return;
+
+        let updated = 0;
+        leads.forEach(function(lead) {
+            const reachOut = lead.reachOut || {};
+            const attempts = parseInt(reachOut.callAttempts) || 0;
+            const connected = parseInt(reachOut.callsConnected) || 0;
+            if (attempts === 0) return;
+
+            const ratio = connected > 0 ? attempts / connected : attempts;
+            let correctPriority = lead.priority || 'Mid';
+
+            if (connected > 0 && ratio <= 2) {
+                correctPriority = 'High';
+            } else if (connected > 0 && ratio <= 3) {
+                correctPriority = 'Mid';
+            } else if (connected > 0 && ratio <= 4) {
+                correctPriority = 'Lower';
+            } else if (connected > 0 && ratio <= 5) {
+                correctPriority = 'Low';
+            } else if (connected > 0 && ratio >= 6) {
+                correctPriority = 'Low';
+            } else if (connected === 0 && attempts >= 6) {
+                correctPriority = 'Low';
+            } else if (connected === 0 && attempts >= 4) {
+                correctPriority = 'Low';
+            } else if (connected === 0 && attempts >= 3) {
+                correctPriority = 'Lower';
+            }
+            // 1-2 attempts with 0 connected stays Mid (default)
+
+            if (correctPriority !== lead.priority) {
+                console.log(`📊 MIGRATION: Lead ${lead.id} (${lead.name || 'unknown'}) — ${attempts}:${connected} ratio → priority "${lead.priority}" ➜ "${correctPriority}"`);
+                lead.priority = correctPriority;
+                updated++;
+            }
+        });
+
+        if (updated > 0) {
+            localStorage.setItem('insurance_leads', JSON.stringify(leads));
+            console.log(`✅ MIGRATION: Updated response rate for ${updated} lead(s)`);
+            // Sync updated leads to server
+            leads.forEach(function(lead) {
+                const reachOut = lead.reachOut || {};
+                const attempts = parseInt(reachOut.callAttempts) || 0;
+                if (attempts === 0) return;
+                fetch('/api/leads/' + lead.id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ priority: lead.priority })
+                }).catch(function() {});
+            });
+            // Refresh table if visible
+            if (window.displayLeads) window.displayLeads();
+        } else {
+            console.log('✅ MIGRATION: All lead response rates already correct');
+        }
+    }, 3000); // Delay to let page finish loading
+})();
 
 // Popup for very low pickup rate (6+ attempts with no connections)
 protectedFunctions.showLowPickupRatePopup = function(leadId, attempts) {

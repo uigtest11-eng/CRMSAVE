@@ -3702,7 +3702,45 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
             lead.calculatedPremium = calculatedPremium;
             lead.insuranceCompany = insuranceCompany;
 
-            console.log(`📊 Enhanced data - Fleet: ${lead.fleetSize}, Premium: $${calculatedPremium.toLocaleString()}, Insurance: "${insuranceCompany}"`);
+            // Parse stage and callback from ViciDial comments
+            let parsedStage = 'new';
+            let parsedCallbackDate = '';
+            let parsedCallbackTime = '';
+            let parsedOwnerName = '';
+            if (comments) {
+                // Custom stage: "Custom: some text"
+                const customMatch = comments.match(/Custom:\s*(.+)/i);
+                if (customMatch && customMatch[1].trim()) {
+                    parsedStage = customMatch[1].trim();
+                    console.log(`✅ Custom stage from comments: "${parsedStage}"`);
+                } else {
+                    // Standard stages with X marker
+                    if (/LR Rec:\s*[Xx]/i.test(comments)) parsedStage = 'loss_runs_received';
+                    else if (/LR Req:\s*[Xx]/i.test(comments)) parsedStage = 'info_requested';
+                    else if (/New:\s*[Xx]/i.test(comments)) parsedStage = 'new';
+                    // Fallback old format
+                    else if (/Loss Runs Received:\s*[Xx]/i.test(comments)) parsedStage = 'loss_runs_received';
+                    else if (/Loss Runs Requested:\s*[Xx]/i.test(comments) || /Info Requested:\s*[Xx]/i.test(comments)) parsedStage = 'info_requested';
+                    console.log(`✅ Stage from comments: "${parsedStage}"`);
+                }
+
+                // NEXT CALL parsing
+                const cbMatch = comments.match(/NEXT CALL\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i)
+                             || comments.match(/--scheduled next call-+\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i);
+                if (cbMatch) {
+                    parsedCallbackDate = cbMatch[1].trim();
+                    parsedCallbackTime = cbMatch[2].trim();
+                    console.log(`✅ Callback from comments: ${parsedCallbackDate} at ${parsedCallbackTime}`);
+                }
+
+                // Owner name
+                const nameMatch = comments.match(/------------Name--------------\s*\n\s*([^\n\r-]+)/i);
+                if (nameMatch) {
+                    parsedOwnerName = nameMatch[1].trim();
+                }
+            }
+
+            console.log(`📊 Enhanced data - Fleet: ${lead.fleetSize}, Premium: $${calculatedPremium.toLocaleString()}, Insurance: "${insuranceCompany}", Stage: "${parsedStage}"`);
 
             // Get existing lead data to preserve important fields like stage, call duration, etc.
             const existingLead = await getExistingLead(leadId);
@@ -3722,7 +3760,8 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 email: lead.email || (existingLead ? existingLead.email : ''),
                 product: "Commercial Auto",
                 // PRESERVE EXISTING STAGE - don't reset to "new" if lead already has a stage
-                stage: existingLead ? (existingLead.stage || "new") : "new",
+                // For new leads, use stage parsed from ViciDial comments
+                stage: existingLead ? (existingLead.stage || parsedStage) : parsedStage,
                 status: existingLead ? (existingLead.status || "hot_lead") : "hot_lead",
                 // Preserve manual reassignment — only use list-based agent for new leads
                 assignedTo: existingLead ? (existingLead.assignedTo || assignedAgent) : assignedAgent,
@@ -3814,8 +3853,55 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                         voicemailCount: existing.voicemailCount || 0,
                         callLogs: logs
                     };
-                })()
+                })(),
+                // Owner name from ViciDial comments
+                ownerName: parsedOwnerName || (existingLead ? existingLead.ownerName : '') || lead.contact || '',
+                // Callback from ViciDial comments NEXT CALL section
+                ...(parsedCallbackDate && parsedCallbackTime && !parsedCallbackDate.startsWith('MM') && !existingLead ? (() => {
+                    try {
+                        // Parse "MM/DD/YYYY" and "HH:MMAM" → ISO
+                        const timeStr = parsedCallbackTime.replace(/(\d+:\d+)([AP]M)/i, '$1 $2').toUpperCase();
+                        const dtStr = `${parsedCallbackDate} ${timeStr}`;
+                        const parts = dtStr.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)\s*(AM|PM)/i);
+                        if (parts) {
+                            let h = parseInt(parts[4]);
+                            const m = parseInt(parts[5]);
+                            const ampm = parts[6].toUpperCase();
+                            if (ampm === 'PM' && h < 12) h += 12;
+                            if (ampm === 'AM' && h === 12) h = 0;
+                            const cbDate = new Date(parseInt(parts[3]), parseInt(parts[1]) - 1, parseInt(parts[2]), h, m);
+                            const cbISO = cbDate.toISOString();
+                            console.log(`📅 Created callback for ${parsedCallbackDate} ${parsedCallbackTime} → ${cbISO}`);
+                            return {
+                                scheduledCallbacks: [{
+                                    id: Date.now().toString(),
+                                    datetime: cbISO,
+                                    date: parsedCallbackDate,
+                                    time: parsedCallbackTime,
+                                    notes: 'Auto-scheduled from ViciDial',
+                                    source: 'vicidial_sync'
+                                }]
+                            };
+                        }
+                    } catch (e) { console.warn('⚠️ Error parsing callback:', e); }
+                    return {};
+                })() : {})
             };
+
+            // Insert ViciDial callback into scheduled_callbacks table so UI displays it
+            if (leadToSave.scheduledCallbacks && leadToSave.scheduledCallbacks.length > 0) {
+                const sc = leadToSave.scheduledCallbacks[0];
+                try {
+                    await new Promise((resolve) => {
+                        db.run(
+                            `INSERT OR IGNORE INTO scheduled_callbacks (callback_id, lead_id, date_time, notes, completed) VALUES (?, ?, ?, ?, 0)`,
+                            [sc.id, leadId, sc.datetime, sc.notes || 'Auto-scheduled from ViciDial'],
+                            () => resolve()
+                        );
+                    });
+                    console.log(`📅 Inserted ViciDial callback into scheduled_callbacks table for lead ${leadId}`);
+                } catch (e) { /* ignore */ }
+            }
 
             // Save to database (using await for sequential processing)
             const data = JSON.stringify(leadToSave);

@@ -72,11 +72,29 @@ console.log('🚀 Applying critical performance fixes...');
         return value;
     };
 
-    // Helper: slim an array of leads by trimming callLogs
+    // Helper: slim an array of leads by trimming callLogs and optionally large arrays
     function slimLeadsArray(leads, maxLogs) {
         return leads.map(lead => {
-            if (!lead.reachOut || !lead.reachOut.callLogs) return lead;
-            return { ...lead, reachOut: { ...lead.reachOut, callLogs: lead.reachOut.callLogs.slice(-maxLogs) } };
+            const slim = { ...lead };
+            if (slim.reachOut && slim.reachOut.callLogs) {
+                slim.reachOut = { ...slim.reachOut, callLogs: slim.reachOut.callLogs.slice(-maxLogs) };
+            }
+            // Strip transcript text (can be very large)
+            if (maxLogs <= 5) {
+                delete slim.transcriptText;
+                delete slim.transcriptWords;
+                delete slim.structuredData;
+            }
+            // At maxLogs 0, also trim vehicle/trailer details to essentials
+            if (maxLogs === 0) {
+                if (Array.isArray(slim.vehicles) && slim.vehicles.length > 0) {
+                    slim.vehicles = slim.vehicles.map(v => ({ id: v.id, year: v.year, make: v.make, vin: v.vin, type: v.type }));
+                }
+                if (Array.isArray(slim.trailers) && slim.trailers.length > 0) {
+                    slim.trailers = slim.trailers.map(t => ({ id: t.id, year: t.year, make: t.make, vin: t.vin, type: t.type }));
+                }
+            }
+            return slim;
         });
     }
 
@@ -107,18 +125,38 @@ console.log('🚀 Applying critical performance fixes...');
             } catch (parseErr) { /* not JSON or not a leads array */ }
 
             // Step 2: Free space by clearing non-critical keys, then retry original value
-            const evictable = ['lossRunsData', 'dotLookupCache', 'leads', 'debug_log', 'tempData'];
+            const evictable = ['lossRunsData', 'dotLookupCache', 'leads', 'debug_log', 'tempData',
+                'clients', 'insurance_clients', 'cached_leads', 'lead_generation_results',
+                'vici_sync_status', 'callTranscripts', 'notification_history',
+                'archivedLeads', 'archived_leads'];
             for (const evictKey of evictable) {
                 if (evictKey !== key) {
                     try { originalRemoveItem.call(localStorage, evictKey); } catch (_) {}
                 }
             }
+            // Also evict any large keys (>100KB) that aren't the current key
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k !== key && k !== 'insurance_leads' && k !== 'vanguard_jwt') {
+                        try {
+                            const v = originalGetItem.call(localStorage, k);
+                            if (v && v.length > 100000) {
+                                originalRemoveItem.call(localStorage, k);
+                                console.log(`🗑️ QUOTA: Evicted large key "${k}" (${Math.round(v.length/1024)}KB)`);
+                            }
+                        } catch (_) {}
+                    }
+                }
+            } catch (_) {}
             try {
                 originalSetItem.call(localStorage, key, value);
                 console.log(`✅ QUOTA: Saved "${key}" after freeing space`);
                 return;
             } catch (e3) {
                 console.error(`❌ QUOTA: Cannot save "${key}" even after recovery - skipping`);
+                // Signal DOT lookups to stop to prevent cascade
+                window._localStorageQuotaFull = true;
             }
         }
     };

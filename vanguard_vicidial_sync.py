@@ -46,10 +46,14 @@ class VanguardViciDialSync:
         self.assignment_index = self.get_current_assignment_index()
 
     def load_processed_leads(self):
-        """Load list of already processed lead IDs (all ViciDial-sourced leads)"""
+        """Load list of already-processed lead IDs that DON'T need re-checking.
+        Leads still at 'new' stage are excluded so ViciDial comment changes can be picked up."""
         cursor = self.db.cursor()
-        # Load all ViciDial leads by source tag — not just IDs starting with '8'
-        cursor.execute("SELECT id FROM leads WHERE JSON_EXTRACT(data, '$.source') = 'ViciDial'")
+        # Only consider fully-processed leads (non-'new' stage) as done
+        cursor.execute("""SELECT id FROM leads
+            WHERE JSON_EXTRACT(data, '$.source') = 'ViciDial'
+            AND JSON_EXTRACT(data, '$.stage') != 'new'
+            AND JSON_EXTRACT(data, '$.stage') IS NOT NULL""")
         return set(row[0] for row in cursor.fetchall())
 
     def get_current_assignment_index(self):
@@ -155,7 +159,8 @@ class VanguardViciDialSync:
                         # Skip leads with invalid ID formats (like 88126125)
                         continue
 
-                    # Skip if already processed
+                    # Skip leads that are fully processed (have non-'new' stage already)
+                    # Leads still at 'new' stage are re-checked for ViciDial comment updates
                     if lead_id in self.processed_leads:
                         continue
 
@@ -607,6 +612,46 @@ class VanguardViciDialSync:
                     except Exception:
                         pass
 
+        # Parse stage and callback from ViciDial comments
+        parsed_stage = 'new'
+        parsed_callback_date = ''
+        parsed_callback_time = ''
+        parsed_owner_name = ''
+        if comments:
+            # Custom stage: "Custom: some text"
+            custom_match = re.search(r'Custom:\s*(.+)', comments, re.IGNORECASE)
+            if custom_match and custom_match.group(1).strip():
+                parsed_stage = custom_match.group(1).strip()
+                logger.info(f"✅ Custom stage from comments: '{parsed_stage}'")
+            else:
+                # Standard stages with X marker (check most specific first)
+                if re.search(r'LR Rec:\s*[Xx]', comments, re.IGNORECASE):
+                    parsed_stage = 'loss_runs_received'
+                elif re.search(r'LR Req:\s*[Xx]', comments, re.IGNORECASE):
+                    parsed_stage = 'info_requested'
+                elif re.search(r'New:\s*[Xx]', comments, re.IGNORECASE):
+                    parsed_stage = 'new'
+                # Old format fallback
+                elif re.search(r'Loss Runs Received:\s*[Xx]', comments, re.IGNORECASE):
+                    parsed_stage = 'loss_runs_received'
+                elif re.search(r'(Loss Runs Requested|Info Requested):\s*[Xx]', comments, re.IGNORECASE):
+                    parsed_stage = 'info_requested'
+                logger.info(f"✅ Stage from comments: '{parsed_stage}'")
+
+            # NEXT CALL parsing
+            cb_match = re.search(r'NEXT CALL\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)', comments, re.IGNORECASE | re.MULTILINE)
+            if not cb_match:
+                cb_match = re.search(r'--scheduled next call-+\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)', comments, re.IGNORECASE | re.MULTILINE)
+            if cb_match:
+                parsed_callback_date = cb_match.group(1).strip()
+                parsed_callback_time = cb_match.group(2).strip()
+                logger.info(f"✅ Callback from comments: {parsed_callback_date} at {parsed_callback_time}")
+
+            # Owner name
+            name_match = re.search(r'------------Name--------------\s*\n\s*([^\n\r-]+)', comments, re.IGNORECASE | re.MULTILINE)
+            if name_match:
+                parsed_owner_name = name_match.group(1).strip()
+
         # Create lead data matching existing format
         lead_data = {
             "id": lead_id,
@@ -615,7 +660,7 @@ class VanguardViciDialSync:
             "phone": phone,
             "email": f"{contact_name.lower().replace(' ', '.')}@company.com" if contact_name else "",
             "product": "Commercial Auto",
-            "stage": "new",  # All new imports start as 'new'
+            "stage": parsed_stage,
             "status": "hot_lead",
             "assignedTo": assigned_representative,
             "assigned_to": assigned_representative,  # Also save underscore format for frontend compatibility
@@ -666,11 +711,43 @@ class VanguardViciDialSync:
                     "leftVoicemail": False,
                     "notes": f"ViciDial SALE call{' — ' + call_talk_time if call_talk_time else ''}"
                 }]
-            }
+            },
+            "ownerName": parsed_owner_name or contact_name.upper()
         }
 
+        # Add callback if parsed from comments — skip placeholder dates like "MM/DD/2026"
+        if parsed_callback_date and parsed_callback_time and not parsed_callback_date.startswith('MM'):
+            try:
+                time_str = re.sub(r'(\d+:\d+)([AP]M)', r'\1 \2', parsed_callback_time.upper())
+                cb_datetime = datetime.strptime(f"{parsed_callback_date} {time_str}", "%m/%d/%Y %I:%M %p")
+                cb_id = str(int(datetime.now().timestamp() * 1000))
+                cb_iso = cb_datetime.isoformat()
+                lead_data["scheduledCallbacks"] = [{
+                    "id": cb_id,
+                    "datetime": cb_iso,
+                    "date": parsed_callback_date,
+                    "time": parsed_callback_time,
+                    "notes": "Auto-scheduled from ViciDial",
+                    "source": "vicidial_sync"
+                }]
+                # Also insert into scheduled_callbacks table so the UI displays it
+                try:
+                    cursor = self.db.cursor()
+                    cursor.execute(
+                        """INSERT OR IGNORE INTO scheduled_callbacks (callback_id, lead_id, date_time, notes, completed)
+                           VALUES (?, ?, ?, ?, 0)""",
+                        (cb_id, lead_id, cb_iso, "Auto-scheduled from ViciDial")
+                    )
+                    self.db.commit()
+                    logger.info(f"📅 Created callback in DB table for {parsed_callback_date} {parsed_callback_time}")
+                except Exception as db_err:
+                    logger.warning(f"⚠️ Error inserting callback into DB table: {db_err}")
+                logger.info(f"📅 Created callback for {parsed_callback_date} {parsed_callback_time}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error creating callback: {e}")
+
         # Simplified - no complex logging needed
-        logger.info(f"✓ Created lead record for {lead_data['name']} (ID: {lead_id}) duration={call_talk_time or 'N/A'}")
+        logger.info(f"✓ Created lead record for {lead_data['name']} (ID: {lead_id}) stage={parsed_stage} duration={call_talk_time or 'N/A'}")
 
         return lead_data
 
@@ -696,7 +773,7 @@ class VanguardViciDialSync:
                 # USER-MANAGED FIELDS: Never overwrite with sync data if the existing record
                 # already has a value — mirrors server.js insertOrUpdateLead() protection.
                 USER_MANAGED_FIELDS = {
-                    'stage', 'stageUpdatedAt', 'confirmedPremium',
+                    'stageUpdatedAt', 'confirmedPremium',
                     'priority', 'notes', 'assignedTo', 'appStage',
                     'callDuration', 'transcriptText', 'transcriptWords',
                     'callTimestamp', 'brokerTracking'
@@ -712,6 +789,16 @@ class VanguardViciDialSync:
                     )
                     if has_value:
                         lead_data[field] = existing_val
+
+                # Stage: only preserve existing if new stage is just 'new' (default)
+                # If ViciDial comments provided a specific stage, use it
+                new_stage = lead_data.get('stage', 'new')
+                existing_stage = existing_data.get('stage', 'new')
+                if new_stage == 'new' and existing_stage and existing_stage != 'new':
+                    lead_data['stage'] = existing_stage
+                elif new_stage != 'new':
+                    lead_data['stage'] = new_stage
+                    logger.info(f"📋 Updating stage from ViciDial comments: '{existing_stage}' → '{new_stage}'")
 
                 # Preserve premium — only use calculated value if no existing premium
                 if existing_data.get('premium'):
@@ -750,6 +837,23 @@ class VanguardViciDialSync:
                                 merged.append(nl)
                         lead_data['reachOut']['callLogs'] = merged
                     logger.info(f"📞 Preserved {len(existing_logs)} existing call log(s)")
+
+                # Merge scheduledCallbacks: keep existing, add new ViciDial ones
+                existing_callbacks = existing_data.get('scheduledCallbacks', [])
+                new_callbacks = lead_data.get('scheduledCallbacks', [])
+                if new_callbacks and existing_callbacks:
+                    # Add new callbacks that don't duplicate existing ones
+                    for nc in new_callbacks:
+                        is_dup = any(c.get('datetime') == nc.get('datetime') for c in existing_callbacks)
+                        if not is_dup:
+                            existing_callbacks.append(nc)
+                    lead_data['scheduledCallbacks'] = existing_callbacks
+                elif existing_callbacks and not new_callbacks:
+                    lead_data['scheduledCallbacks'] = existing_callbacks
+
+                # Preserve ownerName if already set
+                if existing_data.get('ownerName') and not lead_data.get('ownerName'):
+                    lead_data['ownerName'] = existing_data['ownerName']
             except Exception:
                 pass
             cursor.execute(
