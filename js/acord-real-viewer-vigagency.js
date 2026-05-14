@@ -355,9 +355,15 @@ window.createRealACORDViewer = async function(policyId, policyData = null) {
         );
     }
 
+    // Always derive united flag from agency field (agency is the source of truth)
+    if (policy && policy.agency) {
+        policy.united = policy.agency.toLowerCase() === 'united';
+    }
+
     console.log('🔍 Using policy data in createRealACORDViewer:', policy);
     console.log('🔍 POLICY AGENCY DEBUGGING:');
     console.log('  - policy?.agency:', policy?.agency);
+    console.log('  - policy?.united:', policy?.united);
     console.log('  - Full policy object keys:', policy ? Object.keys(policy) : 'policy is null/undefined');
 
     // Create our REAL viewer with EXACT original layout

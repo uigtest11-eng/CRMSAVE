@@ -23817,6 +23817,7 @@ function generateViewTabContent(tabId, policy) {
                         ${_fOV('commissionPlan','Commission Plan', policy.commissionPlan||'')}
                         ${_fOV('policyState','Policy State', policy.policyState||'')}
                         ${_fOV('agent','User / Agent', policy.agent||'')}
+                        ${_sOV('agency','Agency', policy.agency||'Vanguard', ['Vanguard','United'])}
                     </div>
                     <!-- Card 2: Term & Dates -->
                     <div class="pdp-card" style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
@@ -23931,7 +23932,10 @@ function generateViewTabContent(tabId, policy) {
                 <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
                     <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                         <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
-                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
                     </h3>
                     ${vehicles.length === 0
                         ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
@@ -23973,7 +23977,10 @@ function generateViewTabContent(tabId, policy) {
                 <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttrD} data-policy-id="${_pIdD}">
                     <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                         <span><i class="fas fa-id-card" style="margin-right:7px;color:#374151;"></i>Drivers (${drivers.length})</span>
-                        ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewDriver()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
                     </h3>
                     ${drivers.length === 0
                         ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No drivers on this policy</p>'
@@ -24254,14 +24261,20 @@ function generateViewTabContent(tabId, policy) {
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                                     <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
-                                    ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    <span style="display:flex;gap:6px;">
+                                        <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new vehicle"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    </span>
                                 </h3>
                                 ${vehiclesHTML}
                             </div>
                             <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                                     <span><i class="fas fa-id-card" style="margin-right:7px;color:#374151;"></i>Drivers (${drivers.length})</span>
-                                    ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all drivers"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    <span style="display:flex;gap:6px;">
+                                        <button onclick="window.addNewDriver()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new driver"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                                        ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all drivers"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    </span>
                                 </h3>
                                 ${driversHTML}
                             </div>
@@ -24644,7 +24657,7 @@ window.overviewSave = async function(policyId) {
     const g = id => (document.getElementById('ov-' + id) || {}).value || '';
     const updates = {
         policyNumber: g('policyNumber'), carrier: g('carrier'), parentCompany: g('parentCompany'),
-        commissionPlan: g('commissionPlan'), policyState: g('policyState'), agent: g('agent'),
+        commissionPlan: g('commissionPlan'), policyState: g('policyState'), agent: g('agent'), agency: g('agency'),
         producers: [
             { name: g('producer1'), commission: g('producer1Pct') },
             { name: g('producer2'), commission: g('producer2Pct') },
@@ -24859,7 +24872,7 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
 
         // Notes from JenesisNow — deduplicate and only keep real notes
         if (jn.notes && jn.notes.length) {
-            const existing = pol.notes || '';
+            const existing = typeof pol.notes === 'string' ? pol.notes : (Array.isArray(pol.notes) ? pol.notes.join('\n') : '');
             const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
             // Filter: only keep notes that have real text (not just numbers/dates/payment junk)
             const realNotes = jn.notes.filter(n => {
@@ -25100,6 +25113,33 @@ function _jnDateToISO(jnDate) {
     };
 })();
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Add New Vehicle / Driver ─────────────────────────────────────────────────
+window.addNewVehicle = function() {
+    const section = document.getElementById('vehiclesViewSection');
+    if (!section) return;
+    const policyId = section.getAttribute('data-policy-id') || '';
+    const raw = section.getAttribute('data-vehicles');
+    let vehicles = [];
+    try { if (raw) vehicles = JSON.parse(decodeURIComponent(raw)); } catch(e) {}
+    const blank = { year:'', make:'', model:'', vin:'', bodyType:'', gvw:'', garageState:'', garageZip:'', garageAddress:'', garageCity:'', use:'', radius:'', costNew:'', cargoLimit:'' };
+    vehicles.push(blank);
+    section.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+    showVehicleDetailModal(vehicles.length - 1);
+};
+
+window.addNewDriver = function() {
+    const section = document.getElementById('driversViewSection');
+    if (!section) return;
+    const policyId = section.getAttribute('data-policy-id') || '';
+    const raw = section.getAttribute('data-drivers');
+    let drivers = [];
+    try { if (raw) drivers = JSON.parse(decodeURIComponent(raw)); } catch(e) {}
+    const blank = { firstName:'', middleName:'', lastName:'', fullName:'', name:'', dateOfBirth:'', gender:'', licenseNumber:'', licenseState:'', relationship:'', maritalStatus:'' };
+    drivers.push(blank);
+    section.setAttribute('data-drivers', encodeURIComponent(JSON.stringify(drivers)));
+    showDriverDetailModal(drivers.length - 1);
+};
 
 // ─── Vehicle Detail Modal (Editable) ─────────────────────────────────────────
 window.showVehicleDetailModal = function(startIndex) {
@@ -25405,6 +25445,10 @@ window.showVehicleDetailModal = function(startIndex) {
             if(typeof showNotification==='function') showNotification('Policy not found in local cache — saved to vehicles array only','warning');
         }
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Vehicle'; }
+        // Close modal and refresh the policy view
+        const modal = document.getElementById('vehDetailModal');
+        if (modal) modal.remove();
+        if (typeof viewPolicy === 'function') viewPolicy(policyId);
     };
 
     renderModal();
@@ -25587,6 +25631,10 @@ window.showDriverDetailModal = function(startIndex) {
             if(typeof showNotification==='function') showNotification('Policy not found in local cache','warning');
         }
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Driver'; }
+        // Close modal and refresh the policy view
+        const modal = document.getElementById('drvDetailModal');
+        if (modal) modal.remove();
+        if (typeof viewPolicy === 'function') viewPolicy(policyId);
     };
 
     renderModal();
@@ -39224,7 +39272,10 @@ window.generateCertificateForPolicy = function(policyId) {
             policyType: 'commercial-auto',
             vehicles: policy.vehicles || [],
             drivers: policy.drivers || [],
-            coverage: policy.coverage || {}
+            coverage: policy.coverage || {},
+            agent: policy.agent || '',
+            agency: policy.agency || '',
+            united: (policy.agency || '').toLowerCase() === 'united'
         };
 
         // Create modal structure similar to VIG Agency
@@ -40312,13 +40363,14 @@ window.submitCRMCOIModal = async function() {
         // Prepare the COI request data as FormData (not JSON) to match the API
         const formData = new FormData();
 
-        // Set sender email
-        formData.append('from', 'contact@vigagency.com');
+        // Set sender email based on agency
+        const isUnited = (currentPolicy?.agency || '').toLowerCase() === 'united' || currentPolicy?.united;
+        formData.append('from', isUnited ? 'contact@uigagency.com' : 'contact@vigagency.com');
 
         // Pass agent and united flag so backend can pick the correct sender address
         const policyAgent = currentPolicy?.agent || '';
         formData.append('agent', policyAgent);
-        formData.append('united', currentPolicy?.united ? 'true' : 'false');
+        formData.append('united', isUnited ? 'true' : 'false');
 
         // Set recipient emails (all emails from the array)
         formData.append('to', emails.join(', '));
@@ -40423,7 +40475,7 @@ ${certificateHolder}`;
 
         console.log('Submitting COI request via FormData to:', 'https://162-220-14-239.nip.io/api/coi/send-request');
         console.log('FormData contents:', {
-            from: 'contact@vigagency.com',
+            from: isUnited ? 'contact@uigagency.com' : 'contact@vigagency.com',
             to: emails.join(', '),
             subject: subjectText,
             policyId: policyId,
