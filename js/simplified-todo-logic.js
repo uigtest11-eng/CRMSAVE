@@ -2,6 +2,11 @@
 // This overrides the complex highlight duration tracking system
 // RULE: Red "Reach out: CALL" ONLY shows when there's an OVERDUE scheduled callback
 
+// CSR users: skip entirely — CSRs use csrTodo, not callback-based reach outs
+var _stlIsCsr = false;
+try { _stlIsCsr = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr'; } catch(e) {}
+if (_stlIsCsr) { console.log('Simplified TODO Logic: skipped for CSR'); } else {
+
 console.log('🎯 LOADED: Simplified TO DO Logic - Callback-Only System');
 
 // STARTUP SYNC: Load backend callbacks into localStorage so overdue checks work
@@ -231,3 +236,5 @@ window.forceInstallSimplifiedLogic = function() {
 
 console.log('✅ SIMPLIFIED TO DO SYSTEM LOADED: Only overdue callbacks trigger red "Reach out: CALL"');
 console.log('💡 To test immediately, run: forceInstallSimplifiedLogic()');
+
+} // end CSR skip block

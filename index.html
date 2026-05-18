@@ -54,6 +54,62 @@
             window.location.href = (portal === 'united') ? '/login-united.html' : '/login.html';
         }
 
+        // Instant role-based CSS to prevent flash of unauthorized tabs
+        (function() {
+            try {
+                var u = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                var role = (u.role || '').toLowerCase();
+                var uname = (u.username || '').toLowerCase();
+                document.documentElement.setAttribute('data-role', role);
+                var adminUsers = ['grant','maureen'];
+                var isAdmin = adminUsers.includes(uname);
+                var s = document.createElement('style');
+                s.id = 'role-guard-css';
+                var rules = '';
+                if (!isAdmin) {
+                    // Non-admins: hide admin section by default
+                    rules += '#admin-menu-section { display:none !important; }';
+                    // Hide admin mobile nav items
+                    rules += '.mobile-nav-item a[href="#carriers"],' +
+                             '.mobile-nav-item a[href="#compliance"],' +
+                             '.mobile-nav-item a[href="#accounting"],' +
+                             '.mobile-nav-item a[href="#reports"],' +
+                             '.mobile-nav-item a[href="#settings"] { display:none !important; }';
+                }
+                if (role === 'csr') {
+                    // CSR: show admin section but only Downloads
+                    rules += '#admin-menu-section { display:block !important; }';
+                    rules += '#admin-menu-section a[href="#carriers"],' +
+                             '#admin-menu-section a[href="#compliance"],' +
+                             '#admin-menu-section a[href="#accounting"],' +
+                             '#admin-menu-section a[href="#reports"],' +
+                             '#admin-menu-section a[href="#settings"] { display:none !important; }';
+                    // Hide the parent li elements for admin items
+                    rules += '#admin-menu-section li:has(a[href="#carriers"]),' +
+                             '#admin-menu-section li:has(a[href="#compliance"]),' +
+                             '#admin-menu-section li:has(a[href="#accounting"]),' +
+                             '#admin-menu-section li:has(a[href="#reports"]),' +
+                             '#admin-menu-section li:has(a[href="#settings"]) { display:none !important; }';
+                    // Hide Lead Gen and Market
+                    rules += '#leadgen-nav-folder { display:none !important; }';
+                    rules += '.sidebar-menu a[href="#market"] { display:none !important; }';
+                    rules += 'li:has(> a[href="#market"]) { display:none !important; }';
+                    // Hide goals bar
+                    rules += '#dashboard-goals-bar { display:none !important; }';
+                    // Hide mobile Lead Gen
+                    rules += '.mobile-nav-item a[href="#lead-generation"] { display:none !important; }';
+                    // Hide Value Level (time meter) column in leads table
+                    rules += '#leadsTable th:nth-child(5), #leadsTable td:nth-child(5) { display:none !important; }';
+                }
+                if (role === 'agent' || role === 'producer') {
+                    // Agents/producers: hide admin section
+                    rules += '#admin-menu-section { display:none !important; }';
+                }
+                s.textContent = rules;
+                document.head.appendChild(s);
+            } catch(e) {}
+        })();
+
         // Set up PDF.js worker
         if (typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
@@ -802,11 +858,18 @@
                                     if (heading.textContent.trim() === 'Administration') {
                                         administrationSectionFound = true;
                                         console.log('Found Administration section!');
+                                        const _userSession = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                                        const _isCsrRole = (_userSession.role || '') === 'csr';
 
                                         if (isAdmin(username)) {
                                             section.style.display = 'block';
                                             section.style.visibility = 'visible';
                                             console.log('✅ Admin user - Administration section visible');
+                                        } else if (_isCsrRole) {
+                                            // CSR sees the section but auth-manager controls individual items
+                                            section.style.display = 'block';
+                                            section.style.visibility = 'visible';
+                                            console.log('🎧 CSR user - Administration section visible (filtered by auth-manager)');
                                         } else {
                                             section.style.display = 'none';
                                             section.style.visibility = 'hidden';
@@ -3737,6 +3800,8 @@
     <!-- Plaid Link SDK -->
     <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 
+    <!-- CSR To Do Override - MUST load last to override all competing To Do scripts -->
+    <script src="js/csr-todo-override.js?v=1"></script>
 
 </body>
 </html>

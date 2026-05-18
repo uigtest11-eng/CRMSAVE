@@ -17,6 +17,11 @@ function createReachOutCallLink(lead) {
 
 // Function to check if lead should show reach out call link (expired highlights)
 function shouldShowReachOutCallLink(lead) {
+    // CSR users never get stage-based reach out links — they use csrTodo only
+    try {
+        const _csrChk = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((_csrChk.role || '') === 'csr') return false;
+    } catch(e) {}
     if (!lead || !lead.reachOut) return false;
 
     // Check if lead had completion but highlight expired
@@ -121,6 +126,12 @@ function getNextActionExpiredFix(stage, lead) {
 
 // Function to fix table display for expired highlight leads
 function fixExpiredHighlightTableDisplay() {
+    // CSR users: skip all expired-highlight DOM overrides (they use csrTodo)
+    try {
+        const _csrFixChk = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((_csrFixChk.role || '') === 'csr') return;
+    } catch(e) {}
+
     console.log('🔧 EXPIRED FIX: Fixing table display for expired highlight leads...');
 
     try {

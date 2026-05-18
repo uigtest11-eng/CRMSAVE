@@ -1,6 +1,12 @@
 // COMPREHENSIVE FINAL FIX - Everything in one place
 
 (function() {
+    // CSR users: skip entirely — CSRs use csrTodo, not callback-based reach outs
+    try {
+        var _cffSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((_cffSess.role || '') === 'csr') return;
+    } catch(e) {}
+
     // CRITICAL: Override all existing functions to ensure our fixes take priority
 
     // 1. HIGHLIGHT STATUS CHECKER (completely independent)

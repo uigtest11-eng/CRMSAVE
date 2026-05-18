@@ -156,6 +156,32 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <textarea id="todo-text-${lead.id}" placeholder="Enter optional to-do notes..." style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; margin-top: 5px; resize: vertical; min-height: 60px;" onblur="saveTodoText('${lead.id}', this.value)" onkeypress="if(event.key==='Enter' && event.shiftKey) saveTodoText('${lead.id}', this.value)"></textarea>
                             <small style="color: #6b7280; font-size: 11px;">Press Shift+Enter to save, or click outside to save automatically</small>
                         </div>
+                        <!-- CSR To Do -->
+                        <div style="margin-top: 12px;">
+                            ${(() => {
+                                const _csrProf = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                                const _isCsrProf = (_csrProf.role || '') === 'csr';
+                                const isDone = !!lead.csrTodoDone;
+                                const todoText = isDone ? (lead.csrTodoOriginal || '') : (lead.csrTodo || '');
+                                const hasTodo = !!(todoText.trim());
+                                if (_isCsrProf) {
+                                    // CSR view: read-only text with checkbox to mark done
+                                    if (!hasTodo) {
+                                        return '<div style="color: #9ca3af; font-size: 13px; padding: 8px;">No CSR task assigned</div>';
+                                    }
+                                    return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
+                                        '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid ' + (isDone ? '#86efac' : '#7dd3fc') + '; border-radius: 6px; background: ' + (isDone ? '#f0fdf4' : '#f0f9ff') + ';">' +
+                                            '<input type="checkbox" id="csr-done-cb-' + lead.id + '" ' + (isDone ? 'checked' : '') + ' onchange="toggleCsrTodoDone(\'' + lead.id + '\', this.checked)" style="margin-top: 3px; transform: scale(1.4); accent-color: #10b981; cursor: pointer;" title="Mark as done">' +
+                                            '<span id="csr-todo-text-' + lead.id + '" style="font-size: 14px; line-height: 1.5; flex: 1; ' + (isDone ? 'text-decoration: line-through; color: #9ca3af;' : 'color: #1e3a5f;') + '">' + todoText + '</span>' +
+                                        '</div>';
+                                } else {
+                                    // Non-CSR (agents/admins): editable textarea to assign tasks
+                                    return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
+                                        (isDone ? '<div style="margin-bottom: 6px; font-size: 12px; color: #10b981; font-weight: 600;"><i class="fas fa-check-circle"></i> Marked done by CSR</div>' : '') +
+                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + todoText + '</textarea>';
+                                }
+                            })()}
+                        </div>
                     </div>
                     <!-- Stage Timestamp with Color Coding -->
                     <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 6px; text-align: center;">
@@ -210,6 +236,23 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                     white-space: nowrap;
                                 ">${timeText}</span>`;
                             })()}
+                        </div>
+                    </div>
+                    <!-- Sent to Markets / COI / AOR checkboxes -->
+                    <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.7); border-radius: 6px;">
+                        <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; cursor: ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))) ? 'default' : 'pointer'}; opacity: ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))) ? '0.6' : '1'};">
+                                <input type="checkbox" ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))) ? 'checked disabled' : ''} style="margin-right: 6px; transform: scale(1.2); accent-color: #10b981;">
+                                <span style="font-weight: 600; font-size: 13px;">Sent to Markets</span>
+                            </label>
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="coi-checkbox-${lead.id}" ${lead.coiReceived ? 'checked' : ''} onchange="toggleLeadIndicator('${lead.id}','coiReceived',this.checked)" style="margin-right: 6px; transform: scale(1.2); accent-color: #3b82f6;">
+                                <span style="font-weight: 600; font-size: 13px;">COI Received</span>
+                            </label>
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="aor-checkbox-${lead.id}" ${lead.aorCompleted ? 'checked' : ''} onchange="toggleLeadIndicator('${lead.id}','aorCompleted',this.checked)" style="margin-right: 6px; transform: scale(1.2); accent-color: #8b5cf6;">
+                                <span style="font-weight: 600; font-size: 13px;">AOR Completed</span>
+                            </label>
                         </div>
                     </div>
                 </div>
@@ -11272,6 +11315,8 @@ async function sendCallbackWarningEmail(lead, callback) {
 
 // Function to update table cell when callback is due
 function updateTableForDueCallback(leadId, lead) {
+    // CSR users: skip callback table updates
+    try { if ((JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr') return; } catch(e) {}
     console.log('🔍 CALLBACK DEBUG: Attempting to update table for lead:', leadId, lead.name);
 
     const tableBody = document.getElementById('leadsTableBody');
@@ -11432,6 +11477,8 @@ function startCallbackMonitoring() {
 
 // Function to quickly check and restore callback messages
 function checkAndRestoreCallbackMessages() {
+    // CSR users: skip callback message restoration
+    try { if ((JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr') return; } catch(e) {}
     const callbacksKey = 'scheduled_callbacks';
     const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
     const now = new Date();

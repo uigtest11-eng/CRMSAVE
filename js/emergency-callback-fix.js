@@ -9,6 +9,12 @@ console.log('🚨 EMERGENCY CALLBACK FIX: Loading SUPER AGGRESSIVE callback tabl
 
     // Immediate fix function for overdue callbacks
     function emergencyCallbackFix() {
+        // CSR users: skip callback DOM overrides (they use csrTodo)
+        try {
+            const _ecf = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+            if ((_ecf.role || '') === 'csr') return 0;
+        } catch(e) {}
+
         console.log('🚨 EMERGENCY FIX: Checking for overdue callbacks...');
 
         const callbacksKey = 'scheduled_callbacks';
@@ -316,6 +322,17 @@ console.log('🚨 EMERGENCY CALLBACK FIX: Loading SUPER AGGRESSIVE callback tabl
                     const todoCell = cells[6]; // TODO column
 
                     if (todoCell) {
+                        // CSR users: show csrTodo instead of stage-based text
+                        try {
+                            const _csrComp = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                            if ((_csrComp.role || '') === 'csr') {
+                                const cLead = JSON.parse(localStorage.getItem('insurance_leads') || '[]').find(l => String(l.id) === String(leadId));
+                                const ct = (cLead && cLead.csrTodo) ? cLead.csrTodo : '';
+                                todoCell.innerHTML = ct ? `<div style="font-weight: bold; color: #0284c7;">${ct}</div>` : '';
+                                return;
+                            }
+                        } catch(e) {}
+
                         // Remove the callback message and revert to normal TODO based on lead stage
                         const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
                         const lead = leads.find(l => String(l.id) === String(leadId));

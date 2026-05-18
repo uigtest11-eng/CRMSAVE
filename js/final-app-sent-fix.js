@@ -1,6 +1,12 @@
 // FINAL APP SENT FIX - Ultimate override for all TODO text generation
 
 (function() {
+    // CSR users: skip entirely
+    try {
+        var _fasf = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((_fasf.role || '') === 'csr') return;
+    } catch(e) {}
+
     // Function to force fix all app sent leads immediately
     function forceFixAppSentLeads() {
         try {

@@ -7941,10 +7941,18 @@ function generateSimpleLeadRows(leads) {
         let rowClass = '';
 
         // Get TO DO text to determine if highlighting is needed
-        console.log(`🎯 TABLE GEN: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
-        const todoText = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) :
-                         (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead'));
-        console.log(`🎯 TABLE GEN: Todo text result for lead ${lead.id}: "${todoText}"`);
+        // CSR users: use csrTodo field instead of stage-based getNextAction
+        const _csrRowSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const _isCsrRow = (_csrRowSess.role || '') === 'csr';
+        let todoText;
+        if (_isCsrRow) {
+            todoText = lead.csrTodoDone ? '' : (lead.csrTodo || '').trim();
+        } else {
+            console.log(`🎯 TABLE GEN: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
+            todoText = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) :
+                             (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead'));
+            console.log(`🎯 TABLE GEN: Todo text result for lead ${lead.id}: "${todoText}"`);
+        }
 
         // Apply timestamp highlighting to leads EXCEPT closed leads
         // Closed leads should not be tracked by timestamps
@@ -8028,10 +8036,11 @@ function generateSimpleLeadRows(leads) {
         // OVERRIDE: Apply green highlighting for empty TODOs (takes priority over timestamp colors but not closed)
         else if (!todoText || todoText.trim() === '') {
             // CRITICAL FIX: Check for overdue callbacks before applying green highlighting
+            // CSR users: skip callback check entirely — callbacks are not CSR to-dos
             let hasOverdueCallback = false;
 
             // Direct localStorage check for overdue callbacks (independent of external functions)
-            if (lead && lead.id) {
+            if (!_isCsrRow && lead && lead.id) {
                 try {
                     const callbacks = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
                     const leadCallbacks = callbacks[lead.id] || [];
@@ -8127,11 +8136,28 @@ function generateSimpleLeadRows(leads) {
                 <td class="lead-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                     <strong style="cursor: pointer; ${getLeadNameStyling(lead)}; text-decoration: underline; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" onclick="console.log('🔍 LEAD NAME CLICKED: ID=${lead.id}, Name=${lead.name}'); viewLead('${lead.id}')" title="${lead.name}" data-debug-lead-id="${lead.id}">${displayName}</strong>
                 </td>
-                <td style="width: 28px; padding: 4px; text-align: center;">
-                    ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0)))
-                        ? `<span style="width: 22px; height: 22px; border-radius: 50%; background: #10b981; color: white; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; pointer-events: none;" title="Documentation emailed"><i class="fas fa-check"></i></span>`
-                        : `<span style="width: 22px; height: 22px; border-radius: 50%; background: #d1d5db; color: #9ca3af; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; pointer-events: none;"><i class="fas fa-times"></i></span>`
-                    }
+                <td style="width: 56px; padding: 4px 2px; text-align: center;">
+                    <div style="display:flex; gap:3px; justify-content:center; align-items:center;">
+                        ${(() => {
+                            const sentToMarkets = lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0));
+                            const coiDone = !!lead.coiReceived;
+                            const aorDone = !!lead.aorCompleted;
+                            // Sent to Markets circle — GREEN if sent, grey X if not, not clickable
+                            const mktCircle = sentToMarkets
+                                ? '<span style="width:22px;height:22px;border-radius:50%;background:#10b981;color:white;font-size:11px;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;" title="Sent to Markets"><i class="fas fa-check"></i></span>'
+                                : '<span style="width:22px;height:22px;border-radius:50%;background:#d1d5db;color:#9ca3af;font-size:11px;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;" title="Not sent to Markets"><i class="fas fa-times"></i></span>';
+                            // COI/AOR combined circle — purple if AOR (dominant), blue if COI only, grey if neither
+                            let coiAorCircle;
+                            if (aorDone) {
+                                coiAorCircle = '<span onclick="toggleLeadIndicator(\'' + lead.id + '\',\'aorCompleted\',false)" style="width:22px;height:22px;border-radius:50%;background:#8b5cf6;color:white;font-size:11px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;" title="AOR Completed — click to undo"><i class="fas fa-check"></i></span>';
+                            } else if (coiDone) {
+                                coiAorCircle = '<span onclick="toggleLeadIndicator(\'' + lead.id + '\',\'coiReceived\',false)" style="width:22px;height:22px;border-radius:50%;background:#3b82f6;color:white;font-size:11px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;" title="COI Received — click to undo"><i class="fas fa-check"></i></span>';
+                            } else {
+                                coiAorCircle = '<span onclick="toggleLeadIndicator(\'' + lead.id + '\',\'coiReceived\',true)" style="width:22px;height:22px;border-radius:50%;background:#d1d5db;color:#9ca3af;font-size:11px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;" title="Click to mark COI Received"><i class="fas fa-times"></i></span>';
+                            }
+                            return mktCircle + coiAorCircle;
+                        })()}
+                    </div>
                 </td>
                 <td>
                     <div class="contact-info" style="display: flex; gap: 10px; align-items: center;">
@@ -8148,6 +8174,12 @@ function generateSimpleLeadRows(leads) {
                 <td>${getStageHtml(lead.stage, lead)}</td>
                 <td>
                     ${(() => {
+                        // CSR users see only the CSR To Do text
+                        const _csrSess1 = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                        if ((_csrSess1.role || '') === 'csr') {
+                            const csrText = lead.csrTodoDone ? '' : (lead.csrTodo || '');
+                            return csrText ? `<div style="font-weight: bold; color: #0284c7;">${csrText}</div>` : '';
+                        }
                         console.log(`🎯 TO DO CELL: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
                         let result = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) : (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead')) || '';
                         // Check for overdue callbacks - override To Do with "Reach out" if one exists
@@ -8437,6 +8469,168 @@ function generateSimpleLeadRowsWithDividers(leads) {
 // Make generateSimpleLeadRows globally accessible so other scripts use the updated version
 window.generateSimpleLeadRows = generateSimpleLeadRows;
 window.generateSimpleLeadRowsWithDividers = generateSimpleLeadRowsWithDividers;
+
+// Toggle COI Received / AOR Completed indicator on a lead
+window.toggleLeadIndicator = async function(leadId, field, value) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead[field] = value;
+    lead.updatedAt = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+    // Persist to server
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save indicator to server:', e); }
+    // Re-render just the row in-place
+    if (typeof updateLeadRowInTable === 'function') {
+        updateLeadRowInTable(leadId, lead);
+    } else {
+        // Fallback: full table re-render
+        const tbody = document.getElementById('leadsTableBody');
+        if (tbody && window.currentActiveLeads) {
+            const idx = window.currentActiveLeads.findIndex(l => l.id === leadId);
+            if (idx !== -1) window.currentActiveLeads[idx] = lead;
+            tbody.innerHTML = generateSimpleLeadRowsWithDividers(window.currentActiveLeads);
+        }
+    }
+};
+
+// Save CSR To Do notes on a lead
+window.saveCsrTodo = async function(leadId, value) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead.csrTodo = value;
+    // Reset done state when new text is assigned
+    if (value && value.trim()) {
+        lead.csrTodoDone = false;
+        lead.csrTodoOriginal = '';
+    }
+    lead.updatedAt = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+    // Sync in-memory lead arrays
+    [window.allLeads, window.filteredLeads].forEach(arr => {
+        if (!arr) return;
+        const m = arr.find(l => String(l.id) === String(leadId));
+        if (m) { m.csrTodo = lead.csrTodo; m.csrTodoDone = lead.csrTodoDone; m.csrTodoOriginal = lead.csrTodoOriginal; }
+    });
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save CSR todo to server:', e); }
+};
+
+// Toggle CSR To Do done status (CSR checks off a task)
+window.toggleCsrTodoDone = async function(leadId, done) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead.csrTodoDone = done;
+    if (done) {
+        // Clear the csrTodo text so the table To Do column becomes empty -> green row
+        lead.csrTodoOriginal = lead.csrTodo || '';
+        lead.csrTodo = '';
+    } else {
+        // Restore original text if unchecking
+        if (lead.csrTodoOriginal) {
+            lead.csrTodo = lead.csrTodoOriginal;
+        }
+    }
+    lead.updatedAt = new Date().toISOString();
+    lead.lastModified = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+    // Update the profile UI immediately
+    const textEl = document.getElementById('csr-todo-text-' + leadId);
+    if (textEl) {
+        if (done) {
+            textEl.style.textDecoration = 'line-through';
+            textEl.style.color = '#9ca3af';
+        } else {
+            textEl.style.textDecoration = 'none';
+            textEl.style.color = '#1e3a5f';
+            textEl.textContent = lead.csrTodo || '';
+        }
+    }
+    // Update the container border/bg
+    const cb = document.getElementById('csr-done-cb-' + leadId);
+    if (cb) {
+        const container = cb.parentElement;
+        if (container) {
+            container.style.borderColor = done ? '#86efac' : '#7dd3fc';
+            container.style.background = done ? '#f0fdf4' : '#f0f9ff';
+        }
+    }
+
+    // Sync to server
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save CSR todo done to server:', e); }
+
+    // Update the in-memory leads arrays so table re-renders use fresh data
+    if (window.allLeads) {
+        const memLead = window.allLeads.find(l => String(l.id) === String(leadId));
+        if (memLead) {
+            memLead.csrTodo = lead.csrTodo;
+            memLead.csrTodoDone = lead.csrTodoDone;
+            memLead.csrTodoOriginal = lead.csrTodoOriginal;
+        }
+    }
+    if (window.filteredLeads) {
+        const memLead2 = window.filteredLeads.find(l => String(l.id) === String(leadId));
+        if (memLead2) {
+            memLead2.csrTodo = lead.csrTodo;
+            memLead2.csrTodoDone = lead.csrTodoDone;
+            memLead2.csrTodoOriginal = lead.csrTodoOriginal;
+        }
+    }
+
+    // Immediately update the table To Do cell
+    const tableBody = document.getElementById('leadsTableBody');
+    if (tableBody) {
+        tableBody.querySelectorAll('tr').forEach(row => {
+            const cbx = row.querySelector('.lead-checkbox');
+            if (cbx && String(cbx.value) === String(leadId)) {
+                const cells = row.querySelectorAll('td');
+                const todoCell = cells[7];
+                if (todoCell) {
+                    todoCell.innerHTML = done ? '' : (lead.csrTodo ? '<div style="font-weight: bold; color: #0284c7;">' + lead.csrTodo + '</div>' : '');
+                }
+                // Update row highlighting to green if done
+                if (done) {
+                    row.setAttribute('style', 'background-color: rgba(16, 185, 129, 0.2) !important; border-left: 4px solid #10b981 !important; border-right: 2px solid #10b981 !important;');
+                    row.className = row.className.replace(/timestamp-\w+|force-persistent-highlight/g, '').trim() + ' reach-out-complete';
+                }
+            }
+        });
+    }
+
+    // Also refresh the table for a full re-render
+    if (typeof refreshLeadsTable === 'function') {
+        setTimeout(refreshLeadsTable, 300);
+    }
+};
 
 // Bulk select all leads belonging to a specific agent group
 window.toggleAgentLeadSelection = function(headerCheckbox, agentKey) {
@@ -9305,6 +9499,10 @@ async function loadLeadsView() {
 
                             console.log('To Do Tasks - Current user:', currentUser);
 
+                            // Check if CSR user
+                            const _todoUserData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                            const _isCsrTodo = (_todoUserData.role || '') === 'csr';
+
                             // Get ONLY the leads that are currently displayed in the table (visible leads)
                             // This ensures the counter matches what the user can actually see
                             const visibleLeads = leads.filter(lead => {
@@ -9327,6 +9525,17 @@ async function loadLeadsView() {
 
                             // Count To Do tasks from visible leads only
                             let todoCount = 0;
+
+                            // CSR users: count leads with non-empty csrTodo
+                            if (_isCsrTodo) {
+                                visibleLeads.forEach(lead => {
+                                    if (lead.csrTodo && lead.csrTodo.trim()) {
+                                        todoCount++;
+                                    }
+                                });
+                                console.log(`Total CSR To Do tasks: ${todoCount}`);
+                                return todoCount;
+                            }
 
                             visibleLeads.forEach(lead => {
                                 // Only count if assigned to current user AND not closed
@@ -9459,7 +9668,7 @@ async function loadLeadsView() {
                                 <input type="checkbox" id="selectAllLeads" onclick="toggleAllLeads()">
                             </th>
                             <th>Name</th>
-                            <th style="width: 28px;"></th>
+                            <th style="width: 56px;"></th>
                             <th>Contact</th>
                             <th>Value Level</th>
                             <th class="sortable" onclick="sortLeads('premium')" data-sort="premium">
@@ -38388,6 +38597,12 @@ function renderLeadsList(leads) {
                 </td>
                 <td>
                     ${(() => {
+                        // CSR users see only the CSR To Do text
+                        const _csrSess2 = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                        if ((_csrSess2.role || '') === 'csr') {
+                            const csrText = lead.csrTodo || '';
+                            return csrText ? `<div style="font-weight: bold; color: #0284c7;">${csrText}</div>` : '';
+                        }
                         console.log(`🎯 TO DO CELL: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
                         let result = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) : (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead')) || '';
                         // Check for overdue callbacks - override To Do with "Reach out" if one exists
