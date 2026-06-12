@@ -3298,17 +3298,10 @@ async function addCalendarEvent() {
     };
 
     try {
-        // Get API URL
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
-
         // Save to server
-        const response = await fetch(`${apiUrl}/api/calendar-events`, {
+        const response = await fetch('/api/calendar-events', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(eventData)
         });
 
@@ -3420,12 +3413,8 @@ async function loadServerCalendarEvents() {
             return [];
         }
 
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
-
-        console.log('🔍 LOADING: API URL for calendar events:', `${apiUrl}/api/calendar-events?userId=${encodeURIComponent(currentUser)}`);
-        const response = await fetch(`${apiUrl}/api/calendar-events?userId=${encodeURIComponent(currentUser)}`);
+        console.log('🔍 LOADING: API URL for calendar events:', `/api/calendar-events?userId=${encodeURIComponent(currentUser)}`);
+        const response = await fetch(`/api/calendar-events?userId=${encodeURIComponent(currentUser)}`);
 
         if (!response.ok) {
             throw new Error(`Server error: ${response.status}`);
@@ -3968,10 +3957,8 @@ async function dashCalAddEvent() {
         userId: currentUser
     };
 
-    const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3001' : `http://${window.location.hostname}:3001`;
-
     try {
-        const response = await fetch(`${apiUrl}/api/calendar-events`, {
+        const response = await fetch('/api/calendar-events', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(eventData)
@@ -4098,11 +4085,7 @@ async function deleteEvent(eventId) {
                 }
 
                 // Delete from server
-                const apiUrl = window.location.hostname === 'localhost'
-                    ? 'http://localhost:3001'
-                    : `http://${window.location.hostname}:3001`;
-
-                const response = await fetch(`${apiUrl}/api/calendar-events/${serverEventId}?userId=${encodeURIComponent(currentUser)}`, {
+                const response = await fetch(`/api/calendar-events/${serverEventId}?userId=${encodeURIComponent(currentUser)}`, {
                     method: 'DELETE'
                 });
 
@@ -4289,11 +4272,7 @@ async function loadServerCallbacks() {
     try {
         console.log('📞 Loading scheduled callbacks from server...');
 
-        // Construct proper API URL
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
-        const response = await fetch(`${apiUrl}/api/callbacks`);
+        const response = await fetch('/api/callbacks');
 
         if (!response.ok) {
             console.error('Failed to fetch callbacks:', response.status);
@@ -4373,15 +4352,9 @@ async function rescheduleServerCallback(leadId, newDateTime) {
         console.log('📅 Rescheduling callback for lead:', leadId, 'to:', newDateTime);
 
         // Construct proper API URL
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
-
-        const response = await fetch(`${apiUrl}/api/callbacks/reschedule`, {
+        const response = await fetch('/api/callbacks/reschedule', {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 leadId: leadId,
                 newDateTime: newDateTime
@@ -4495,25 +4468,6 @@ function openFullLeadDetails(leadId) {
 
     // You can implement navigation to your existing lead details page here
     // For example: window.location.hash = '#leads/' + leadId;
-}
-
-function refreshCalendarDisplay() {
-    if (!window.calendarState) return;
-
-    // Refresh calendar grid
-    const calendarGrid = document.getElementById('calendarGrid');
-    if (calendarGrid) {
-        calendarGrid.innerHTML = generateCalendarGrid(
-            window.calendarState.currentYear,
-            window.calendarState.currentMonth
-        );
-    }
-
-    // Refresh today's events
-    const todaysEvents = document.getElementById('todaysEvents');
-    if (todaysEvents) {
-        todaysEvents.innerHTML = generateTodaysEvents();
-    }
 }
 
 // Switch between personal and agency calendar views
@@ -5630,7 +5584,7 @@ async function saveClient() {
     // IMPORTANT: Also save to server to prevent data loss during syncs
     try {
         console.log('💾 Saving client to server...', newClient);
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         const response = await fetch(`${API_URL}/api/clients`, {
             method: 'POST',
             headers: {
@@ -7203,8 +7157,8 @@ async function syncTodosToBackend() {
         console.log('🔍 DEBUG SYNC: Filtered todos with dates:', todosWithDates);
 
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         const response = await fetch(`${apiUrl}/api/sync-todos`, {
             method: 'POST',
@@ -8481,7 +8435,7 @@ window.toggleLeadIndicator = async function(leadId, field, value) {
     // Persist to server
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
+            ? 'https://localhost:3001'
             : `${window.location.protocol}//${window.location.host}`;
         await fetch(`${apiUrl}/api/leads`, {
             method: 'POST',
@@ -8524,7 +8478,7 @@ window.saveCsrTodo = async function(leadId, value) {
     });
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
+            ? 'https://localhost:3001'
             : `${window.location.protocol}//${window.location.host}`;
         await fetch(`${apiUrl}/api/leads`, {
             method: 'POST',
@@ -8579,7 +8533,7 @@ window.toggleCsrTodoDone = async function(leadId, done) {
     // Sync to server
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
+            ? 'https://localhost:3001'
             : `${window.location.protocol}//${window.location.host}`;
         await fetch(`${apiUrl}/api/leads`, {
             method: 'POST',
@@ -9975,8 +9929,8 @@ async function saveNewLead(event) {
     // Save to server first
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         const response = await fetch(`${apiUrl}/api/leads`, {
             method: 'POST',
@@ -10295,7 +10249,7 @@ function editLead(leadId) {
 async function saveLeadToServer(lead) {
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
+            ? 'https://localhost:3001'
             : `${window.location.protocol}//${window.location.host}`;
 
         // Ensure the lead has an updatedAt timestamp
@@ -11536,8 +11490,8 @@ async function deleteLead(leadId) {
         // Delete from server first
         try {
             const apiUrl = window.location.hostname === 'localhost'
-                ? 'http://localhost:3001'
-                : `http://${window.location.hostname}:3001`;
+                ? 'https://localhost:3001'
+                : `https://${window.location.hostname}:3001`;
 
             const response = await fetch(`${apiUrl}/api/leads/${leadId}`, {
                 method: 'DELETE',
@@ -12006,7 +11960,7 @@ async function generateClientRows(page = 1) {
             <tr data-person-name="${personName.replace(/"/g, '&quot;')}" data-biz-name="${bizName.replace(/"/g, '&quot;')}">
                 <td class="client-name">
                     <div class="client-avatar">${initials}</div>
-                    <span class="client-display-name">${personName}</span>
+                    <span class="client-display-name">${bizName || personName}</span>
                 </td>
                 <td>${client.phone}</td>
                 <td>${client.email}</td>
@@ -12084,7 +12038,7 @@ async function loadClientsView() {
                     </select>` : ''}
                     <select class="filter-select" id="clientNameDisplayFilter" onchange="applyClientNameDisplay()" style="min-width:160px;">
                         <option value="person">Person's Name</option>
-                        <option value="business">Business Name</option>
+                        <option value="business" selected>Business Name</option>
                     </select>
                     <button class="btn-filter" id="missing-data-btn" onclick="toggleMissingDataFilter()" style="transition:0.2s;">
                         <i class="fas fa-exclamation-triangle"></i> Missing Data
@@ -12919,31 +12873,9 @@ function filterPolicies() {
     const policySearchValue = (document.getElementById('policySearch')?.value || '').toLowerCase();
     const tbody = document.getElementById('policyTableBody');
 
-    // CSR: require 4+ characters before showing any policies
-    const _csrPolicySession = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
-    const _isCsrPolicy = (_csrPolicySession.role || '') === 'csr';
-    if (_isCsrPolicy) {
-        const dataRows = tbody ? tbody.querySelectorAll('tr:not(#csrPolicySearchPrompt)') : [];
-        let promptRow = document.getElementById('csrPolicySearchPrompt');
-        // Skip the 4-char gate if a magic link deep-link is pending
-        if (policySearchValue.length < 4 && !window._magicLinkPending) {
-            dataRows.forEach(r => r.style.display = 'none');
-            if (tbody && !promptRow) {
-                promptRow = document.createElement('tr');
-                promptRow.id = 'csrPolicySearchPrompt';
-                promptRow.innerHTML = `<td colspan="10" style="text-align:center;padding:40px;color:#6b7280;">
-                    <i class="fas fa-search" style="font-size:48px;margin-bottom:16px;opacity:0.3;"></i>
-                    <p style="font-size:16px;margin:0;">Search for policies in the top left</p>
-                    <p style="font-size:14px;margin-top:8px;">Type 4 or more characters to display results</p>
-                </td>`;
-                tbody.appendChild(promptRow);
-            } else if (promptRow) {
-                promptRow.style.display = '';
-            }
-            return;
-        }
-        if (promptRow) promptRow.style.display = 'none';
-    }
+    // Remove any stale CSR search prompt if present
+    const _csrPrompt = document.getElementById('csrPolicySearchPrompt');
+    if (_csrPrompt) _csrPrompt.style.display = 'none';
 
     const rows = document.querySelectorAll('#policyTableBody tr');
 
@@ -13191,6 +13123,10 @@ async function loadRenewalsView() {
                         <option value="Vanguard" ${window._renewalAgencyFilter==='Vanguard'?'selected':''}>Vanguard</option>
                         <option value="United" ${window._renewalAgencyFilter==='United'?'selected':''}>United</option>
                     </select>` : ''}
+                    <select id="renewalNameDisplayFilter" onchange="window._renewalNameDisplay=this.value;applyRenewalNameDisplay()" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:.875rem;margin-right:8px;">
+                        <option value="person" ${window._renewalNameDisplay==='person'?'selected':''}>Person's Name</option>
+                        <option value="business" ${window._renewalNameDisplay!=='person'?'selected':''}>Business Name</option>
+                    </select>
                     <button class="btn-primary" onclick="exportRenewals()">
                         <i class="fas fa-download"></i> Export
                     </button>
@@ -13229,6 +13165,9 @@ async function loadRenewalsView() {
 
     // Restore green highlights for completed renewals
     restoreRenewalHighlighting();
+
+    // Apply name display preference (person vs business)
+    applyRenewalNameDisplay();
 }
 
 function getRealRenewalPolicies(policies, clients) {
@@ -13274,15 +13213,29 @@ function getRealRenewalPolicies(policies, clients) {
             }
         }
         
+        // Person name = contact/client name; Business name = insured/business name
+        const personName = client.name ||
+                          (policy.clientName && policy.clientName !== 'N/A' && policy.clientName !== 'Unknown' ? policy.clientName : null) ||
+                          clientName;
+        const businessName = policy.insured?.['Name/Business Name'] ||
+                            policy.insured?.['Primary Named Insured'] ||
+                            policy.namedInsured?.name ||
+                            policy.insuredName ||
+                            client.companyName ||
+                            client.businessName ||
+                            clientName;
+
         renewalPolicies.push({
             id: policy.id || `POL-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
             client: clientName,
+            personName: personName,
+            businessName: businessName,
             carrier: policy.carrier || policy.insuranceCarrier || 'Unknown Carrier',
             type: policy.policyType || policy.type || 'Commercial Auto',
             policyNumber: policy.policyNumber || policy.number || 'N/A',
             premium: premiumValue,
             expirationDate: expirationDate,
-            effectiveDate: policy.effectiveDate ? new Date(policy.effectiveDate) : 
+            effectiveDate: policy.effectiveDate ? new Date(policy.effectiveDate) :
                           new Date(expirationDate.getFullYear() - 1, expirationDate.getMonth(), expirationDate.getDate()),
             status: getStatusFromDate(expirationDate),
             agent: policy.agent || 'Unassigned',
@@ -13399,10 +13352,12 @@ function renderMonthView(policies, isAdmin = false) {
                 ${monthPolicies.map(policy => `
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
                          onclick="showRenewalProfile('${policy.id}')"
-                         id="renewal-card-${policy.id}">
+                         id="renewal-card-${policy.id}"
+                         data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}">
                         <div class="renewal-header">
                             <div class="renewal-info">
-                                <h4>${policy.client || 'Unknown Client'}</h4>
+                                <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
                                 <p>${policy.type || 'Commercial Auto'} - ${policy.carrier || 'Unknown Carrier'}</p>
                                 <p class="policy-number">Policy #${policy.policyNumber || 'N/A'}</p>
                             </div>
@@ -13444,10 +13399,12 @@ function renderThreeMonthView(policies, isAdmin = false) {
                 ${threeMonthPolicies.map(policy => `
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
                          onclick="showRenewalProfile('${policy.id}')"
-                         id="renewal-card-${policy.id}">
+                         id="renewal-card-${policy.id}"
+                         data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}">
                         <div class="renewal-header">
                             <div class="renewal-info">
-                                <h4>${policy.client || 'Unknown Client'}</h4>
+                                <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
                                 <p>${policy.type || 'Commercial Auto'} - ${policy.carrier || 'Unknown Carrier'}</p>
                                 <p class="policy-number">Policy #${policy.policyNumber || 'N/A'}</p>
                             </div>
@@ -13501,10 +13458,12 @@ function renderYearView(policies, isAdmin = false) {
                         </div>
                         <div class="month-policies">
                             ${months[key].policies.slice(0, 3).map(p => `
-                                <div class="mini-policy ${selectedRenewalPolicyId === p.id ? 'selected' : ''}" 
+                                <div class="mini-policy ${selectedRenewalPolicyId === p.id ? 'selected' : ''}"
                                      onclick="showRenewalProfile('${p.id}')"
-                                     id="renewal-card-${p.id}">
-                                    <span>${p.client}</span>
+                                     id="renewal-card-${p.id}"
+                                     data-person-name="${(p.personName || '').replace(/"/g, '&quot;')}"
+                                     data-biz-name="${(p.businessName || '').replace(/"/g, '&quot;')}">
+                                    <span class="renewal-display-name">${p.businessName || p.client}</span>
                                     <span class="mini-date">${p.expirationDate.getDate()}</span>
                                 </div>
                             `).join('')}
@@ -13820,6 +13779,21 @@ function switchRenewalView(view) {
     loadRenewalsView();
 }
 
+function applyRenewalNameDisplay() {
+    const mode = window._renewalNameDisplay || document.getElementById('renewalNameDisplayFilter')?.value || 'business';
+    document.querySelectorAll('[data-person-name]').forEach(card => {
+        const personName = card.getAttribute('data-person-name') || '';
+        const bizName = card.getAttribute('data-biz-name') || '';
+        const nameEl = card.querySelector('.renewal-display-name');
+        if (!nameEl) return;
+        if (mode === 'business') {
+            nameEl.textContent = bizName || personName;
+        } else {
+            nameEl.textContent = personName || bizName;
+        }
+    });
+}
+
 function switchProfileTab(tab) {
     const tabContent = document.getElementById('profileTabContent');
     if (!tabContent) return;
@@ -13893,8 +13867,8 @@ function getDaysRemaining(date) {
 
 function getRenewalTasksApiUrl(policyId) {
     const base = window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : `http://${window.location.hostname}:3001`;
+        ? 'https://localhost:3001'
+        : `https://${window.location.hostname}:3001`;
     return `${base}/api/renewal-tasks/${policyId}`;
 }
 
@@ -14119,7 +14093,7 @@ function highlightPolicyAsCompleted() {
     // Store completion status to server using policyId as key
     const completionApiUrl = window.location.hostname === 'localhost'
         ? 'http://localhost:3001/api/renewal-completions'
-        : `http://${window.location.hostname}:3001/api/renewal-completions`;
+        : `https://${window.location.hostname}:3001/api/renewal-completions`;
     fetch(completionApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14166,7 +14140,7 @@ function removePolicyHighlight() {
     // Remove completion status from server using policyId as key
     const completionDeleteUrl = window.location.hostname === 'localhost'
         ? `http://localhost:3001/api/renewal-completions/${currentPolicyId}`
-        : `http://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
+        : `https://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
     fetch(completionDeleteUrl, { method: 'DELETE' })
         .then(r => { if (r.ok) console.log('✅ Removed renewal completion from server'); })
         .catch(e => console.error('Error removing completion:', e));
@@ -14180,7 +14154,7 @@ async function restoreRenewalHighlighting() {
     try {
         const apiUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3001/api/renewal-completions'
-            : `http://${window.location.hostname}:3001/api/renewal-completions`;
+            : `https://${window.location.hostname}:3001/api/renewal-completions`;
         const response = await fetch(apiUrl);
         if (response.ok) {
             completions = await response.json();
@@ -14209,7 +14183,7 @@ async function restoreRenewalHighlighting() {
                 // Migrate to server so localStorage is no longer needed
                 const migrateUrl = window.location.hostname === 'localhost'
                     ? 'http://localhost:3001/api/renewal-completions'
-                    : `http://${window.location.hostname}:3001/api/renewal-completions`;
+                    : `https://${window.location.hostname}:3001/api/renewal-completions`;
                 fetch(migrateUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -17124,7 +17098,7 @@ async function fetchLeadsFromServer() {
 
         const apiUrl = window.location.protocol === 'https:'
             ? `https://${window.location.hostname}/api`
-            : `http://${window.location.hostname}:3001/api`;
+            : `https://${window.location.hostname}:3001/api`;
 
         console.log('🌐 DEBUG: API URL:', apiUrl + '/leads');
         const response = await fetch(apiUrl + '/leads');
@@ -21562,7 +21536,7 @@ async function viewClient(id) {
     let client = null;
 
     try {
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         console.log('📡 Fetching clients from:', `${API_URL}/api/clients`);
         const response = await fetch(`${API_URL}/api/clients`, {
             headers: {
@@ -21626,7 +21600,7 @@ async function viewClient(id) {
     // Get all policies for this client - fetch from API first, fallback to localStorage
     let allPolicies = [];
     try {
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         const polRes = await fetch(`${API_URL}/api/policies?includeInactive=true`, {
             headers: { 'Cache-Control': 'no-cache', 'Bypass-Tunnel-Reminder': 'true' }
         });
@@ -23539,30 +23513,8 @@ function filterClients() {
     const tbody = document.getElementById('clientsTableBody');
     if (!tbody) return;
 
-    // Require 4+ characters before showing any clients (skip for admins)
-    const _csrSession = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
-    const _isCsr = (_csrSession.role || '') === 'csr';
-    const _role = (_csrSession.role || '').toLowerCase();
-    const _isAdmin = ['master_admin', 'united_admin', 'vanguard_admin'].includes(_role) ||
-                     ['grant', 'maureen'].includes((_csrSession.username || '').toLowerCase());
-    const dataRows = tbody.querySelectorAll('tr:not(#csrClientSearchPrompt)');
-    let promptRow = document.getElementById('csrClientSearchPrompt');
-    if (!_isAdmin && searchValue.length < 4) {
-        dataRows.forEach(r => r.style.display = 'none');
-        if (!promptRow) {
-            promptRow = document.createElement('tr');
-            promptRow.id = 'csrClientSearchPrompt';
-            promptRow.innerHTML = `<td colspan="8" style="text-align:center;padding:40px;color:#6b7280;">
-                <i class="fas fa-search" style="font-size:48px;margin-bottom:16px;opacity:0.3;"></i>
-                <p style="font-size:16px;margin:0;">Search for clients in the top left</p>
-                <p style="font-size:14px;margin-top:8px;">Type 4 or more characters to display results</p>
-            </td>`;
-            tbody.appendChild(promptRow);
-        } else {
-            promptRow.style.display = '';
-        }
-        return;
-    }
+    // Remove any stale CSR search prompt if present
+    const promptRow = document.getElementById('csrClientSearchPrompt');
     if (promptRow) promptRow.style.display = 'none';
 
     // Remove existing warning banner rows
@@ -23570,13 +23522,15 @@ function filterClients() {
 
     const rows = tbody.querySelectorAll('tr');
 
-    // Check if Maureen is logged in
+    // Check user role
     const sessionData = sessionStorage.getItem('vanguard_user');
     let isMaureen = false;
+    let _isCsr = false;
     if (sessionData) {
         try {
             const user = JSON.parse(sessionData);
             isMaureen = user.username && user.username.toLowerCase() === 'maureen';
+            _isCsr = (user.role || '') === 'csr';
         } catch (error) {}
     }
 
@@ -23670,7 +23624,7 @@ async function viewPolicy(policyId) {
     // 2. Fallback: fetch from API (covers fresh/magic-link sessions)
     if (!policy) {
         try {
-            const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+            const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
             const _jwt = sessionStorage.getItem('vanguard_jwt') || '';
             const res = await fetch(`${API_URL}/api/policies?includeInactive=true&limit=500`, {
                 headers: { 'Cache-Control': 'no-cache', 'Bypass-Tunnel-Reminder': 'true', 'Authorization': `Bearer ${_jwt}` }
@@ -24920,7 +24874,7 @@ window.overviewSave = async function(policyId) {
     }
 
     try {
-        const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         const jwt = sessionStorage.getItem('vanguard_jwt') || '';
         const r = await fetch(`${API}/api/policies/${policyId}`, {
             method: 'PUT',
@@ -25307,7 +25261,7 @@ function _jnDateToISO(jnDate) {
         const policyToSave = JSON.parse(JSON.stringify(policies[idx])); // deep copy for server
         _raw.set('insurance_policies', JSON.stringify(policies));
         try {
-            const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+            const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
             const jwt = sessionStorage.getItem('vanguard_jwt') || '';
             const r = await fetch(`${API}/api/policies/${policyId}`, {
                 method: 'PUT',
@@ -25639,7 +25593,7 @@ window.showVehicleDetailModal = function(startIndex) {
             policies[idx].vehicles = vehicles;
             localStorage.setItem('insurance_policies', JSON.stringify(policies));
             try {
-                const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+                const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
                 const jwt = sessionStorage.getItem('vanguard_jwt') || '';
                 const r = await fetch(`${API}/api/policies/${policyId}`, {
                     method: 'PUT',
@@ -25825,7 +25779,7 @@ window.showDriverDetailModal = function(startIndex) {
             policies[idx].drivers = drivers;
             localStorage.setItem('insurance_policies', JSON.stringify(policies));
             try {
-                const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+                const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
                 const jwt = sessionStorage.getItem('vanguard_jwt') || '';
                 const r = await fetch(`${API}/api/policies/${policyId}`, {
                     method: 'PUT',
@@ -29621,7 +29575,7 @@ async function fetchLeadsForReport(agentName) {
         // Get API URL based on protocol
         const apiUrl = window.location.protocol === 'https:'
             ? `https://${window.location.hostname}/api`
-            : `http://${window.location.hostname}:3001/api`;
+            : `https://${window.location.hostname}:3001/api`;
 
         console.log('Fetching leads from:', apiUrl + '/leads');
         const response = await fetch(apiUrl + '/leads');
@@ -37646,8 +37600,8 @@ window.bulkDeleteLeads = async function() {
 
     // Delete from server
     const apiUrl = window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : `http://${window.location.hostname}:3001`;
+        ? 'https://localhost:3001'
+        : `https://${window.location.hostname}:3001`;
 
     let successCount = 0;
     let failCount = 0;
@@ -39340,6 +39294,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         usdot: extractedDotNumber, // Also set usdot for compatibility
         policyId: policyId,
         isPolicyQuote: true,
+        agent: policy.agent || '',
         policyVehicles: vehicleData,
         policyDrivers: driverData
     };
@@ -40185,7 +40140,7 @@ window.addCRMCOIEmailRecipientWithOptions = function() {
     // Add agent email if checkbox is checked
     if (addAgentCheck.checked) {
         // Try to get agent email from policy, then fall back to name→email map
-        const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen.corp@vigagency.com', carson: 'Carson@vigagency.com' };
+        const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen.corp@Uigagency.com', carson: 'Carson@vigagency.com' };
         const _agentKey = (currentPolicy.agent || currentPolicy.assignedTo || '').toLowerCase().trim();
         const agentEmail = currentPolicy.agentEmail || _agentEmailMap[_agentKey] || '';
 
@@ -40233,7 +40188,7 @@ window.handleCheckboxChange = function(type, silent) {
                 if (!silent) alert('No email address found in Contact Information for this policy.');
             }
         } else if (type === 'agent') {
-            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen.corp@vigagency.com', carson: 'Carson@vigagency.com' };
+            const _agentEmailMap = { hunter: 'Hunter@vigagency.com', grant: 'Grant@vigagency.com', maureen: 'Maureen.corp@Uigagency.com', carson: 'Carson@vigagency.com' };
             // Primary: read from policy object
             let _agentName = currentPolicy.agent || currentPolicy.assignedTo || '';
             // Fallback: scrape from overview tab only (not edit form labels)
@@ -43005,12 +42960,8 @@ window.deleteSimpleTodo = async function deleteSimpleTodo(index) {
             }
 
             // Delete from server first
-            const apiUrl = window.location.hostname === 'localhost'
-                ? 'http://localhost:3001'
-                : `http://${window.location.hostname}:3001`;
-
             const serverEventId = todo.originalEvent?.id?.toString().replace('server_', '');
-            const response = await fetch(`${apiUrl}/api/calendar-events/${serverEventId}?userId=${encodeURIComponent(currentUser)}`, {
+            const response = await fetch(`/api/calendar-events/${serverEventId}?userId=${encodeURIComponent(currentUser)}`, {
                 method: 'DELETE'
             });
 

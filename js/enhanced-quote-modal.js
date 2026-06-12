@@ -364,7 +364,31 @@ window.createQuoteApplicationSimple = function(leadId) {
     const leads = JSON.parse(localStorage.getItem('leads') || '[]');
     const insuranceLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
     const allLeads = [...leads, ...insuranceLeads];
-    const lead = allLeads.find(l => l.id == leadId);
+    let lead = allLeads.find(l => l.id == leadId);
+
+    // If not found and leadId has policy_ prefix, look up from policy/client data
+    if (!lead && typeof leadId === 'string' && leadId.startsWith('policy_')) {
+        const policyId = leadId.replace('policy_', '');
+        const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const clients = JSON.parse(localStorage.getItem('clients') || '[]');
+        const policy = allPolicies.find(p => p.id === policyId || p.policyNumber === policyId);
+        if (policy) {
+            const client = clients.find(c => c.id === policy.clientId) || {};
+            lead = {
+                id: leadId,
+                name: policy.insuredName || policy.insured?.['Name/Business Name'] || policy.clientName || client.name || '',
+                phone: client.phone || policy.clientPhone || '',
+                email: client.email || policy.clientEmail || '',
+                address: client.address || policy.insured?.['Mailing Address'] || '',
+                dotNumber: policy.insured?.['USDOT'] || policy.dotNumber || client.dotNumber || '',
+                mcNumber: policy.insured?.['MC#'] || policy.mcNumber || client.mcNumber || '',
+                yearsInBusiness: policy.insured?.['Years in Business'] || client.yearsInBusiness || '',
+                renewalDate: policy.expirationDate || policy.endDate || '',
+                agent: policy.agent || ''
+            };
+            console.log('📋 Built lead from policy data:', policy.policyNumber);
+        }
+    }
 
     if (!lead) {
         console.error('Lead not found with ID:', leadId);
@@ -423,6 +447,13 @@ window.createQuoteApplicationSimple = function(leadId) {
         position: relative;
     `;
 
+    // Determine agency branding based on agent
+    const _agentName = (lead.agent || lead.assignedTo || '').toLowerCase().trim();
+    const _isUIG = _agentName === 'maureen';
+    const _agencyName = _isUIG ? 'United Insurance Group LLC' : 'Vanguard Insurance Group LLC';
+    const _agencyAddr = _isUIG ? 'Medina, OH 44256 • 330-259-7438' : 'Brunswick, OH 44256 • 330-460-0872';
+    const _agencyPhone = _isUIG ? '330-259-7438' : '330-460-0872';
+
     content.innerHTML = `
         <div style="position: relative;">
             <button onclick="closeQuoteApplicationModal();"
@@ -433,8 +464,8 @@ window.createQuoteApplicationSimple = function(leadId) {
                 <span style="margin-top: -2px;">&times;</span>
             </button>
             <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
-                <h2 style="margin: 0; color: #0066cc;">Vanguard Insurance Group LLC</h2>
-                <p style="margin: 5px 0;">Brunswick, OH 44256 • 330-460-0872</p>
+                <h2 style="margin: 0; color: #0066cc;">${_agencyName}</h2>
+                <p style="margin: 5px 0;">${_agencyAddr}</p>
                 <h3 style="margin: 10px 0 0 0;">TRUCKING APPLICATION</h3>
             </div>
         </div>
@@ -1918,7 +1949,31 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
     const leads = JSON.parse(localStorage.getItem('leads') || '[]');
     const insuranceLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
     const allLeads = [...leads, ...insuranceLeads];
-    const lead = allLeads.find(l => l.id == leadId);
+    let lead = allLeads.find(l => l.id == leadId);
+
+    // If not found and leadId has policy_ prefix, look up from policy/client data
+    if (!lead && typeof leadId === 'string' && leadId.startsWith('policy_')) {
+        const policyId = leadId.replace('policy_', '');
+        const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const clients = JSON.parse(localStorage.getItem('clients') || '[]');
+        const policy = allPolicies.find(p => p.id === policyId || p.policyNumber === policyId);
+        if (policy) {
+            const client = clients.find(c => c.id === policy.clientId) || {};
+            lead = {
+                id: leadId,
+                name: policy.insuredName || policy.insured?.['Name/Business Name'] || policy.clientName || client.name || '',
+                phone: client.phone || policy.clientPhone || '',
+                email: client.email || policy.clientEmail || '',
+                address: client.address || policy.insured?.['Mailing Address'] || '',
+                dotNumber: policy.insured?.['USDOT'] || policy.dotNumber || client.dotNumber || '',
+                mcNumber: policy.insured?.['MC#'] || policy.mcNumber || client.mcNumber || '',
+                yearsInBusiness: policy.insured?.['Years in Business'] || client.yearsInBusiness || '',
+                renewalDate: policy.expirationDate || policy.endDate || '',
+                agent: policy.agent || ''
+            };
+            console.log('📋 Built lead from policy data:', policy.policyNumber);
+        }
+    }
 
     if (!lead) {
         console.error('Lead not found with ID:', leadId);
@@ -1994,6 +2049,12 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
     }
 
 
+    // Determine agency branding based on agent
+    const _agentName2 = (lead.agent || lead.assignedTo || '').toLowerCase().trim();
+    const _isUIG2 = _agentName2 === 'maureen';
+    const _agencyName2 = _isUIG2 ? 'United Insurance Group LLC' : 'Vanguard Insurance Group LLC';
+    const _agencyAddr2 = _isUIG2 ? 'Medina, OH 44256 • 330-259-7438' : 'Brunswick, OH 44256 • 330-460-0872';
+
     content.innerHTML = `
         <div style="position: sticky; top: 0; background: white; z-index: 1000; border-bottom: 1px solid #ccc;">
             <button onclick="closeQuoteApplicationModal();"
@@ -2003,8 +2064,8 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                 <span style="margin-top: -2px;">&times;</span>
             </button>
             <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
-                <h2 style="margin: 0; color: #0066cc;">Vanguard Insurance Group LLC</h2>
-                <p style="margin: 5px 0;">Brunswick, OH 44256 • 330-460-0872</p>
+                <h2 style="margin: 0; color: #0066cc;">${_agencyName2}</h2>
+                <p style="margin: 5px 0;">${_agencyAddr2}</p>
                 <h3 style="margin: 10px 0 0 0;">TRUCKING APPLICATION (VIEW/EDIT)</h3>
             </div>
         </div>
@@ -2767,7 +2828,17 @@ window.downloadQuoteApplicationPDF = function() {
         const leads = JSON.parse(localStorage.getItem('leads') || '[]');
         const insuranceLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
         const allLeads = [...leads, ...insuranceLeads];
-        const lead = allLeads.find(l => l.id == leadId) || {};
+        let lead = allLeads.find(l => l.id == leadId) || {};
+
+        // If not found and leadId has policy_ prefix, look up from policy data
+        if (!lead.id && typeof leadId === 'string' && leadId.startsWith('policy_')) {
+            const _pid = leadId.replace('policy_', '');
+            const _pols = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const _pol = _pols.find(p => p.id === _pid || p.policyNumber === _pid);
+            if (_pol) {
+                lead = { id: leadId, name: _pol.insuredName || _pol.clientName || '', agent: _pol.agent || '' };
+            }
+        }
 
         console.log('📊 PDF data collected:', { leadId, lead, formData });
 
@@ -2787,6 +2858,14 @@ function generateApplicationPDF(lead, formData) {
     try {
         const currentDate = new Date().toLocaleDateString();
         const companyName = formData['name'] || formData["Insured's Name (including DBA)"] || lead.name || 'N/A';
+
+        // Determine agency branding based on agent
+        const _pdfAgent = (lead.agent || lead.assignedTo || '').toLowerCase().trim();
+        const _pdfIsUIG = _pdfAgent === 'maureen';
+        const _pdfAgencyName = _pdfIsUIG ? 'UNITED INSURANCE GROUP LLC' : 'VANGUARD INSURANCE GROUP LLC';
+        const _pdfAgencyAddr = _pdfIsUIG ? 'Medina, OH 44256 • 330-259-7438' : 'Brunswick, OH 44256 • 330-460-0872';
+        const _pdfAgencyPhone = _pdfIsUIG ? '330-259-7438' : '330-460-0872';
+        const _pdfAgencyFull = _pdfIsUIG ? 'United Insurance Group LLC' : 'Vanguard Insurance Group LLC';
 
         // Count vehicles
         const truckCount = formData.truckCount || 0;
@@ -3068,8 +3147,8 @@ function generateApplicationPDF(lead, formData) {
 <body>
     <!-- Header -->
     <div class="header">
-        <h1>VANGUARD INSURANCE GROUP LLC</h1>
-        <div class="contact">Brunswick, OH 44256 • 330-460-0872</div>
+        <h1>${_pdfAgencyName}</h1>
+        <div class="contact">${_pdfAgencyAddr}</div>
         <h2>COMMERCIAL TRUCKING APPLICATION</h2>
     </div>
 
@@ -3215,8 +3294,8 @@ function generateApplicationPDF(lead, formData) {
 
     <!-- Footer -->
     <div class="footer">
-        <p>This application was generated electronically by Vanguard Insurance Group LLC</p>
-        <p>For questions or modifications, please contact us at 330-460-0872</p>
+        <p>This application was generated electronically by ${_pdfAgencyFull}</p>
+        <p>For questions or modifications, please contact us at ${_pdfAgencyPhone}</p>
     </div>
 
     <script>

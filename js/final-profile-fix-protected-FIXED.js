@@ -1282,7 +1282,7 @@ const AGENT_EMAILS = {
     'grant':   'Grant@vigagency.com',
     'carson':  'Carson@vigagency.com',
     'hunter':  'Hunter@vigagency.com',
-    'maureen': 'Maureen@vigagency.com'
+    'maureen': 'Maureen.corp@Uigagency.com'
 };
 function getAgentEmail(assignedTo) {
     if (!assignedTo) return '';

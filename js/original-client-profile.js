@@ -35,8 +35,10 @@ window.viewClientOriginal = async function(id) {
     try {
         const response = await fetch('/api/policies?includeInactive=true&limit=500');
         if (response.ok) {
-            const serverPolicies = await response.json();
-            const localPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const _serverRaw = await response.json();
+            const serverPolicies = Array.isArray(_serverRaw) ? _serverRaw : [];
+            const _localRaw = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const localPolicies = Array.isArray(_localRaw) ? _localRaw : [];
             // Build map of server policies by id
             const serverMap = {};
             serverPolicies.forEach(p => { if (p.id) serverMap[p.id] = p; });
@@ -50,7 +52,8 @@ window.viewClientOriginal = async function(id) {
         console.log('⚠️ Could not sync from server, using localStorage data:', error.message);
     }
 
-    const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const _rawPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const allPolicies = Array.isArray(_rawPolicies) ? _rawPolicies : [];
     console.log('Total policies in storage:', allPolicies.length);
     console.log('Client ID:', id, 'Client Name:', client.name);
 
@@ -136,6 +139,31 @@ window.viewClientOriginal = async function(id) {
 
         return false;
     });
+
+    // Deduplicate policies by policyNumber (keep the newest by updated_at or id)
+    const _seenPolicyNumbers = new Map();
+    clientPolicies.forEach(p => {
+        const key = p.policyNumber || p.id;
+        if (!key) return;
+        const existing = _seenPolicyNumbers.get(key);
+        if (!existing) {
+            _seenPolicyNumbers.set(key, p);
+        } else {
+            // Keep the one with more data (more keys) or newer timestamp
+            const existingKeys = Object.keys(existing).length;
+            const currentKeys = Object.keys(p).length;
+            if (currentKeys > existingKeys) {
+                _seenPolicyNumbers.set(key, p);
+            }
+        }
+    });
+    const dedupedPolicies = Array.from(_seenPolicyNumbers.values());
+    if (dedupedPolicies.length < clientPolicies.length) {
+        console.log(`🔄 Deduplicated ${clientPolicies.length} → ${dedupedPolicies.length} policies`);
+    }
+    // Replace clientPolicies with deduped version
+    clientPolicies.length = 0;
+    clientPolicies.push(...dedupedPolicies);
 
     console.log('Client policies found:', clientPolicies.length);
 
@@ -387,9 +415,7 @@ window.viewClientOriginal = async function(id) {
                                     + fRow2('Business Type','type', client.businessType||'', 'FEIN','fein', client.fein||'')
                                     + fRow('Website','website', client.website||'')
                                     + fRow('Email','email', client.businessEmail||client.email||'')
-                                    + fRow('GL Code','glCode', client.glCode||'')
-                                    + fRow('SIC Code','sicCode', client.sicCode||'')
-                                    + fRow('NAICS Code','naicsCode', client.naicsCode||'');
+                                    + fRow('DOT #','dotNumber', client.dotNumber||client.dot||'');
                             })()}
                         </div>
                     </div>
@@ -587,13 +613,61 @@ window.viewClientOriginal = async function(id) {
                 </div>`; })()}
             </div>
 
-            <!-- Media / Files + Notes Row -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px;">
-
-                <!-- Media / Files -->
+            <!-- Client Notes Section -->
+            <div style="padding: 24px 24px 0;">
                 <div style="background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; overflow: hidden;">
                     <div style="background: #3c8dbc; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="far fa-folder-open" style="margin-right:7px;"></i>Media / Files</span>
+                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="fas fa-pen" style="margin-right:7px;"></i>Notes</span>
+                    </div>
+                    <div style="padding: 14px 16px;">
+                        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+                            <textarea id="client-note-input-${id}" placeholder="Type a note..." style="flex:1;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;min-height:38px;max-height:120px;font-family:inherit;"></textarea>
+                            <input type="file" id="client-note-file-${id}" multiple style="display:none;" onchange="window._noteFileSelected('${id}')">
+                            <button onclick="document.getElementById('client-note-file-${id}').click()" style="background:#6b7280;color:white;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;" title="Attach file">
+                                <i class="fas fa-paperclip"></i>
+                            </button>
+                            <button onclick="window.addClientNote && window.addClientNote('${id}')" style="background:#3b82f6;color:white;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;">
+                                <i class="fas fa-plus" style="margin-right:4px;"></i>Add
+                            </button>
+                        </div>
+                        <div id="client-note-file-preview-${id}" style="margin-bottom:8px;"></div>
+                        <div id="client-user-notes-list-${id}">
+                            ${(() => {
+                                const userNotes = Array.isArray(client.userNotes) ? client.userNotes : [];
+                                if (!userNotes.length) return '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:12px;"><i class="fas fa-pen" style="margin-right:6px;opacity:0.4;"></i>No notes yet</div>';
+                                const page = 0;
+                                const perPage = 5;
+                                const totalPages = Math.ceil(userNotes.length / perPage);
+                                const visible = userNotes.slice(0, perPage);
+                                let html = visible.map((n, i) => {
+                                    const dateStr = n.date ? new Date(n.date).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+                                    return '<div style="display:flex;justify-content:space-between;align-items:start;padding:8px 10px;border-bottom:1px solid #f3f4f6;' + (i%2===1?'background:#fafafa;':'') + '">'
+                                        + '<span style="color:#374151;font-size:13px;line-height:1.4;flex:1;">' + (n.text||'') + '</span>'
+                                        + '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px;">'
+                                        + '<span style="color:#9ca3af;font-size:11px;white-space:nowrap;">' + dateStr + '</span>'
+                                        + '<button onclick="window.deleteClientNote && window.deleteClientNote(\'' + id + '\',' + i + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:2px;" title="Delete note"><i class="fas fa-trash-alt"></i></button>'
+                                        + '</div></div>';
+                                }).join('');
+                                if (totalPages > 1) {
+                                    html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:8px 10px;">'
+                                        + '<span style="color:#9ca3af;font-size:11px;">Page 1 of ' + totalPages + '</span>'
+                                        + '<button onclick="window.paginateClientNotes && window.paginateClientNotes(\'' + id + '\',1)" style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;"><i class="fas fa-chevron-right"></i></button>'
+                                        + '</div>';
+                                }
+                                return html;
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- IVANS Media / Files + IVANS Notes Row -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px;">
+
+                <!-- IVANS Media / Files -->
+                <div style="background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; overflow: hidden;">
+                    <div style="background: #3c8dbc; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="far fa-folder-open" style="margin-right:7px;"></i>IVANS Media / Files</span>
                         <button onclick="window.uploadClientDocument('${id}')" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.35); color: white; border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 13px;" title="Upload file">
                             <i class="fas fa-plus"></i>
                         </button>
@@ -615,10 +689,10 @@ window.viewClientOriginal = async function(id) {
                     </div>
                 </div>
 
-                <!-- Notes -->
+                <!-- IVANS Notes -->
                 <div style="background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; overflow: hidden; display: flex; flex-direction: column;">
                     <div style="background: #3c8dbc; padding: 10px 16px; display: flex; align-items: center; flex-shrink: 0;">
-                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="fas fa-sticky-note" style="margin-right:7px;"></i>Notes</span>
+                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="fas fa-sticky-note" style="margin-right:7px;"></i>IVANS Notes</span>
                     </div>
                     <div style="flex: 1; overflow-y: auto; max-height: 320px;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;" id="client-notes-table">
@@ -1443,7 +1517,7 @@ window.saveClientBusiness = async function(clientId) {
         company: g('name'), businessName: g('name'), dba: g('dba'),
         businessType: g('type'), fein: g('fein'),
         website: g('website'), businessEmail: bizEmail,
-        glCode: g('glCode'), sicCode: g('sicCode'), naicsCode: g('naicsCode'),
+        dotNumber: g('dotNumber'),
     };
     // Update localStorage
     const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
@@ -1487,6 +1561,162 @@ window.saveClientBusiness = async function(clientId) {
     } catch(e) {
         if (typeof showNotification === 'function') showNotification('Saved locally (offline)', 'warning');
     }
+};
+
+// ── Client User Notes (manual notes with timestamps + attachments) ─────────
+window._pendingNoteFiles = {};
+
+window._noteFileSelected = function(clientId) {
+    const fileInput = document.getElementById('client-note-file-' + clientId);
+    const preview = document.getElementById('client-note-file-preview-' + clientId);
+    if (!fileInput || !preview) return;
+    const files = Array.from(fileInput.files);
+    window._pendingNoteFiles[clientId] = files;
+    if (!files.length) { preview.innerHTML = ''; return; }
+    preview.innerHTML = files.map((f, i) =>
+        '<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;padding:2px 8px;font-size:11px;color:#0369a1;margin-right:4px;">'
+        + '<i class="fas fa-file" style="font-size:10px;"></i>' + f.name
+        + '<button onclick="window._removeNoteFile(\'' + clientId + '\',' + i + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px;"><i class="fas fa-times"></i></button>'
+        + '</span>'
+    ).join('');
+};
+
+window._removeNoteFile = function(clientId, idx) {
+    const files = window._pendingNoteFiles[clientId] || [];
+    files.splice(idx, 1);
+    window._pendingNoteFiles[clientId] = files;
+    const preview = document.getElementById('client-note-file-preview-' + clientId);
+    const fileInput = document.getElementById('client-note-file-' + clientId);
+    if (fileInput) { fileInput.value = ''; }
+    if (!files.length) { if (preview) preview.innerHTML = ''; return; }
+    if (preview) {
+        preview.innerHTML = files.map((f, i) =>
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;padding:2px 8px;font-size:11px;color:#0369a1;margin-right:4px;">'
+            + '<i class="fas fa-file" style="font-size:10px;"></i>' + f.name
+            + '<button onclick="window._removeNoteFile(\'' + clientId + '\',' + i + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px;"><i class="fas fa-times"></i></button>'
+            + '</span>'
+        ).join('');
+    }
+};
+
+window.addClientNote = async function(clientId) {
+    const input = document.getElementById('client-note-input-' + clientId);
+    if (!input) return;
+    const text = input.value.trim();
+    const files = window._pendingNoteFiles[clientId] || [];
+    if (!text && !files.length) return;
+
+    // Convert files to base64 for storage
+    const attachments = [];
+    for (const file of files) {
+        const dataUrl = await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(file);
+        });
+        attachments.push({ name: file.name, size: file.size, type: file.type, dataUrl: dataUrl });
+    }
+
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const idx = clients.findIndex(c => String(c.id) === String(clientId));
+    if (idx === -1) return;
+
+    if (!Array.isArray(clients[idx].userNotes)) clients[idx].userNotes = [];
+    const note = { text: text, date: new Date().toISOString() };
+    if (attachments.length) note.attachments = attachments;
+    clients[idx].userNotes.unshift(note);
+    localStorage.setItem('insurance_clients', JSON.stringify(clients));
+    input.value = '';
+    window._pendingNoteFiles[clientId] = [];
+    const preview = document.getElementById('client-note-file-preview-' + clientId);
+    if (preview) preview.innerHTML = '';
+    const fileInput = document.getElementById('client-note-file-' + clientId);
+    if (fileInput) fileInput.value = '';
+
+    // Sync to server
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+        await fetch('/api/clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+            body: JSON.stringify(clients[idx])
+        });
+    } catch(e) { /* saved locally */ }
+
+    window.renderUserNotes(clientId, 0);
+};
+
+window.deleteClientNote = async function(clientId, noteIdx) {
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const idx = clients.findIndex(c => String(c.id) === String(clientId));
+    if (idx === -1 || !Array.isArray(clients[idx].userNotes)) return;
+
+    clients[idx].userNotes.splice(noteIdx, 1);
+    localStorage.setItem('insurance_clients', JSON.stringify(clients));
+
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+        await fetch('/api/clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+            body: JSON.stringify(clients[idx])
+        });
+    } catch(e) { /* saved locally */ }
+
+    window.renderUserNotes(clientId, 0);
+};
+
+window.paginateClientNotes = function(clientId, page) {
+    window.renderUserNotes(clientId, page);
+};
+
+window.renderUserNotes = function(clientId, page) {
+    const container = document.getElementById('client-user-notes-list-' + clientId);
+    if (!container) return;
+
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const client = clients.find(c => String(c.id) === String(clientId));
+    const userNotes = (client && Array.isArray(client.userNotes)) ? client.userNotes : [];
+    const perPage = 5;
+    const totalPages = Math.max(1, Math.ceil(userNotes.length / perPage));
+    if (page >= totalPages) page = totalPages - 1;
+    if (page < 0) page = 0;
+    const start = page * perPage;
+    const visible = userNotes.slice(start, start + perPage);
+
+    if (!userNotes.length) {
+        container.innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:12px;"><i class="fas fa-pen" style="margin-right:6px;opacity:0.4;"></i>No notes yet</div>';
+        return;
+    }
+
+    let html = visible.map((n, i) => {
+        const globalIdx = start + i;
+        const dateStr = n.date ? new Date(n.date).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+        const attHtml = (n.attachments && n.attachments.length) ? '<div style="margin-top:4px;">' + n.attachments.map(a =>
+            '<a href="' + a.dataUrl + '" download="' + (a.name||'file').replace(/"/g,'&quot;') + '" style="display:inline-flex;align-items:center;gap:3px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:3px;padding:1px 6px;font-size:10px;color:#0369a1;text-decoration:none;margin-right:4px;">'
+            + '<i class="fas fa-paperclip" style="font-size:9px;"></i>' + (a.name||'file') + '</a>'
+        ).join('') + '</div>' : '';
+        return '<div style="display:flex;justify-content:space-between;align-items:start;padding:8px 10px;border-bottom:1px solid #f3f4f6;' + (i%2===1?'background:#fafafa;':'') + '">'
+            + '<div style="flex:1;"><span style="color:#374151;font-size:13px;line-height:1.4;">' + (n.text||'').replace(/</g,'&lt;') + '</span>' + attHtml + '</div>'
+            + '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px;">'
+            + '<span style="color:#9ca3af;font-size:11px;white-space:nowrap;">' + dateStr + '</span>'
+            + '<button onclick="window.deleteClientNote(\'' + clientId + '\',' + globalIdx + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:2px;" title="Delete note"><i class="fas fa-trash-alt"></i></button>'
+            + '</div></div>';
+    }).join('');
+
+    if (totalPages > 1) {
+        html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:8px 10px;">';
+        if (page > 0) {
+            html += '<button onclick="window.paginateClientNotes(\'' + clientId + '\',' + (page-1) + ')" style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;"><i class="fas fa-chevron-left"></i></button>';
+        }
+        html += '<span style="color:#9ca3af;font-size:11px;">Page ' + (page+1) + ' of ' + totalPages + '</span>';
+        if (page < totalPages - 1) {
+            html += '<button onclick="window.paginateClientNotes(\'' + clientId + '\',' + (page+1) + ')" style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;"><i class="fas fa-chevron-right"></i></button>';
+        }
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
 };
 
 window.viewClientNote = function(clientId, idx) {
