@@ -18,20 +18,19 @@ const twilioSipDomains = [
 ];
 
 // Fix 1: Update default domain in SIP configuration UI
-function updateSIPDefaults() {
+async function updateSIPDefaults() {
     console.log('✅ Updating SIP default configuration...');
 
-    // Set the working domain as default
-    const workingConfig = {
-        username: 'Grant',
-        password: 'GrantCorp2006@',
-        domain: 'vanguard1.sip.us1.twilio.com', // Use the .us1 domain
-        proxy: 'sip.twilio.com',
-        callerId: '+13306369079'
-    };
-
-    // Update localStorage with corrected config
-    localStorage.setItem('sipConfig', JSON.stringify(workingConfig));
+    // Load SIP config from server
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt');
+        const resp = await fetch('/api/sip-config', { headers: { Authorization: 'Bearer ' + jwt } });
+        if (resp.ok) {
+            const cfg = await resp.json();
+            const workingConfig = { username: cfg.username, password: cfg.password, domain: cfg.domain || 'vanguard1.sip.us1.twilio.com', proxy: 'sip.twilio.com', callerId: cfg.callerId };
+            localStorage.setItem('sipConfig', JSON.stringify(workingConfig));
+        }
+    } catch (e) { console.warn('Could not load SIP config'); }
     console.log('📋 Updated localStorage sipConfig with working domain');
 
     return workingConfig;

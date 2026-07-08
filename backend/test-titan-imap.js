@@ -4,7 +4,7 @@ console.log('Testing Titan IMAP connection...');
 
 const imap = new Imap({
     user: 'contact@vigagency.com',
-    password: '25nickc124!',
+    password: process.env.GODADDY_VIG_PASSWORD || '',
     host: 'imap.titan.email',
     port: 993,
     tls: true,

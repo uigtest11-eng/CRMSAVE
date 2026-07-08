@@ -28,10 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ViciDial Configuration
-USERNAME = "6666"
-PASSWORD = "corp06"
-VICIDIAL_HOST = "204.13.233.29"
+# ViciDial Configuration from environment
+USERNAME = os.environ.get("VICIDIAL_USER", "")
+PASSWORD = os.environ.get("VICIDIAL_PASS", "")
+VICIDIAL_HOST = os.environ.get("VICIDIAL_HOST", "204.13.233.29")
 DB_PATH = "/var/www/vanguard/vanguard.db"
 
 class VanguardViciDialSelectiveSync:
@@ -555,6 +555,14 @@ class VanguardViciDialSelectiveSync:
                 logger.info(f"✅ Owner name extracted: '{parsed_info['owner_name']}'")
 
             # Extract stage selections and determine current stage - updated for new format
+            # Check for Custom stage first (Custom: followed by non-empty text)
+            custom_match = re.search(r'Custom:\s*(.+)', comments, re.IGNORECASE)
+            if custom_match and custom_match.group(1).strip():
+                custom_text = custom_match.group(1).strip()
+                parsed_info['stage_selections']['custom'] = True
+                parsed_info['lead_stage'] = custom_text
+                logger.info(f"✅ Custom stage detected: '{custom_text}'")
+
             stage_patterns = [
                 # Try new format first
                 ('new', r'New:\s*([Xx])', 'new'),
@@ -570,7 +578,9 @@ class VanguardViciDialSelectiveSync:
             for stage_key, pattern, stage_value in stage_patterns:
                 if re.search(pattern, comments, re.IGNORECASE):
                     parsed_info['stage_selections'][stage_key] = True
-                    parsed_info['lead_stage'] = stage_value
+                    # Only override if no custom stage was already set
+                    if 'custom' not in parsed_info['stage_selections']:
+                        parsed_info['lead_stage'] = stage_value
                     logger.info(f"✅ Stage detected: {stage_value}")
 
             # Extract callback information - updated for new format

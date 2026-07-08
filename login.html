@@ -393,7 +393,10 @@
         // Check if user is already logged in
         if (sessionStorage.getItem('vanguard_user')) {
             const params = new URLSearchParams(window.location.search);
-            window.location.href = params.get('redirect') || '/';
+            // Prevent open redirect — only allow same-origin paths
+            let redirect = params.get('redirect') || '/';
+            if (redirect.startsWith('//') || redirect.includes('://')) redirect = '/';
+            window.location.href = redirect;
         }
 
         // Remember this login portal so expired sessions redirect back here
@@ -457,7 +460,9 @@
                     }));
                     localStorage.setItem('vanguard_login_portal', 'vanguard');
                     const params = new URLSearchParams(window.location.search);
-                    window.location.href = params.get('redirect') || '/';
+                    let redirect = params.get('redirect') || '/';
+                    if (redirect.startsWith('//') || redirect.includes('://')) redirect = '/';
+                    window.location.href = redirect;
                 } else {
                     throw new Error(data.error || 'Invalid credentials');
                 }

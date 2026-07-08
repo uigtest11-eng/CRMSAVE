@@ -6,7 +6,7 @@
 async function loadPoliciesFromServer() {
     try {
         console.log('Loading policies from server...');
-        const response = await fetch('/api/policies?limit=1000'); // Get more policies
+        const response = await fetch('/api/policies?limit=1000&includeInactive=true'); // Get all policies including inactive
         if (response.ok) {
             const serverPolicies = await response.json();
             console.log(`Loaded ${serverPolicies.length} policies from server`);
@@ -21,6 +21,12 @@ async function loadPoliciesFromServer() {
                 const merged = { ...sp };
                 if (!sp.clientId && lp.clientId) { merged.clientId = lp.clientId; merged.clientName = lp.clientName || sp.clientName; }
                 if (!sp.contact?.['Owner Name'] && lp.contact?.['Owner Name']) merged.contact = { ...lp.contact, ...sp.contact };
+                // Preserve locally-saved coverage edits (CoveragesArray) when server lacks them
+                const lpCovArr = lp.coverage?.CoveragesArray;
+                const spCovArr = sp.coverage?.CoveragesArray;
+                if (lpCovArr && Object.keys(lpCovArr).length > 0 && (!spCovArr || Object.keys(spCovArr).length === 0)) {
+                    merged.coverage = { ...(sp.coverage || {}), CoveragesArray: lpCovArr };
+                }
                 return merged;
             });
             localStorage.setItem('insurance_policies', JSON.stringify(mergedPolicies));
@@ -644,6 +650,22 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(() => _directOpenPolicy(_polNum), 200);
             return; // skip normal loadContent below
         }
+    }
+
+    // Handle nested routes on initial page load (deep-link support)
+    const _clientPolicyMatch = _initialHash.match(/^#clients\/([^/]+)\/policy\/([^/]+)$/);
+    const _clientMatch = !_clientPolicyMatch && _initialHash.match(/^#clients\/([^/]+)$/);
+    const _policyMatch = !_clientPolicyMatch && !_clientMatch && _initialHash.match(/^#policies\/([^/]+)$/);
+
+    if (_clientPolicyMatch || _clientMatch || _policyMatch) {
+        const _dc = document.querySelector('.dashboard-content');
+        if (_dc) _dc.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:400px;"><i class="fas fa-spinner fa-spin" style="font-size:48px;color:#3b82f6;"></i></div>';
+        // Delay to let scripts initialize, then the hashchange handler will route
+        setTimeout(() => {
+            window.dispatchEvent(new HashChangeEvent('hashchange'));
+        }, 500);
+        updateActiveMenuItem(_initialHash);
+        return; // skip normal loadContent
     }
 
     // If not on dashboard, blank out the pre-rendered HTML immediately so
@@ -3278,8 +3300,8 @@ async function addCalendarEvent() {
     try {
         // Get API URL
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         // Save to server
         const response = await fetch(`${apiUrl}/api/calendar-events`, {
@@ -3399,8 +3421,8 @@ async function loadServerCalendarEvents() {
         }
 
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         console.log('🔍 LOADING: API URL for calendar events:', `${apiUrl}/api/calendar-events?userId=${encodeURIComponent(currentUser)}`);
         const response = await fetch(`${apiUrl}/api/calendar-events?userId=${encodeURIComponent(currentUser)}`);
@@ -3946,7 +3968,7 @@ async function dashCalAddEvent() {
         userId: currentUser
     };
 
-    const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:3001' : `http://${window.location.hostname}:3001`;
+    const apiUrl = window.location.hostname === 'localhost' ? 'https://localhost:3001' : `https://${window.location.hostname}:3001`;
 
     try {
         const response = await fetch(`${apiUrl}/api/calendar-events`, {
@@ -4077,8 +4099,8 @@ async function deleteEvent(eventId) {
 
                 // Delete from server
                 const apiUrl = window.location.hostname === 'localhost'
-                    ? 'http://localhost:3001'
-                    : `http://${window.location.hostname}:3001`;
+                    ? 'https://localhost:3001'
+                    : `https://${window.location.hostname}:3001`;
 
                 const response = await fetch(`${apiUrl}/api/calendar-events/${serverEventId}?userId=${encodeURIComponent(currentUser)}`, {
                     method: 'DELETE'
@@ -4269,8 +4291,8 @@ async function loadServerCallbacks() {
 
         // Construct proper API URL
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
         const response = await fetch(`${apiUrl}/api/callbacks`);
 
         if (!response.ok) {
@@ -4352,8 +4374,8 @@ async function rescheduleServerCallback(leadId, newDateTime) {
 
         // Construct proper API URL
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         const response = await fetch(`${apiUrl}/api/callbacks/reschedule`, {
             method: 'PUT',
@@ -4642,8 +4664,48 @@ function _directOpenPolicy(polNum) {
 
 // Handle browser back/forward navigation
 window.addEventListener('hashchange', function() {
+    // Skip if this hash change was set programmatically by viewClient/viewPolicy
+    if (window._skipHashRoute) {
+        window._skipHashRoute = false;
+        return;
+    }
+
     const hash = window.location.hash || '#dashboard';
     console.log('🔥 CRITICAL DEBUG: Hash changed to:', hash);
+
+    // === NESTED ROUTE: #clients/CLIENT_ID/policy/POLICY_ID ===
+    const clientPolicyMatch = hash.match(/^#clients\/([^/]+)\/policy\/([^/]+)$/);
+    if (clientPolicyMatch) {
+        const [, clientId, policyId] = clientPolicyMatch;
+        console.log('🔗 Route: client policy view |', clientId, '→', policyId);
+        window.currentViewingClientId = decodeURIComponent(clientId);
+        window._routeClientId = decodeURIComponent(clientId);
+        viewPolicy(decodeURIComponent(policyId));
+        updateActiveMenuItem('#clients');
+        return;
+    }
+
+    // === NESTED ROUTE: #clients/CLIENT_ID ===
+    const clientMatch = hash.match(/^#clients\/([^/]+)$/);
+    if (clientMatch) {
+        const clientId = decodeURIComponent(clientMatch[1]);
+        console.log('🔗 Route: client profile |', clientId);
+        window.currentViewingClientId = clientId;
+        viewClient(clientId);
+        updateActiveMenuItem('#clients');
+        return;
+    }
+
+    // === NESTED ROUTE: #policies/POLICY_ID ===
+    const policyMatch = hash.match(/^#policies\/([^/]+)$/);
+    if (policyMatch) {
+        const policyId = decodeURIComponent(policyMatch[1]);
+        console.log('🔗 Route: standalone policy view |', policyId);
+        window._routeClientId = null;
+        viewPolicy(policyId);
+        updateActiveMenuItem('#policies');
+        return;
+    }
 
     // Direct policy route: #policy/POLICYNUMBER → open policy profile directly
     if (hash.startsWith('#policy/')) {
@@ -4685,8 +4747,8 @@ window.addEventListener('hashchange', function() {
 
 // Update active menu item
 function updateActiveMenuItem(hash) {
-    // Normalize hash (handle empty or missing hash)
-    const normalizedHash = hash || '#dashboard';
+    // Normalize hash: #clients/ID/policy/X → #clients, #policies/ID → #policies
+    const normalizedHash = (hash || '#dashboard').replace(/^(#(?:clients|policies))\/.*$/, '$1');
 
     // Remove active class from all menu items
     document.querySelectorAll('.sidebar li').forEach(li => {
@@ -5064,7 +5126,10 @@ function loadContent(section) {
         dashboardContent.style.display = 'block';
     }
 
-    switch(section) {
+    // Normalize nested routes for the switch: #clients/ID → #clients, #policies/ID → #policies
+    const _baseSection = section.replace(/^(#(?:clients|policies))\/.*$/, '$1');
+
+    switch(_baseSection) {
         case '':
         case '#':
         case '#dashboard':
@@ -5565,7 +5630,7 @@ async function saveClient() {
     // IMPORTANT: Also save to server to prevent data loss during syncs
     try {
         console.log('💾 Saving client to server...', newClient);
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         const response = await fetch(`${API_URL}/api/clients`, {
             method: 'POST',
             headers: {
@@ -7138,8 +7203,8 @@ async function syncTodosToBackend() {
         console.log('🔍 DEBUG SYNC: Filtered todos with dates:', todosWithDates);
 
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         const response = await fetch(`${apiUrl}/api/sync-todos`, {
             method: 'POST',
@@ -7247,15 +7312,49 @@ async function loadReminderStats(retryCount = 0) {
         }
     });
 
-    // Policies needing updates (expired or expiring within 7 days)
-    const sevenDaysFromNow = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000));
-    const policiesNeedingUpdate = policies.filter(policy => {
-        if (policy.expirationDate) {
-            const expiryDate = new Date(policy.expirationDate);
-            return expiryDate <= sevenDaysFromNow;
+    // IVANS: replicate "Sync Recent Policies" logic — fetch 4 most recent Processed policy files
+    let ivansUpdateCount = 0;
+    let ivansNewCount = 0;
+    try {
+        const _jnRes = await fetch('/api/jenesis/downloads');
+        if (_jnRes.ok) {
+            const _jnData = await _jnRes.json();
+            const _jnRows = (_jnData.rows || []).map(r => ({
+                jobId: r.id, type: (r.fileType || '').trim(), statusText: r.status || ''
+            }));
+            const _policyRows = _jnRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
+            const _toFetch = _policyRows.slice(0, 4);
+
+            let _allParsed = [];
+            for (const row of _toFetch) {
+                try {
+                    const _fRes = await fetch(`/api/jenesis/file/${row.jobId}`);
+                    if (_fRes.ok) {
+                        const _fData = await _fRes.json();
+                        if (_fData.policies && _fData.policies.length) _allParsed = _allParsed.concat(_fData.policies);
+                    }
+                } catch(e) { /* skip failed file */ }
+            }
+
+            // Deduplicate by policy number + insured name
+            const _seen = new Set();
+            const _deduped = _allParsed.filter(p => {
+                const key = ((p.policyNumber || '').replace(/\s/g, '').toLowerCase()) + '|' + ((p.insuredName || '').toLowerCase().trim());
+                if (!key || key === '|') return true;
+                if (_seen.has(key)) return false;
+                _seen.add(key); return true;
+            });
+
+            // Compare against existing policies
+            const _existingNums = new Set(policies.map(p => (p.policyNumber || '').replace(/\s/g, '').toLowerCase()).filter(Boolean));
+            _deduped.forEach(p => {
+                const pNum = (p.policyNumber || '').replace(/\s/g, '').toLowerCase();
+                if (pNum && _existingNums.has(pNum)) ivansUpdateCount++;
+                else ivansNewCount++;
+            });
         }
-        return false;
-    }).length;
+    } catch(e) { console.warn('Could not fetch IVANS data for dashboard:', e.message); }
+    const policiesToSync = ivansUpdateCount + ivansNewCount;
 
     // New COI Emails (fetch from backend)
     let newCoiEmails = 0;
@@ -7309,16 +7408,20 @@ async function loadReminderStats(retryCount = 0) {
                 </div>
             </div>
 
-            <div style="background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%); padding: 15px; border-radius: 8px; border-left: 4px solid #ef4444; cursor: pointer; transition: transform 0.2s;"
-                 onclick="navigateToTab('#policies')"
+            <div style="background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%); padding: 15px; border-radius: 8px; border-left: 4px solid #6366f1; cursor: pointer; transition: transform 0.2s;"
+                 onclick="navigateToTab('#downloads'); setTimeout(() => { const btn = document.getElementById('jn-import-recent-btn'); if (btn) btn.click(); }, 600);"
                  onmouseover="this.style.transform='translateY(-2px)'"
                  onmouseout="this.style.transform='translateY(0)'">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <p style="margin: 0; font-size: 0.8rem; color: #dc2626; font-weight: 500;">Policies to Update</p>
-                        <p style="margin: 5px 0 0 0; font-size: 1.4rem; font-weight: 700; color: #dc2626;">${policiesNeedingUpdate}</p>
+                        <p style="margin: 0; font-size: 0.8rem; color: #4338ca; font-weight: 500;">Policies to Sync</p>
+                        <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 5px;">
+                            <span style="font-size: 1.4rem; font-weight: 700; color: #4338ca;">${policiesToSync}</span>
+                            ${ivansUpdateCount ? `<span style="font-size: 0.7rem; font-weight: 600; color: #1e40af;">${ivansUpdateCount} update${ivansUpdateCount !== 1 ? 's' : ''}</span>` : ''}
+                            ${ivansNewCount ? `<span style="font-size: 0.7rem; font-weight: 600; color: #15803d;">${ivansNewCount} new</span>` : ''}
+                        </div>
                     </div>
-                    <i class="fas fa-exclamation-triangle" style="font-size: 1.2rem; color: #ef4444;"></i>
+                    <i class="fas fa-cloud-download-alt" style="font-size: 1.2rem; color: #6366f1;"></i>
                 </div>
             </div>
 
@@ -7341,7 +7444,9 @@ async function loadReminderStats(retryCount = 0) {
         upcomingRenewals60d,
         newClientsUnsent,
         upcomingBirthdays30d,
-        policiesNeedingUpdate,
+        policiesToSync,
+        ivansUpdateCount,
+        ivansNewCount,
         newCoiEmails
     });
 }
@@ -7836,10 +7941,18 @@ function generateSimpleLeadRows(leads) {
         let rowClass = '';
 
         // Get TO DO text to determine if highlighting is needed
-        console.log(`🎯 TABLE GEN: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
-        const todoText = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) :
-                         (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead'));
-        console.log(`🎯 TABLE GEN: Todo text result for lead ${lead.id}: "${todoText}"`);
+        // CSR users: use csrTodo field instead of stage-based getNextAction
+        const _csrRowSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const _isCsrRow = (_csrRowSess.role || '') === 'csr';
+        let todoText;
+        if (_isCsrRow) {
+            todoText = lead.csrTodoDone ? '' : (lead.csrTodo || '').trim();
+        } else {
+            console.log(`🎯 TABLE GEN: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
+            todoText = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) :
+                             (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead'));
+            console.log(`🎯 TABLE GEN: Todo text result for lead ${lead.id}: "${todoText}"`);
+        }
 
         // Apply timestamp highlighting to leads EXCEPT closed leads
         // Closed leads should not be tracked by timestamps
@@ -7923,10 +8036,11 @@ function generateSimpleLeadRows(leads) {
         // OVERRIDE: Apply green highlighting for empty TODOs (takes priority over timestamp colors but not closed)
         else if (!todoText || todoText.trim() === '') {
             // CRITICAL FIX: Check for overdue callbacks before applying green highlighting
+            // CSR users: skip callback check entirely — callbacks are not CSR to-dos
             let hasOverdueCallback = false;
 
             // Direct localStorage check for overdue callbacks (independent of external functions)
-            if (lead && lead.id) {
+            if (!_isCsrRow && lead && lead.id) {
                 try {
                     const callbacks = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
                     const leadCallbacks = callbacks[lead.id] || [];
@@ -7961,6 +8075,7 @@ function generateSimpleLeadRows(leads) {
             let totalMinutes = 0;
             lead.reachOut.callLogs.forEach(log => {
                 if (log.duration) {
+                    if (typeof log.duration !== 'string') log.duration = String(log.duration);
                     let logMinutes = 0;
                     if (log.duration === '< 1 min') {
                         logMinutes = 0.5;
@@ -8021,11 +8136,28 @@ function generateSimpleLeadRows(leads) {
                 <td class="lead-name" style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                     <strong style="cursor: pointer; ${getLeadNameStyling(lead)}; text-decoration: underline; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" onclick="console.log('🔍 LEAD NAME CLICKED: ID=${lead.id}, Name=${lead.name}'); viewLead('${lead.id}')" title="${lead.name}" data-debug-lead-id="${lead.id}">${displayName}</strong>
                 </td>
-                <td style="width: 28px; padding: 4px; text-align: center;">
-                    ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0)))
-                        ? `<span style="width: 22px; height: 22px; border-radius: 50%; background: #10b981; color: white; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; pointer-events: none;" title="Documentation emailed"><i class="fas fa-check"></i></span>`
-                        : `<span style="width: 22px; height: 22px; border-radius: 50%; background: #d1d5db; color: #9ca3af; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; pointer-events: none;"><i class="fas fa-times"></i></span>`
-                    }
+                <td style="width: 56px; padding: 4px 2px; text-align: center;">
+                    <div style="display:flex; gap:3px; justify-content:center; align-items:center;">
+                        ${(() => {
+                            const sentToMarkets = lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0));
+                            const coiDone = !!lead.coiReceived;
+                            const aorDone = !!lead.aorCompleted;
+                            // Sent to Markets circle — GREEN if sent, grey X if not, not clickable
+                            const mktCircle = sentToMarkets
+                                ? '<span style="width:22px;height:22px;border-radius:50%;background:#10b981;color:white;font-size:11px;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;" title="Sent to Markets"><i class="fas fa-check"></i></span>'
+                                : '<span style="width:22px;height:22px;border-radius:50%;background:#d1d5db;color:#9ca3af;font-size:11px;display:inline-flex;align-items:center;justify-content:center;pointer-events:none;" title="Not sent to Markets"><i class="fas fa-times"></i></span>';
+                            // COI/AOR combined circle — purple if AOR (dominant), blue if COI only, grey if neither
+                            let coiAorCircle;
+                            if (aorDone) {
+                                coiAorCircle = '<span onclick="toggleLeadIndicator(\'' + lead.id + '\',\'aorCompleted\',false)" style="width:22px;height:22px;border-radius:50%;background:#8b5cf6;color:white;font-size:11px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;" title="AOR Completed — click to undo"><i class="fas fa-check"></i></span>';
+                            } else if (coiDone) {
+                                coiAorCircle = '<span onclick="toggleLeadIndicator(\'' + lead.id + '\',\'coiReceived\',false)" style="width:22px;height:22px;border-radius:50%;background:#3b82f6;color:white;font-size:11px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;" title="COI Received — click to undo"><i class="fas fa-check"></i></span>';
+                            } else {
+                                coiAorCircle = '<span onclick="toggleLeadIndicator(\'' + lead.id + '\',\'coiReceived\',true)" style="width:22px;height:22px;border-radius:50%;background:#d1d5db;color:#9ca3af;font-size:11px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;" title="Click to mark COI Received"><i class="fas fa-times"></i></span>';
+                            }
+                            return mktCircle + coiAorCircle;
+                        })()}
+                    </div>
                 </td>
                 <td>
                     <div class="contact-info" style="display: flex; gap: 10px; align-items: center;">
@@ -8042,6 +8174,12 @@ function generateSimpleLeadRows(leads) {
                 <td>${getStageHtml(lead.stage, lead)}</td>
                 <td>
                     ${(() => {
+                        // CSR users see only the CSR To Do text
+                        const _csrSess1 = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                        if ((_csrSess1.role || '') === 'csr') {
+                            const csrText = lead.csrTodoDone ? '' : (lead.csrTodo || '');
+                            return csrText ? `<div style="font-weight: bold; color: #0284c7;">${csrText}</div>` : '';
+                        }
                         console.log(`🎯 TO DO CELL: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
                         let result = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) : (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead')) || '';
                         // Check for overdue callbacks - override To Do with "Reach out" if one exists
@@ -8332,6 +8470,168 @@ function generateSimpleLeadRowsWithDividers(leads) {
 window.generateSimpleLeadRows = generateSimpleLeadRows;
 window.generateSimpleLeadRowsWithDividers = generateSimpleLeadRowsWithDividers;
 
+// Toggle COI Received / AOR Completed indicator on a lead
+window.toggleLeadIndicator = async function(leadId, field, value) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead[field] = value;
+    lead.updatedAt = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+    // Persist to server
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'https://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save indicator to server:', e); }
+    // Re-render just the row in-place
+    if (typeof updateLeadRowInTable === 'function') {
+        updateLeadRowInTable(leadId, lead);
+    } else {
+        // Fallback: full table re-render
+        const tbody = document.getElementById('leadsTableBody');
+        if (tbody && window.currentActiveLeads) {
+            const idx = window.currentActiveLeads.findIndex(l => l.id === leadId);
+            if (idx !== -1) window.currentActiveLeads[idx] = lead;
+            tbody.innerHTML = generateSimpleLeadRowsWithDividers(window.currentActiveLeads);
+        }
+    }
+};
+
+// Save CSR To Do notes on a lead
+window.saveCsrTodo = async function(leadId, value) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead.csrTodo = value;
+    // Reset done state when new text is assigned
+    if (value && value.trim()) {
+        lead.csrTodoDone = false;
+        lead.csrTodoOriginal = '';
+    }
+    lead.updatedAt = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+    // Sync in-memory lead arrays
+    [window.allLeads, window.filteredLeads].forEach(arr => {
+        if (!arr) return;
+        const m = arr.find(l => String(l.id) === String(leadId));
+        if (m) { m.csrTodo = lead.csrTodo; m.csrTodoDone = lead.csrTodoDone; m.csrTodoOriginal = lead.csrTodoOriginal; }
+    });
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'https://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save CSR todo to server:', e); }
+};
+
+// Toggle CSR To Do done status (CSR checks off a task)
+window.toggleCsrTodoDone = async function(leadId, done) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead.csrTodoDone = done;
+    if (done) {
+        // Clear the csrTodo text so the table To Do column becomes empty -> green row
+        lead.csrTodoOriginal = lead.csrTodo || '';
+        lead.csrTodo = '';
+    } else {
+        // Restore original text if unchecking
+        if (lead.csrTodoOriginal) {
+            lead.csrTodo = lead.csrTodoOriginal;
+        }
+    }
+    lead.updatedAt = new Date().toISOString();
+    lead.lastModified = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+    // Update the profile UI immediately
+    const textEl = document.getElementById('csr-todo-text-' + leadId);
+    if (textEl) {
+        if (done) {
+            textEl.style.textDecoration = 'line-through';
+            textEl.style.color = '#9ca3af';
+        } else {
+            textEl.style.textDecoration = 'none';
+            textEl.style.color = '#1e3a5f';
+            textEl.textContent = lead.csrTodo || '';
+        }
+    }
+    // Update the container border/bg
+    const cb = document.getElementById('csr-done-cb-' + leadId);
+    if (cb) {
+        const container = cb.parentElement;
+        if (container) {
+            container.style.borderColor = done ? '#86efac' : '#7dd3fc';
+            container.style.background = done ? '#f0fdf4' : '#f0f9ff';
+        }
+    }
+
+    // Sync to server
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'https://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save CSR todo done to server:', e); }
+
+    // Update the in-memory leads arrays so table re-renders use fresh data
+    if (window.allLeads) {
+        const memLead = window.allLeads.find(l => String(l.id) === String(leadId));
+        if (memLead) {
+            memLead.csrTodo = lead.csrTodo;
+            memLead.csrTodoDone = lead.csrTodoDone;
+            memLead.csrTodoOriginal = lead.csrTodoOriginal;
+        }
+    }
+    if (window.filteredLeads) {
+        const memLead2 = window.filteredLeads.find(l => String(l.id) === String(leadId));
+        if (memLead2) {
+            memLead2.csrTodo = lead.csrTodo;
+            memLead2.csrTodoDone = lead.csrTodoDone;
+            memLead2.csrTodoOriginal = lead.csrTodoOriginal;
+        }
+    }
+
+    // Immediately update the table To Do cell
+    const tableBody = document.getElementById('leadsTableBody');
+    if (tableBody) {
+        tableBody.querySelectorAll('tr').forEach(row => {
+            const cbx = row.querySelector('.lead-checkbox');
+            if (cbx && String(cbx.value) === String(leadId)) {
+                const cells = row.querySelectorAll('td');
+                const todoCell = cells[7];
+                if (todoCell) {
+                    todoCell.innerHTML = done ? '' : (lead.csrTodo ? '<div style="font-weight: bold; color: #0284c7;">' + lead.csrTodo + '</div>' : '');
+                }
+                // Update row highlighting to green if done
+                if (done) {
+                    row.setAttribute('style', 'background-color: rgba(16, 185, 129, 0.2) !important; border-left: 4px solid #10b981 !important; border-right: 2px solid #10b981 !important;');
+                    row.className = row.className.replace(/timestamp-\w+|force-persistent-highlight/g, '').trim() + ' reach-out-complete';
+                }
+            }
+        });
+    }
+
+    // Also refresh the table for a full re-render
+    if (typeof refreshLeadsTable === 'function') {
+        setTimeout(refreshLeadsTable, 300);
+    }
+};
+
 // Bulk select all leads belonging to a specific agent group
 window.toggleAgentLeadSelection = function(headerCheckbox, agentKey) {
     const checked = headerCheckbox.checked;
@@ -8471,6 +8771,26 @@ async function loadLeadsView() {
         if (typeof window.performLeadCleanup === 'function') {
             window.performLeadCleanup();
         }
+
+        // Sanitize call log durations — ensure they are strings (fixes .includes crash)
+        try {
+            const _sLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            let _sDirty = false;
+            _sLeads.forEach(function(l) {
+                if (l && l.reachOut && Array.isArray(l.reachOut.callLogs)) {
+                    l.reachOut.callLogs.forEach(function(cl) {
+                        if (cl.duration != null && typeof cl.duration !== 'string') {
+                            cl.duration = String(cl.duration);
+                            _sDirty = true;
+                        }
+                    });
+                }
+            });
+            if (_sDirty) {
+                localStorage.setItem('insurance_leads', JSON.stringify(_sLeads));
+                console.log('🔧 Sanitized non-string call log durations');
+            }
+        } catch(e) { console.warn('Duration sanitize error:', e); }
 
         // Run deduplication first to clean up any duplicates
         if (window.deduplicateData) {
@@ -9042,6 +9362,7 @@ async function loadLeadsView() {
                                         let totalMinutes = 0;
                                         lead.reachOut.callLogs.forEach(log => {
                                             if (log.duration) {
+                                                if (typeof log.duration !== 'string') log.duration = String(log.duration);
                                                 let logMinutes = 0;
                                                 if (log.duration === '< 1 min') {
                                                     logMinutes = 0.5;
@@ -9089,6 +9410,7 @@ async function loadLeadsView() {
                                         let totalMinutes = 0;
                                         lead.reachOut.callLogs.forEach(log => {
                                             if (log.duration) {
+                                                if (typeof log.duration !== 'string') log.duration = String(log.duration);
                                                 let logMinutes = 0;
                                                 if (log.duration === '< 1 min') {
                                                     logMinutes = 0.5;
@@ -9177,6 +9499,10 @@ async function loadLeadsView() {
 
                             console.log('To Do Tasks - Current user:', currentUser);
 
+                            // Check if CSR user
+                            const _todoUserData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                            const _isCsrTodo = (_todoUserData.role || '') === 'csr';
+
                             // Get ONLY the leads that are currently displayed in the table (visible leads)
                             // This ensures the counter matches what the user can actually see
                             const visibleLeads = leads.filter(lead => {
@@ -9199,6 +9525,17 @@ async function loadLeadsView() {
 
                             // Count To Do tasks from visible leads only
                             let todoCount = 0;
+
+                            // CSR users: count leads with non-empty csrTodo
+                            if (_isCsrTodo) {
+                                visibleLeads.forEach(lead => {
+                                    if (lead.csrTodo && lead.csrTodo.trim()) {
+                                        todoCount++;
+                                    }
+                                });
+                                console.log(`Total CSR To Do tasks: ${todoCount}`);
+                                return todoCount;
+                            }
 
                             visibleLeads.forEach(lead => {
                                 // Only count if assigned to current user AND not closed
@@ -9331,7 +9668,7 @@ async function loadLeadsView() {
                                 <input type="checkbox" id="selectAllLeads" onclick="toggleAllLeads()">
                             </th>
                             <th>Name</th>
-                            <th style="width: 28px;"></th>
+                            <th style="width: 56px;"></th>
                             <th>Contact</th>
                             <th>Value Level</th>
                             <th class="sortable" onclick="sortLeads('premium')" data-sort="premium">
@@ -9384,7 +9721,7 @@ async function loadLeadsView() {
                     <tbody id="leadsTableBody">
                         ${(() => {
                             const _leadsForTable = (window.myLeadsOnlyActive && currentUser)
-                                ? leads.filter(l => (l.assignedTo || '').toLowerCase() === currentUser)
+                                ? leads.filter(l => (l.assignedTo || '').toLowerCase() === currentUser.toLowerCase())
                                 : leads;
                             return generateSimpleLeadRowsWithDividers(_leadsForTable);
                         })()}
@@ -9638,8 +9975,8 @@ async function saveNewLead(event) {
     // Save to server first
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
-            : `http://${window.location.hostname}:3001`;
+            ? 'https://localhost:3001'
+            : `https://${window.location.hostname}:3001`;
 
         const response = await fetch(`${apiUrl}/api/leads`, {
             method: 'POST',
@@ -9958,7 +10295,7 @@ function editLead(leadId) {
 async function saveLeadToServer(lead) {
     try {
         const apiUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001'
+            ? 'https://localhost:3001'
             : `${window.location.protocol}//${window.location.host}`;
 
         // Ensure the lead has an updatedAt timestamp
@@ -11199,8 +11536,8 @@ async function deleteLead(leadId) {
         // Delete from server first
         try {
             const apiUrl = window.location.hostname === 'localhost'
-                ? 'http://localhost:3001'
-                : `http://${window.location.hostname}:3001`;
+                ? 'https://localhost:3001'
+                : `https://${window.location.hostname}:3001`;
 
             const response = await fetch(`${apiUrl}/api/leads/${leadId}`, {
                 method: 'DELETE',
@@ -11662,11 +11999,14 @@ async function generateClientRows(page = 1) {
                           client.producer ||
                           'Grant'; // Default to Grant if no assignment
 
+        const personName = client.name || '';
+        const bizName = client.businessName || client.companyName || '';
+
         return `
-            <tr>
+            <tr data-person-name="${personName.replace(/"/g, '&quot;')}" data-biz-name="${bizName.replace(/"/g, '&quot;')}">
                 <td class="client-name">
                     <div class="client-avatar">${initials}</div>
-                    <span>${client.name}</span>
+                    <span class="client-display-name">${personName}</span>
                 </td>
                 <td>${client.phone}</td>
                 <td>${client.email}</td>
@@ -11742,6 +12082,10 @@ async function loadClientsView() {
                         <option value="Hunter">Hunter</option>
                         <option value="Maureen" style="color: #2563eb;">MAUREEN</option>`}
                     </select>` : ''}
+                    <select class="filter-select" id="clientNameDisplayFilter" onchange="applyClientNameDisplay()" style="min-width:160px;">
+                        <option value="person">Person's Name</option>
+                        <option value="business">Business Name</option>
+                    </select>
                     <button class="btn-filter" id="missing-data-btn" onclick="toggleMissingDataFilter()" style="transition:0.2s;">
                         <i class="fas fa-exclamation-triangle"></i> Missing Data
                     </button>
@@ -13070,6 +13414,7 @@ function renderMonthView(policies, isAdmin = false) {
                         </div>
                         <div class="renewal-footer">
                             ${isAdmin ? `<span class="premium">$${(policy.premium || 0).toLocaleString()}/yr</span>` : ''}
+                            <span class="agent-badge" title="Assigned to ${policy.agent || policy.assignedTo || 'Unassigned'}">${policy.agent || policy.assignedTo || 'Unassigned'}</span>
                             <span class="status-badge ${policy.status || ''}">${(policy.status || 'pending').replace('-', ' ')}</span>
                         </div>
                     </div>
@@ -13114,6 +13459,7 @@ function renderThreeMonthView(policies, isAdmin = false) {
                         </div>
                         <div class="renewal-footer">
                             ${isAdmin ? `<span class="premium">$${(policy.premium || 0).toLocaleString()}/yr</span>` : ''}
+                            <span class="agent-badge" title="Assigned to ${policy.agent || policy.assignedTo || 'Unassigned'}">${policy.agent || policy.assignedTo || 'Unassigned'}</span>
                             <span class="status-badge ${policy.status || ''}">${(policy.status || 'pending').replace('-', ' ')}</span>
                         </div>
                     </div>
@@ -13547,8 +13893,8 @@ function getDaysRemaining(date) {
 
 function getRenewalTasksApiUrl(policyId) {
     const base = window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : `http://${window.location.hostname}:3001`;
+        ? 'https://localhost:3001'
+        : `https://${window.location.hostname}:3001`;
     return `${base}/api/renewal-tasks/${policyId}`;
 }
 
@@ -13773,7 +14119,7 @@ function highlightPolicyAsCompleted() {
     // Store completion status to server using policyId as key
     const completionApiUrl = window.location.hostname === 'localhost'
         ? 'http://localhost:3001/api/renewal-completions'
-        : `http://${window.location.hostname}:3001/api/renewal-completions`;
+        : `https://${window.location.hostname}:3001/api/renewal-completions`;
     fetch(completionApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -13820,7 +14166,7 @@ function removePolicyHighlight() {
     // Remove completion status from server using policyId as key
     const completionDeleteUrl = window.location.hostname === 'localhost'
         ? `http://localhost:3001/api/renewal-completions/${currentPolicyId}`
-        : `http://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
+        : `https://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
     fetch(completionDeleteUrl, { method: 'DELETE' })
         .then(r => { if (r.ok) console.log('✅ Removed renewal completion from server'); })
         .catch(e => console.error('Error removing completion:', e));
@@ -13834,7 +14180,7 @@ async function restoreRenewalHighlighting() {
     try {
         const apiUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3001/api/renewal-completions'
-            : `http://${window.location.hostname}:3001/api/renewal-completions`;
+            : `https://${window.location.hostname}:3001/api/renewal-completions`;
         const response = await fetch(apiUrl);
         if (response.ok) {
             completions = await response.json();
@@ -13863,7 +14209,7 @@ async function restoreRenewalHighlighting() {
                 // Migrate to server so localStorage is no longer needed
                 const migrateUrl = window.location.hostname === 'localhost'
                     ? 'http://localhost:3001/api/renewal-completions'
-                    : `http://${window.location.hostname}:3001/api/renewal-completions`;
+                    : `https://${window.location.hostname}:3001/api/renewal-completions`;
                 fetch(migrateUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -14294,6 +14640,17 @@ function addRenewalStyles() {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 8px;
+        }
+
+        .agent-badge {
+            font-size: 11px;
+            font-weight: 600;
+            color: #4b5563;
+            background: #e5e7eb;
+            padding: 2px 8px;
+            border-radius: 10px;
+            white-space: nowrap;
         }
         
         .premium {
@@ -16767,7 +17124,7 @@ async function fetchLeadsFromServer() {
 
         const apiUrl = window.location.protocol === 'https:'
             ? `https://${window.location.hostname}/api`
-            : `http://${window.location.hostname}:3001/api`;
+            : `https://${window.location.hostname}:3001/api`;
 
         console.log('🌐 DEBUG: API URL:', apiUrl + '/leads');
         const response = await fetch(apiUrl + '/leads');
@@ -21194,11 +21551,18 @@ async function viewClient(id) {
     // Store the current client ID globally for other functions to use
     window.currentViewingClientId = id;
 
+    // Update URL hash for deep-linking (use flag to prevent hashchange re-trigger)
+    const targetHash = '#clients/' + encodeURIComponent(id);
+    if (window.location.hash !== targetHash) {
+        window._skipHashRoute = true;
+        window.location.hash = targetHash;
+    }
+
     // Get actual client data from API first, then localStorage as fallback
     let client = null;
 
     try {
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         console.log('📡 Fetching clients from:', `${API_URL}/api/clients`);
         const response = await fetch(`${API_URL}/api/clients`, {
             headers: {
@@ -21262,7 +21626,7 @@ async function viewClient(id) {
     // Get all policies for this client - fetch from API first, fallback to localStorage
     let allPolicies = [];
     try {
-        const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         const polRes = await fetch(`${API_URL}/api/policies?includeInactive=true`, {
             headers: { 'Cache-Control': 'no-cache', 'Bypass-Tunnel-Reminder': 'true' }
         });
@@ -21277,18 +21641,77 @@ async function viewClient(id) {
     }
 
     // Filter policies that belong to this client
-    // Check by client ID, client name, or insured name
+    // Check by client ID, client name, business name, email, phone, address
+    const _normStr = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+    const _normPhone = ph => (ph || '').replace(/\D/g, '');
+    const clientNameNorm = _normStr(client.name);
+    const clientBizNorm  = _normStr(client.businessName || client.companyName || '');
+    const clientEmailNorm = (client.email || '').toLowerCase().trim();
+    const clientPhoneNorm = _normPhone(client.phone);
+    const clientAddr = client.addresses && client.addresses[0];
+    const clientAddrNorm = clientAddr ? _normStr((clientAddr.address || clientAddr.street || '') + (clientAddr.zip || clientAddr.zipCode || '')) : '';
+
+    // Collect person names from client.people array
+    const clientPeopleNames = (client.people || []).map(p => _normStr((p.firstName || '') + ' ' + (p.lastName || '') || p.name || ''));
+
     const clientPolicies = allPolicies.filter(policy => {
-        // Check if policy has a clientId that matches
+        // 1. Explicit clientId link
         if (policy.clientId && String(policy.clientId) === String(id)) return true;
-        
-        // Check if the insured name matches the client name
-        const insuredName = policy.insured?.['Name/Business Name'] || 
-                           policy.insured?.['Primary Named Insured'] || 
-                           policy.insuredName;
-        if (insuredName && client.name && insuredName.toLowerCase() === client.name.toLowerCase()) return true;
-        
-        // Check if policy is in the client's policies array (by ID or policy number)
+
+        // Gather all name variants from the policy
+        const polNames = [
+            policy.insured?.['Name/Business Name'],
+            policy.insured?.['Primary Named Insured'],
+            policy.insured?.['Business Name'],
+            policy.insured?.['Full Name'],
+            policy.insuredName,
+            policy.clientName,
+            policy.contact?.['Owner Name'],
+            policy.contact?.['Business Name']
+        ].filter(Boolean);
+
+        // 2. Exact name match (person name OR business name)
+        for (const pn of polNames) {
+            const pnNorm = _normStr(pn);
+            if (pnNorm && clientNameNorm && pnNorm === clientNameNorm) return true;
+            if (pnNorm && clientBizNorm && pnNorm === clientBizNorm) return true;
+            // Also check against people names
+            if (pnNorm && clientPeopleNames.some(cn => cn && cn === pnNorm)) return true;
+        }
+
+        // 3. Business name contains or is contained (handles "LOPEZ TRUCKING COMPANY LLC" vs "Lopez Trucking Company")
+        if (clientBizNorm && clientBizNorm.length >= 4) {
+            for (const pn of polNames) {
+                const pnNorm = _normStr(pn);
+                if (pnNorm && (pnNorm.includes(clientBizNorm) || clientBizNorm.includes(pnNorm))) return true;
+            }
+        }
+
+        // 4. Match by email
+        const polEmail = (policy.contact?.['Email'] || policy.contact?.['email'] || policy.insured?.['Email'] || '').toLowerCase().trim();
+        if (clientEmailNorm && polEmail && clientEmailNorm === polEmail) return true;
+
+        // 5. Match by phone
+        const polPhone = _normPhone(policy.contact?.['Phone'] || policy.contact?.['phone'] || policy.insured?.['Phone'] || '');
+        if (clientPhoneNorm && clientPhoneNorm.length >= 10 && polPhone && polPhone.length >= 10 && clientPhoneNorm === polPhone) return true;
+
+        // 6. Match by garaging address zip + name overlap (secondary confirmation)
+        if (clientAddrNorm && clientAddrNorm.length >= 5) {
+            const vehicles = policy.vehicles || [];
+            for (const v of vehicles) {
+                const vZip = (v.garageZip || v.garagingZip || '').trim();
+                if (vZip && clientAddr && (clientAddr.zip || clientAddr.zipCode || '').trim() === vZip) {
+                    // Zip matches — check for at least partial name overlap
+                    for (const pn of polNames) {
+                        const pnNorm = _normStr(pn);
+                        if (pnNorm && clientNameNorm && (pnNorm.includes(clientNameNorm) || clientNameNorm.includes(pnNorm))) return true;
+                        if (pnNorm && clientBizNorm && (pnNorm.includes(clientBizNorm) || clientBizNorm.includes(pnNorm))) return true;
+                    }
+                }
+            }
+        }
+
+        // 7. Check client.policies array (legacy)
         if (client.policies && Array.isArray(client.policies)) {
             return client.policies.some(p => {
                 if (typeof p === 'string') {
@@ -21300,7 +21723,7 @@ async function viewClient(id) {
                 return false;
             });
         }
-        
+
         return false;
     });
     
@@ -23209,6 +23632,23 @@ function filterClients() {
     });
 }
 
+function applyClientNameDisplay() {
+    const mode = document.getElementById('clientNameDisplayFilter')?.value || 'person';
+    const tbody = document.getElementById('clientsTableBody');
+    if (!tbody) return;
+    tbody.querySelectorAll('tr[data-person-name]').forEach(row => {
+        const personName = row.getAttribute('data-person-name') || '';
+        const bizName = row.getAttribute('data-biz-name') || '';
+        const span = row.querySelector('.client-display-name');
+        if (!span) return;
+        if (mode === 'business') {
+            span.textContent = bizName || personName;
+        } else {
+            span.textContent = personName || bizName;
+        }
+    });
+}
+
 // Policy Management Functions
 async function viewPolicy(policyId) {
     console.log('Viewing policy:', policyId);
@@ -23219,13 +23659,18 @@ async function viewPolicy(policyId) {
         return policies.find(p => String(p.id) === idStr || String(p.policyNumber) === idStr) || null;
     }
 
-    // 1. Try localStorage first (fast path for already-loaded sessions)
-    let policy = _findInList(JSON.parse(localStorage.getItem('insurance_policies') || '[]'));
+    // 1. Try localStorage first — use raw getItem to bypass performance-optimization.js cache
+    // which can return stale data after coverage saves bypass the setItem interceptor chain
+    const _rawGetPol = Storage.prototype.getItem.bind(localStorage);
+    const _lsPolicies = JSON.parse(_rawGetPol('insurance_policies') || '[]');
+    let policy = _findInList(_lsPolicies);
+    console.log('📋 viewPolicy localStorage lookup:', policyId, '→', policy ? 'FOUND' : 'NOT FOUND',
+        policy ? `coverage.CoveragesArray: ${policy.coverage?.CoveragesArray ? Object.keys(policy.coverage.CoveragesArray).length + ' entries' : 'NONE'}` : '');
 
     // 2. Fallback: fetch from API (covers fresh/magic-link sessions)
     if (!policy) {
         try {
-            const API_URL = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+            const API_URL = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
             const _jwt = sessionStorage.getItem('vanguard_jwt') || '';
             const res = await fetch(`${API_URL}/api/policies?includeInactive=true&limit=500`, {
                 headers: { 'Cache-Control': 'no-cache', 'Bypass-Tunnel-Reminder': 'true', 'Authorization': `Bearer ${_jwt}` }
@@ -23248,6 +23693,24 @@ async function viewPolicy(policyId) {
         console.error('Policy not found:', policyId);
         showNotification('Policy not found', 'error');
         return;
+    }
+
+    // Ensure clientId is set if we came from a client profile
+    if (!policy.clientId && window.currentViewingClientId) {
+        policy.clientId = window.currentViewingClientId;
+    }
+
+    // Update URL hash for deep-linking — nested under client if we have context
+    const _clientCtx = window.currentViewingClientId || window._routeClientId || policy.clientId;
+    let targetHash;
+    if (_clientCtx) {
+        targetHash = '#clients/' + encodeURIComponent(_clientCtx) + '/policy/' + encodeURIComponent(policyId);
+    } else {
+        targetHash = '#policies/' + encodeURIComponent(policyId);
+    }
+    if (window.location.hash !== targetHash) {
+        window._skipHashRoute = true;
+        window.location.hash = targetHash;
     }
 
     // Show the policy details in a tabbed modal
@@ -23273,8 +23736,8 @@ function showPolicyDetailsModal(policy) {
             <!-- Page Header -->
             <div class="pdp-header" style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
                 <div class="pdp-header-inner" style="display: flex; align-items: center; gap: 16px; height: 64px;">
-                    <button class="pdp-back-btn" onclick="loadPoliciesView()" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                        <i class="fas fa-arrow-left"></i> Back to Policies
+                    <button class="pdp-back-btn" onclick="${(window.currentViewingClientId || policy.clientId) ? `window.location.hash='#clients/${encodeURIComponent(window.currentViewingClientId || policy.clientId)}'` : `window.location.hash='#policies'`}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                        <i class="fas fa-arrow-left"></i> ${(window.currentViewingClientId || policy.clientId) ? 'Back to Client' : 'Back to Policies'}
                     </button>
                     ${policyTypeLabel ? `<span class="pdp-type-badge" style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
                     <h1 class="pdp-policy-num" style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
@@ -23563,6 +24026,7 @@ function generateViewTabContent(tabId, policy) {
                         ${_fOV('commissionPlan','Commission Plan', policy.commissionPlan||'')}
                         ${_fOV('policyState','Policy State', policy.policyState||'')}
                         ${_fOV('agent','User / Agent', policy.agent||'')}
+                        ${_sOV('agency','Agency', policy.agency||'Vanguard', ['Vanguard','United'])}
                     </div>
                     <!-- Card 2: Term & Dates -->
                     <div class="pdp-card" style="padding:20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
@@ -23677,7 +24141,10 @@ function generateViewTabContent(tabId, policy) {
                 <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
                     <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                         <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
-                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
                     </h3>
                     ${vehicles.length === 0
                         ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
@@ -23719,7 +24186,10 @@ function generateViewTabContent(tabId, policy) {
                 <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttrD} data-policy-id="${_pIdD}">
                     <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                         <span><i class="fas fa-id-card" style="margin-right:7px;color:#374151;"></i>Drivers (${drivers.length})</span>
-                        ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewDriver()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
                     </h3>
                     ${drivers.length === 0
                         ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No drivers on this policy</p>'
@@ -23782,16 +24252,31 @@ function generateViewTabContent(tabId, policy) {
 
             if (isCommercialAuto) {
                 // Build INTERACTIVE coverage table (left column)
-                const coveragesArray = coverageData.CoveragesArray;
                 const _pId = policy.id || policy.policyNumber || '';
+                // Check dedicated override key first (bypasses all 22+ localStorage interceptors)
+                let coveragesArray = coverageData.CoveragesArray;
+                try {
+                    const _covRaw = Storage.prototype.getItem.call(localStorage, '_covOverride_' + _pId);
+                    if (_covRaw) {
+                        const parsed = JSON.parse(_covRaw);
+                        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+                            coveragesArray = parsed;
+                            console.log('📋 COVERAGE TAB: Loaded', Object.keys(parsed).length, 'coverages from override key for', _pId);
+                        }
+                    }
+                } catch(e) {}
                 const _eQ = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
                 let initRows = '';
+                console.log('📋 COVERAGE TAB RENDER:', _pId, '| CoveragesArray:', coveragesArray ? Object.keys(coveragesArray).length + ' entries' : 'NONE');
 
+                // Fix known wrong descriptions from legacy imports
+                const _descFix = {'Cargo Deductible':'Motor Truck Cargo','Cargo Limit':'Motor Truck Cargo','Comp Deductible':'Comprehensive','Collision Deductible':'Collision','Liability Limits':'Combined Single Limit','General Liability':'GL Combined Bodily Injury'};
                 if (coveragesArray && typeof coveragesArray === 'object' && Object.keys(coveragesArray).length > 0) {
                     Object.values(coveragesArray).filter(c => c && c.Code).forEach(cov => {
                         const _isGL = window._isGLCode && window._isGLCode(cov.Code);
-                        initRows += `<tr data-code="${_eQ(cov.Code)}" data-desc="${_eQ(cov.Description||'')}">
-                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${cov.Code}</span>${cov.Description?`<br><span style="font-size:11px;color:#6b7280;">${cov.Description}</span>`:''}</td>
+                        const _desc = _descFix[cov.Description] || cov.Description || '';
+                        initRows += `<tr data-code="${_eQ(cov.Code)}" data-desc="${_eQ(_desc)}">
+                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${cov.Code}</span>${_desc?`<br><span style="font-size:11px;color:#6b7280;">${_desc}</span>`:''}</td>
                             <td style="padding:3px 4px;"><input class="vcov-limit" placeholder="${_isGL?'Limit':''}" value="${_eQ(cov.Amount)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-deduct" placeholder="${_isGL?'Aggregate':''}" value="${_eQ(_isGL ? (cov.Aggregate||cov.Deductible) : cov.Deductible)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-prem" value="${_eQ(cov.Premium)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
@@ -23799,25 +24284,52 @@ function generateViewTabContent(tabId, policy) {
                         </tr>`;
                     });
                 } else {
-                    // Legacy fields → editable rows
-                    const LMAP = {'coverage-liability-limits':'Liability Limits','coverage-general-aggregate':'General Liability','coverage-comp-deduct':'Comp Deductible','coverage-coll-deduct':'Collision Deductible','coverage-cargo-limit':'Cargo Limit','coverage-cargo-deduct':'Cargo Deductible','coverage-medical':'Medical Payments','coverage-um-uim':'UM/UIM','Liability Limits':'Liability Limits','General Liability':'General Liability','Comp Deductible':'Comp Deductible','Collision Deductible':'Collision Deductible','Cargo Limit':'Cargo Limit','Cargo Deductible':'Cargo Deductible','UM/UIM':'UM/UIM','Medical Payments':'Medical Payments','CSL':'Combined Single Limit','BISPL':'Bodily Injury Split Limit','MEDPM':'Medical Payments','UMCSL':'Uninsured Motorist CSL','COMP':'Comprehensive','COLL':'Collision','MTCARGO':'Motor Truck Cargo','GLCBI':'GL Bodily Injury','GLCPD':'GL Property Damage'};
-                    const LCODE = {'Liability Limits':'CSL','General Liability':'GLCBI','Comp Deductible':'COMP','Collision Deductible':'COLL','Cargo Limit':'MTCARGO','Cargo Deductible':'MTCARGO','UM/UIM':'UMCSL','Medical Payments':'MEDPM'};
-                    const LSKIP = new Set(['additionalCoverages','CoveragesArray','automotiveLiability']);
-                    const lSeen = new Set();
-                    Object.entries(coverageData).forEach(([key, val]) => {
-                        if (LSKIP.has(key) || typeof val !== 'string' || !val.trim() || val.toLowerCase() === 'n/a') return;
-                        const label = LMAP[key] || key;
-                        if (lSeen.has(label)) return;
-                        lSeen.add(label);
-                        const code = LCODE[label] || key.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,8) || 'COV';
-                        initRows += `<tr data-code="${_eQ(code)}" data-desc="${_eQ(label)}">
-                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${code}</span><br><span style="font-size:11px;color:#6b7280;">${label}</span></td>
-                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(val.trim())}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
-                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                    // Legacy flat-key fields → editable rows
+                    // First pass: collect limit+deductible pairs for coverages that have both
+                    const _cd = coverageData;
+                    const _gv = k => { const v = _cd[k] || _cd[k.replace(/ /g,'-').toLowerCase()] || ''; return (typeof v === 'string' && v.trim() && v.toLowerCase() !== 'n/a') ? v.trim() : ''; };
+                    const mergedCovs = [];
+                    const handled = new Set(['additionalCoverages','CoveragesArray','automotiveLiability']);
+                    // Merged pairs: limit key, deductible key, code, description
+                    const pairs = [
+                        ['Liability Limits','coverage-liability-limits', null, null, 'CSL', 'Combined Single Limit'],
+                        ['General Liability','coverage-general-aggregate', null, null, 'GLCBI', 'GL Combined Bodily Injury'],
+                        ['Cargo Limit','coverage-cargo-limit', 'Cargo Deductible','coverage-cargo-deduct', 'MTCARGO', 'Motor Truck Cargo'],
+                        ['Comp Deductible','coverage-comp-deduct', null, null, 'COMP', 'Comprehensive'],
+                        ['Collision Deductible','coverage-coll-deduct', null, null, 'COLL', 'Collision'],
+                        ['UM/UIM','coverage-um-uim', null, null, 'UMCSL', 'Uninsured Motorist CSL'],
+                        ['Medical Payments','coverage-medical', null, null, 'MEDPM', 'Medical Payments'],
+                    ];
+                    for (const [lk1, lk2, dk1, dk2, code, desc] of pairs) {
+                        const limit = _gv(lk1) || _gv(lk2);
+                        const deduct = dk1 ? (_gv(dk1) || _gv(dk2 || '')) : '';
+                        if (limit || deduct) {
+                            // For COMP/COLL the flat key IS the deductible, not the limit
+                            if (code === 'COMP' || code === 'COLL') {
+                                mergedCovs.push({ code, desc, limit: '', deduct: limit }); // value is actually deductible
+                            } else {
+                                mergedCovs.push({ code, desc, limit, deduct });
+                            }
+                        }
+                        [lk1, lk2, dk1, dk2].filter(Boolean).forEach(k => handled.add(k));
+                    }
+                    // Remaining unhandled flat keys
+                    Object.entries(_cd).forEach(([key, val]) => {
+                        if (handled.has(key) || typeof val !== 'string' || !val.trim() || val.toLowerCase() === 'n/a') return;
+                        handled.add(key);
+                        const code = key.replace(/[^A-Za-z0-9]/g,'').toUpperCase().slice(0,8) || 'COV';
+                        mergedCovs.push({ code, desc: key, limit: val.trim(), deduct: '' });
+                    });
+                    // Render merged rows
+                    for (const c of mergedCovs) {
+                        initRows += `<tr data-code="${_eQ(c.code)}" data-desc="${_eQ(c.desc)}">
+                            <td style="padding:6px 8px;"><span style="font-weight:700;color:#111827;font-size:13px;">${c.code}</span><br><span style="font-size:11px;color:#6b7280;">${c.desc}</span></td>
+                            <td style="padding:3px 4px;"><input class="vcov-limit" value="${_eQ(c.limit)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
+                            <td style="padding:3px 4px;"><input class="vcov-deduct" value="${_eQ(c.deduct)}" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:60px;"></td>
                             <td style="padding:3px 4px;"><input class="vcov-prem" value="" style="width:100%;border:1px solid #d1d5db;border-radius:4px;padding:3px 5px;font-size:12px;min-width:55px;"></td>
                             <td style="padding:3px;text-align:center;"><button onclick="this.closest('tr').remove()" style="background:#fee2e2;border:none;border-radius:4px;padding:2px 6px;cursor:pointer;color:#dc2626;" title="Remove"><i class="fas fa-times" style="font-size:11px;"></i></button></td>
                         </tr>`;
-                    });
+                    }
                 }
 
                 const coverageTableHTML = `
@@ -23958,14 +24470,20 @@ function generateViewTabContent(tabId, policy) {
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                                     <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
-                                    ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    <span style="display:flex;gap:6px;">
+                                        <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new vehicle"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    </span>
                                 </h3>
                                 ${vehiclesHTML}
                             </div>
                             <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                                     <span><i class="fas fa-id-card" style="margin-right:7px;color:#374151;"></i>Drivers (${drivers.length})</span>
-                                    ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all drivers"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    <span style="display:flex;gap:6px;">
+                                        <button onclick="window.addNewDriver()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new driver"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                                        ${drivers.length > 0 ? `<button onclick="showDriverDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all drivers"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    </span>
                                 </h3>
                                 ${driversHTML}
                             </div>
@@ -24348,7 +24866,7 @@ window.overviewSave = async function(policyId) {
     const g = id => (document.getElementById('ov-' + id) || {}).value || '';
     const updates = {
         policyNumber: g('policyNumber'), carrier: g('carrier'), parentCompany: g('parentCompany'),
-        commissionPlan: g('commissionPlan'), policyState: g('policyState'), agent: g('agent'),
+        commissionPlan: g('commissionPlan'), policyState: g('policyState'), agent: g('agent'), agency: g('agency'),
         producers: [
             { name: g('producer1'), commission: g('producer1Pct') },
             { name: g('producer2'), commission: g('producer2Pct') },
@@ -24402,7 +24920,7 @@ window.overviewSave = async function(policyId) {
     }
 
     try {
-        const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+        const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
         const jwt = sessionStorage.getItem('vanguard_jwt') || '';
         const r = await fetch(`${API}/api/policies/${policyId}`, {
             method: 'PUT',
@@ -24563,7 +25081,7 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
 
         // Notes from JenesisNow — deduplicate and only keep real notes
         if (jn.notes && jn.notes.length) {
-            const existing = pol.notes || '';
+            const existing = typeof pol.notes === 'string' ? pol.notes : (Array.isArray(pol.notes) ? pol.notes.join('\n') : '');
             const timestamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
             // Filter: only keep notes that have real text (not just numbers/dates/payment junk)
             const realNotes = jn.notes.filter(n => {
@@ -24652,7 +25170,7 @@ function _jnDateToISO(jnDate) {
             ['DIS','Total Disability Benefits'],['DTH','Death Indemnity'],['ADDA','Automobile Death Indemnity Benefits'],['ADDG','Total Disability for Gainfully Employed'],['ADDN','Total Disability for Not Gainfully Employed'],['WLB','Work Loss Benefits'],['GAP','Lease/Loan Gap'],
         ]],
         ['Physical Damage', [
-            ['COMP','Comprehensive'],['COLL','Collision'],['BCOLL','Broadened Collision'],['LCOLL','Limited Collision'],['COMTI','Comprehensive with Trailer Interchange'],['COLTI','Collision with Trailer Interchange'],
+            ['COMP','Comprehensive'],['COLL','Collision'],['BCOLL','Broadened Collision'],['LCOLL','Limited Collision'],['COMTI','Comprehensive with Trailer Interchange'],['COLTI','Collision with Trailer Interchange'],['TI','Trailer Interchange'],['NOTI','Non-Owned Trailer Interchange'],
             ['CPD','Combined Physical Damages'],['CPDBC','Combined Physical Damages w/ Broadened Collision'],['CPDC','Combined Physical Damages w/ Collision'],['CPDLC','Combined Physical Damages w/ Limited Collision'],['OTC','Other Than Collision'],
             ['CWAIV','Waiver of Collision Deductible'],['MEXCO','Mexico Coverage'],['NDCOL','Named Driver Collision Coverage'],['NYMA','New York Mutual Aid'],['OEM','Original Equipment Manufactured Parts'],['PDBY','Property Damage Buy Back'],
             ['SRCOL','Sound Receiving Collision'],['SORCV','Sound Receiving'],['SORPE','Sound Reproducing Equipment'],['SROTC','Sound Receiving Other than Collision'],
@@ -24715,7 +25233,7 @@ function _jnDateToISO(jnDate) {
             opt.style.display = (!q || opt.text.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q)) ? '' : 'none';
         });
         Array.from(sel.querySelectorAll('optgroup')).forEach(grp => {
-            const visible = Array.from(grp.options).some(o => o.style.display !== 'none');
+            const visible = Array.from(grp.querySelectorAll('option')).some(o => o.style.display !== 'none');
             grp.style.display = visible ? '' : 'none';
         });
     };
@@ -24768,23 +25286,33 @@ function _jnDateToISO(jnDate) {
             CoveragesArray[code] = { Code: code, Description: desc, Amount: amount, Premium: premium };
             if (isGL) { CoveragesArray[code].Aggregate = deductible; } else { CoveragesArray[code].Deductible = deductible; }
         });
-        const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        // Save CoveragesArray to a DEDICATED key that no interceptor touches.
+        // 22+ scripts wrap localStorage.setItem/getItem with caches and formatters
+        // that corrupt or clobber policy coverage data. This dedicated key is safe.
+        const _raw = { get: Storage.prototype.getItem.bind(localStorage), set: Storage.prototype.setItem.bind(localStorage) };
+        const covKey = '_covOverride_' + policyId;
+        _raw.set(covKey, JSON.stringify(CoveragesArray));
+        console.log('Coverage saved to', covKey, ':', Object.keys(CoveragesArray).length, 'entries');
+        // Also try to update the main policies array (best-effort, may be clobbered by interceptors)
+        const policies = JSON.parse(_raw.get('insurance_policies') || '[]');
         const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
         if (idx === -1) {
-            if(typeof showNotification==='function') showNotification('Policy not found in local cache', 'error');
+            // Still show success since dedicated key was saved
+            if(typeof showNotification==='function') showNotification('Coverages saved', 'success');
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Coverages'; }
             return;
         }
         if (!policies[idx].coverage) policies[idx].coverage = {};
         policies[idx].coverage.CoveragesArray = CoveragesArray;
-        localStorage.setItem('insurance_policies', JSON.stringify(policies));
+        const policyToSave = JSON.parse(JSON.stringify(policies[idx])); // deep copy for server
+        _raw.set('insurance_policies', JSON.stringify(policies));
         try {
-            const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+            const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
             const jwt = sessionStorage.getItem('vanguard_jwt') || '';
             const r = await fetch(`${API}/api/policies/${policyId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
-                body: JSON.stringify(policies[idx])
+                body: JSON.stringify(policyToSave)
             });
             if(typeof showNotification==='function') showNotification(r.ok ? 'Coverages saved' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
         } catch(e) {
@@ -24794,6 +25322,33 @@ function _jnDateToISO(jnDate) {
     };
 })();
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Add New Vehicle / Driver ─────────────────────────────────────────────────
+window.addNewVehicle = function() {
+    const section = document.getElementById('vehiclesViewSection');
+    if (!section) return;
+    const policyId = section.getAttribute('data-policy-id') || '';
+    const raw = section.getAttribute('data-vehicles');
+    let vehicles = [];
+    try { if (raw) vehicles = JSON.parse(decodeURIComponent(raw)); } catch(e) {}
+    const blank = { year:'', make:'', model:'', vin:'', bodyType:'', gvw:'', garageState:'', garageZip:'', garageAddress:'', garageCity:'', use:'', radius:'', costNew:'', cargoLimit:'' };
+    vehicles.push(blank);
+    section.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+    showVehicleDetailModal(vehicles.length - 1);
+};
+
+window.addNewDriver = function() {
+    const section = document.getElementById('driversViewSection');
+    if (!section) return;
+    const policyId = section.getAttribute('data-policy-id') || '';
+    const raw = section.getAttribute('data-drivers');
+    let drivers = [];
+    try { if (raw) drivers = JSON.parse(decodeURIComponent(raw)); } catch(e) {}
+    const blank = { firstName:'', middleName:'', lastName:'', fullName:'', name:'', dateOfBirth:'', gender:'', licenseNumber:'', licenseState:'', relationship:'', maritalStatus:'' };
+    drivers.push(blank);
+    section.setAttribute('data-drivers', encodeURIComponent(JSON.stringify(drivers)));
+    showDriverDetailModal(drivers.length - 1);
+};
 
 // ─── Vehicle Detail Modal (Editable) ─────────────────────────────────────────
 window.showVehicleDetailModal = function(startIndex) {
@@ -25084,7 +25639,7 @@ window.showVehicleDetailModal = function(startIndex) {
             policies[idx].vehicles = vehicles;
             localStorage.setItem('insurance_policies', JSON.stringify(policies));
             try {
-                const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+                const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
                 const jwt = sessionStorage.getItem('vanguard_jwt') || '';
                 const r = await fetch(`${API}/api/policies/${policyId}`, {
                     method: 'PUT',
@@ -25099,6 +25654,10 @@ window.showVehicleDetailModal = function(startIndex) {
             if(typeof showNotification==='function') showNotification('Policy not found in local cache — saved to vehicles array only','warning');
         }
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Vehicle'; }
+        // Close modal and refresh the policy view
+        const modal = document.getElementById('vehDetailModal');
+        if (modal) modal.remove();
+        if (typeof viewPolicy === 'function') viewPolicy(policyId);
     };
 
     renderModal();
@@ -25266,7 +25825,7 @@ window.showDriverDetailModal = function(startIndex) {
             policies[idx].drivers = drivers;
             localStorage.setItem('insurance_policies', JSON.stringify(policies));
             try {
-                const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
+                const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
                 const jwt = sessionStorage.getItem('vanguard_jwt') || '';
                 const r = await fetch(`${API}/api/policies/${policyId}`, {
                     method: 'PUT',
@@ -25281,6 +25840,10 @@ window.showDriverDetailModal = function(startIndex) {
             if(typeof showNotification==='function') showNotification('Policy not found in local cache','warning');
         }
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-save" style="margin-right:5px;"></i>Save Driver'; }
+        // Close modal and refresh the policy view
+        const modal = document.getElementById('drvDetailModal');
+        if (modal) modal.remove();
+        if (typeof viewPolicy === 'function') viewPolicy(policyId);
     };
 
     renderModal();
@@ -29058,7 +29621,7 @@ async function fetchLeadsForReport(agentName) {
         // Get API URL based on protocol
         const apiUrl = window.location.protocol === 'https:'
             ? `https://${window.location.hostname}/api`
-            : `http://${window.location.hostname}:3001/api`;
+            : `https://${window.location.hostname}:3001/api`;
 
         console.log('Fetching leads from:', apiUrl + '/leads');
         const response = await fetch(apiUrl + '/leads');
@@ -33096,7 +33659,9 @@ async function applyStateDropdownStyling() {
         if (!type) return;
         // Colors
         if (type === 'green' || type === 'green-split') {
-            opt.style.color = opt.value === 'OH' ? '#7c3aed' : '#16a34a';
+            opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#7c3aed' : '#16a34a';
+        } else if (['OH','NC','SC','TX'].includes(opt.value)) {
+            opt.style.color = '#7c3aed';
         }
         // Default labels (stripped clean first)
         const bare = opt.text.replace(/ \(Split\)\(Closed\)$/, '').replace(/ \(Split\)$/, '').replace(/ \((Open|Closed)\)$/, '');
@@ -33120,24 +33685,24 @@ async function applyStateDropdownStyling() {
             if (closedSet.has(opt.value)) {
                 if (type === 'green-split') {
                     opt.text = bare + ' (Split)(Closed)';
-                    opt.style.color = opt.value === 'OH' ? '#6d28d9' : '#15803d';
+                    opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#6d28d9' : '#15803d';
                 } else if (type === 'green') {
                     opt.text = bare + ' (Closed)';
-                    opt.style.color = opt.value === 'OH' ? '#6d28d9' : '#15803d';
+                    opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#6d28d9' : '#15803d';
                 } else {
                     opt.text = bare + ' (Closed)';
-                    opt.style.color = '#dc2626';
+                    opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#6d28d9' : '#dc2626';
                 }
             } else {
                 if (type === 'green-split') {
                     opt.text = bare + ' (Split)';
-                    opt.style.color = opt.value === 'OH' ? '#7c3aed' : '#16a34a';
+                    opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#7c3aed' : '#16a34a';
                 } else if (type === 'green') {
                     opt.text = bare + ' (Open)';
-                    opt.style.color = opt.value === 'OH' ? '#7c3aed' : '#16a34a';
+                    opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#7c3aed' : '#16a34a';
                 } else {
                     opt.text = bare + ' (Open)';
-                    opt.style.color = '';
+                    opt.style.color = ['OH','NC','SC','TX'].includes(opt.value) ? '#7c3aed' : '';
                 }
             }
         });
@@ -37081,8 +37646,8 @@ window.bulkDeleteLeads = async function() {
 
     // Delete from server
     const apiUrl = window.location.hostname === 'localhost'
-        ? 'http://localhost:3001'
-        : `http://${window.location.hostname}:3001`;
+        ? 'https://localhost:3001'
+        : `https://${window.location.hostname}:3001`;
 
     let successCount = 0;
     let failCount = 0;
@@ -37794,6 +38359,7 @@ function generateTimeMeter(lead) {
         console.log(`📞 CALL LOGS for ${lead.name}:`, lead.reachOut.callLogs.map(log => `${log.duration} (connected: ${log.connected})`));
         lead.reachOut.callLogs.forEach(log => {
             if (log.duration) {
+                if (typeof log.duration !== 'string') log.duration = String(log.duration);
                 let logMinutes = 0;
 
                 // Parse different duration formats
@@ -38031,6 +38597,12 @@ function renderLeadsList(leads) {
                 </td>
                 <td>
                     ${(() => {
+                        // CSR users see only the CSR To Do text
+                        const _csrSess2 = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                        if ((_csrSess2.role || '') === 'csr') {
+                            const csrText = lead.csrTodo || '';
+                            return csrText ? `<div style="font-weight: bold; color: #0284c7;">${csrText}</div>` : '';
+                        }
                         console.log(`🎯 TO DO CELL: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
                         let result = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) : (window.getNextAction ? window.getNextAction(lead.stage || 'new', lead) : 'Review lead')) || '';
                         // Check for overdue callbacks - override To Do with "Reach out" if one exists
@@ -38915,7 +39487,10 @@ window.generateCertificateForPolicy = function(policyId) {
             policyType: 'commercial-auto',
             vehicles: policy.vehicles || [],
             drivers: policy.drivers || [],
-            coverage: policy.coverage || {}
+            coverage: policy.coverage || {},
+            agent: policy.agent || '',
+            agency: policy.agency || '',
+            united: (policy.agency || '').toLowerCase() === 'united'
         };
 
         // Create modal structure similar to VIG Agency
@@ -40003,13 +40578,14 @@ window.submitCRMCOIModal = async function() {
         // Prepare the COI request data as FormData (not JSON) to match the API
         const formData = new FormData();
 
-        // Set sender email
-        formData.append('from', 'contact@vigagency.com');
+        // Set sender email based on agency
+        const isUnited = (currentPolicy?.agency || '').toLowerCase() === 'united' || currentPolicy?.united;
+        formData.append('from', isUnited ? 'contact@uigagency.com' : 'contact@vigagency.com');
 
         // Pass agent and united flag so backend can pick the correct sender address
         const policyAgent = currentPolicy?.agent || '';
         formData.append('agent', policyAgent);
-        formData.append('united', currentPolicy?.united ? 'true' : 'false');
+        formData.append('united', isUnited ? 'true' : 'false');
 
         // Set recipient emails (all emails from the array)
         formData.append('to', emails.join(', '));
@@ -40114,7 +40690,7 @@ ${certificateHolder}`;
 
         console.log('Submitting COI request via FormData to:', 'https://162-220-14-239.nip.io/api/coi/send-request');
         console.log('FormData contents:', {
-            from: 'contact@vigagency.com',
+            from: isUnited ? 'contact@uigagency.com' : 'contact@vigagency.com',
             to: emails.join(', '),
             subject: subjectText,
             policyId: policyId,
@@ -42430,8 +43006,8 @@ window.deleteSimpleTodo = async function deleteSimpleTodo(index) {
 
             // Delete from server first
             const apiUrl = window.location.hostname === 'localhost'
-                ? 'http://localhost:3001'
-                : `http://${window.location.hostname}:3001`;
+                ? 'https://localhost:3001'
+                : `https://${window.location.hostname}:3001`;
 
             const serverEventId = todo.originalEvent?.id?.toString().replace('server_', '');
             const response = await fetch(`${apiUrl}/api/calendar-events/${serverEventId}?userId=${encodeURIComponent(currentUser)}`, {

@@ -11,8 +11,9 @@ import aiohttp
 from deepgram import DeepgramClient, PrerecordedOptions, FileSource
 import time
 
-# Deepgram configuration
-DEEPGRAM_API_KEY = "19b5d4a1221a91a41bc415d5eefc955d94938962"
+# Deepgram configuration from environment
+import os
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
 
 class DeepgramTranscriber:
     def __init__(self):

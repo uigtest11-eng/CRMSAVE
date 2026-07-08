@@ -77,7 +77,7 @@ router.get('/emails', async (req, res) => {
         const account = req.query.account || 'vig';
         const isUIG = account === 'uig';
         const imapUser = isUIG ? 'contact@uigagency.com' : (process.env.OUTLOOK_EMAIL || 'contact@vigagency.com');
-        const imapPass = isUIG ? 'Jacob2007' : (process.env.OUTLOOK_PASSWORD || '25nickc124!');
+        const imapPass = isUIG ? process.env.GODADDY_UIG_PASSWORD : (process.env.OUTLOOK_PASSWORD || process.env.GODADDY_VIG_PASSWORD);
 
         const imap = new Imap({
             user: imapUser,
@@ -487,7 +487,7 @@ function syncCOIEmailsFromIMAP() {
 
         const imap = new Imap({
             user: process.env.OUTLOOK_EMAIL || 'contact@vigagency.com',
-            password: process.env.OUTLOOK_PASSWORD || '25nickc124!',
+            password: process.env.OUTLOOK_PASSWORD || process.env.GODADDY_VIG_PASSWORD,
             host: process.env.OUTLOOK_IMAP_HOST || 'imap.secureserver.net',
             port: parseInt(process.env.OUTLOOK_IMAP_PORT) || 993,
             tls: true,
@@ -683,7 +683,7 @@ router.get('/test-connection', async (req, res) => {
 
     const imap = new Imap({
         user: process.env.OUTLOOK_EMAIL || 'contact@vigagency.com',
-        password: process.env.OUTLOOK_PASSWORD || '25nickc124!',
+        password: process.env.OUTLOOK_PASSWORD || process.env.GODADDY_VIG_PASSWORD,
         host: process.env.OUTLOOK_IMAP_HOST || 'imap.secureserver.net',
         port: 993,
         tls: true,
@@ -742,7 +742,7 @@ router.post('/send-smtp', async (req, res) => {
         // Support UIG account when requested (e.g. Maureen's emails)
         const isUIG = account === 'uig';
         const smtpUser = isUIG ? 'contact@uigagency.com' : (process.env.OUTLOOK_EMAIL || 'contact@vigagency.com');
-        const smtpPass = isUIG ? 'Jacob2007' : (process.env.OUTLOOK_PASSWORD || '25nickc124!');
+        const smtpPass = isUIG ? process.env.GODADDY_UIG_PASSWORD : (process.env.OUTLOOK_PASSWORD || process.env.GODADDY_VIG_PASSWORD);
 
         // Create SMTP transporter using Titan/GoDaddy credentials
         const transporter = nodemailer.createTransport({
@@ -816,7 +816,7 @@ router.post('/send-coi', upload.single('attachment'), async (req, res) => {
             secure: true,
             auth: {
                 user: process.env.OUTLOOK_EMAIL || 'contact@vigagency.com',
-                pass: process.env.OUTLOOK_PASSWORD || '25nickc124!'
+                pass: process.env.OUTLOOK_PASSWORD || process.env.GODADDY_VIG_PASSWORD
             },
             tls: { rejectUnauthorized: false }
         });

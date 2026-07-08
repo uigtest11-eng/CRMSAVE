@@ -140,20 +140,58 @@ const authRoutes = require('./auth-routes');
 const { encryptField, decryptField } = require('./crypto-utils');
 
 app.use(helmet({
-    contentSecurityPolicy: false,       // CRM loads CDN scripts
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'",
+                "https://cdnjs.cloudflare.com", "https://sdk.twilio.com",
+                "https://fonts.googleapis.com", "https://fonts.gstatic.com"],
+            styleSrc: ["'self'", "'unsafe-inline'",
+                "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
+            imgSrc: ["'self'", "data:", "blob:", "https:"],
+            connectSrc: ["'self'", "https://162-220-14-239.nip.io:3001",
+                "https://portal.vigagency.com", "wss:", "https:"],
+            mediaSrc: ["'self'", "blob:"],
+            frameSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"]
+        }
+    },
     crossOriginEmbedderPolicy: false
 }));
 
 app.use(cors({
     origin: [
         'https://162-220-14-239.nip.io',
-        'http://localhost:3000',
-        'http://localhost:3001'
+        'https://portal.vigagency.com',
+        'https://vigagency.com'
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// ── Global Rate Limiting ────────────────────────────────────────────────────
+const rateLimit = require('express-rate-limit');
+const apiLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,   // 1 minute
+    max: 200,                    // 200 requests per minute per IP
+    message: { error: 'Too many requests. Please try again shortly.' },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+app.use('/api', apiLimiter);
+
+// SIP config endpoint (requires auth — served to logged-in users only)
+app.get('/api/sip-config', authenticateToken, (req, res) => {
+    res.json({
+        username: process.env.SIP_USERNAME || '',
+        password: process.env.SIP_PASSWORD || '',
+        domain: process.env.SIP_DOMAIN || '',
+        callerId: process.env.SIP_CALLER_ID || ''
+    });
+});
 
 app.use(bodyParser.json({ limit: '50mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
@@ -1847,7 +1885,7 @@ app.delete('/api/leads/:id', (req, res) => {
 });
 
 // Cleanup invalid leads (leads without proper IDs)
-app.post('/api/cleanup-invalid-leads', (req, res) => {
+app.post('/api/cleanup-invalid-leads', requireRole('admin'), (req, res) => {
     console.log('🧹 CLEANUP: Starting invalid lead cleanup...');
 
     // Delete leads that have no ID or are test data
@@ -2299,12 +2337,12 @@ app.get('/api/vicidial/data', async (req, res) => {
     const https = require('https');
     const cheerio = require('cheerio');
 
-    // ViciDial credentials
-    const VICIDIAL_HOST = '204.13.233.29';
-    const USERNAME = '6666';
-    const PASSWORD = 'corp06';
+    // ViciDial credentials from environment
+    const VICIDIAL_HOST = process.env.VICIDIAL_HOST || '204.13.233.29';
+    const USERNAME = process.env.VICIDIAL_USER || '';
+    const PASSWORD = process.env.VICIDIAL_PASS || '';
 
-    console.log('📋 Fetching ViciDial lead list (NO SYNC - just data)...');
+    console.log('Fetching ViciDial lead list (NO SYNC - just data)...');
 
     // DO NOT AUTO-SYNC! Only fetch lead data for selection
     // Use Python script to ONLY fetch ViciDial leads without importing
@@ -2313,13 +2351,14 @@ import requests
 import urllib3
 from bs4 import BeautifulSoup
 import json
+import os
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ViciDial credentials
-USERNAME = "6666"
-PASSWORD = "corp06"
-VICIDIAL_HOST = "204.13.233.29"
+# ViciDial credentials from environment
+USERNAME = os.environ.get("VICIDIAL_USER", "")
+PASSWORD = os.environ.get("VICIDIAL_PASS", "")
+VICIDIAL_HOST = os.environ.get("VICIDIAL_HOST", "204.13.233.29")
 
 session = requests.Session()
 session.verify = False
@@ -2542,9 +2581,9 @@ app.get('/api/vicidial/lists', async (req, res) => {
         const https = require('https');
         const querystring = require('querystring');
 
-        const VICI_HOST = '204.13.233.29';
-        const VICI_USER = '6666';
-        const VICI_PASS = 'corp06';
+        const VICI_HOST = process.env.VICIDIAL_HOST || '204.13.233.29';
+        const VICI_USER = process.env.VICIDIAL_USER || '';
+        const VICI_PASS = process.env.VICIDIAL_PASS || '';
         const KNOWN_LISTS = ['998', '999', '1000', '1001', '1002', '1005', '1006', '1007', '1008', '1009', '1010', '1011', '1012', '1013', '1014', '1015', '1016', '1017', '1018', '1019', '1020', '1021', '1022', '1023', '1024', '1025', '1026', '1027', '1028', '1029', '1030', '1031', '1032', '1033', '1034', '1035', '1036', '1037', '1038', '1039', '1040', '1041', '1042'];
 
         // Fetch a single list's info via Node.js HTTPS (no Python subprocess needed)
@@ -2618,9 +2657,9 @@ app.get('/api/vicidial/lists', async (req, res) => {
 // ViciDial Agent Performance Report proxy
 app.get('/api/vicidial/performance-report', async (req, res) => {
     const axios = require('axios');
-    const VICI_HOST = '204.13.233.29';
-    const VICI_USER = '6666';
-    const VICI_PASS = 'corp06';
+    const VICI_HOST = process.env.VICIDIAL_HOST || '204.13.233.29';
+    const VICI_USER = process.env.VICIDIAL_USER || '';
+    const VICI_PASS = process.env.VICIDIAL_PASS || '';
 
     const today = new Date().toISOString().slice(0, 10);
     const queryDate  = req.query.query_date  || today;
@@ -2821,8 +2860,8 @@ function parseViciDispositions(text) {
 
 app.get('/api/vicidial/campaign-stats', async (req, res) => {
     const axios = require('axios');
-    const VICI_URL = 'http://204.13.233.29/vicidial/AST_VDADstats.php';
-    const AUTH = { username: '6666', password: 'corp06' };
+    const VICI_URL = `http://${process.env.VICIDIAL_HOST || '204.13.233.29'}/vicidial/AST_VDADstats.php`;
+    const AUTH = { username: process.env.VICIDIAL_USER || '', password: process.env.VICIDIAL_PASS || '' };
     const AX_CFG = { auth: AUTH, timeout: 25000, responseType: 'text', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
     const today = new Date().toISOString().slice(0, 10);
@@ -3140,7 +3179,7 @@ app.post('/api/vicidial/clear-list', async (req, res) => {
 });
 
 // Overwrite Vicidial list endpoint (GET version for URL parameters)
-app.get('/api/vicidial/overwrite', async (req, res) => {
+app.get('/api/vicidial/overwrite', requireRole('admin'), async (req, res) => {
     try {
         const { list_id, state, insurance_company, days_until_expiry, skip_days, limit } = req.query;
 
@@ -3228,7 +3267,7 @@ async function processLargeUpload(targetListId, leads) {
 }
 
 // Overwrite Vicidial list endpoint (POST version with body data)
-app.post('/api/vicidial/overwrite', async (req, res) => {
+app.post('/api/vicidial/overwrite', requireRole('admin'), async (req, res) => {
     try {
         const { list_id, criteria, leads } = req.body;
         const queryParams = req.query;
@@ -3700,7 +3739,45 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
             lead.calculatedPremium = calculatedPremium;
             lead.insuranceCompany = insuranceCompany;
 
-            console.log(`📊 Enhanced data - Fleet: ${lead.fleetSize}, Premium: $${calculatedPremium.toLocaleString()}, Insurance: "${insuranceCompany}"`);
+            // Parse stage and callback from ViciDial comments
+            let parsedStage = 'new';
+            let parsedCallbackDate = '';
+            let parsedCallbackTime = '';
+            let parsedOwnerName = '';
+            if (comments) {
+                // Custom stage: "Custom: some text"
+                const customMatch = comments.match(/Custom:\s*(.+)/i);
+                if (customMatch && customMatch[1].trim()) {
+                    parsedStage = customMatch[1].trim();
+                    console.log(`✅ Custom stage from comments: "${parsedStage}"`);
+                } else {
+                    // Standard stages with X marker
+                    if (/LR Rec:\s*[Xx]/i.test(comments)) parsedStage = 'loss_runs_received';
+                    else if (/LR Req:\s*[Xx]/i.test(comments)) parsedStage = 'info_requested';
+                    else if (/New:\s*[Xx]/i.test(comments)) parsedStage = 'new';
+                    // Fallback old format
+                    else if (/Loss Runs Received:\s*[Xx]/i.test(comments)) parsedStage = 'loss_runs_received';
+                    else if (/Loss Runs Requested:\s*[Xx]/i.test(comments) || /Info Requested:\s*[Xx]/i.test(comments)) parsedStage = 'info_requested';
+                    console.log(`✅ Stage from comments: "${parsedStage}"`);
+                }
+
+                // NEXT CALL parsing
+                const cbMatch = comments.match(/NEXT CALL\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i)
+                             || comments.match(/--scheduled next call-+\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i);
+                if (cbMatch) {
+                    parsedCallbackDate = cbMatch[1].trim();
+                    parsedCallbackTime = cbMatch[2].trim();
+                    console.log(`✅ Callback from comments: ${parsedCallbackDate} at ${parsedCallbackTime}`);
+                }
+
+                // Owner name
+                const nameMatch = comments.match(/------------Name--------------\s*\n\s*([^\n\r-]+)/i);
+                if (nameMatch) {
+                    parsedOwnerName = nameMatch[1].trim();
+                }
+            }
+
+            console.log(`📊 Enhanced data - Fleet: ${lead.fleetSize}, Premium: $${calculatedPremium.toLocaleString()}, Insurance: "${insuranceCompany}", Stage: "${parsedStage}"`);
 
             // Get existing lead data to preserve important fields like stage, call duration, etc.
             const existingLead = await getExistingLead(leadId);
@@ -3720,7 +3797,8 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 email: lead.email || (existingLead ? existingLead.email : ''),
                 product: "Commercial Auto",
                 // PRESERVE EXISTING STAGE - don't reset to "new" if lead already has a stage
-                stage: existingLead ? (existingLead.stage || "new") : "new",
+                // For new leads, use stage parsed from ViciDial comments
+                stage: existingLead ? (existingLead.stage || parsedStage) : parsedStage,
                 status: existingLead ? (existingLead.status || "hot_lead") : "hot_lead",
                 // Preserve manual reassignment — only use list-based agent for new leads
                 assignedTo: existingLead ? (existingLead.assignedTo || assignedAgent) : assignedAgent,
@@ -3812,8 +3890,55 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                         voicemailCount: existing.voicemailCount || 0,
                         callLogs: logs
                     };
-                })()
+                })(),
+                // Owner name from ViciDial comments
+                ownerName: parsedOwnerName || (existingLead ? existingLead.ownerName : '') || lead.contact || '',
+                // Callback from ViciDial comments NEXT CALL section
+                ...(parsedCallbackDate && parsedCallbackTime && !parsedCallbackDate.startsWith('MM') && !existingLead ? (() => {
+                    try {
+                        // Parse "MM/DD/YYYY" and "HH:MMAM" → ISO
+                        const timeStr = parsedCallbackTime.replace(/(\d+:\d+)([AP]M)/i, '$1 $2').toUpperCase();
+                        const dtStr = `${parsedCallbackDate} ${timeStr}`;
+                        const parts = dtStr.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)\s*(AM|PM)/i);
+                        if (parts) {
+                            let h = parseInt(parts[4]);
+                            const m = parseInt(parts[5]);
+                            const ampm = parts[6].toUpperCase();
+                            if (ampm === 'PM' && h < 12) h += 12;
+                            if (ampm === 'AM' && h === 12) h = 0;
+                            const cbDate = new Date(parseInt(parts[3]), parseInt(parts[1]) - 1, parseInt(parts[2]), h, m);
+                            const cbISO = cbDate.toISOString();
+                            console.log(`📅 Created callback for ${parsedCallbackDate} ${parsedCallbackTime} → ${cbISO}`);
+                            return {
+                                scheduledCallbacks: [{
+                                    id: Date.now().toString(),
+                                    datetime: cbISO,
+                                    date: parsedCallbackDate,
+                                    time: parsedCallbackTime,
+                                    notes: 'Auto-scheduled from ViciDial',
+                                    source: 'vicidial_sync'
+                                }]
+                            };
+                        }
+                    } catch (e) { console.warn('⚠️ Error parsing callback:', e); }
+                    return {};
+                })() : {})
             };
+
+            // Insert ViciDial callback into scheduled_callbacks table so UI displays it
+            if (leadToSave.scheduledCallbacks && leadToSave.scheduledCallbacks.length > 0) {
+                const sc = leadToSave.scheduledCallbacks[0];
+                try {
+                    await new Promise((resolve) => {
+                        db.run(
+                            `INSERT OR IGNORE INTO scheduled_callbacks (callback_id, lead_id, date_time, notes, completed) VALUES (?, ?, ?, ?, 0)`,
+                            [sc.id, leadId, sc.datetime, sc.notes || 'Auto-scheduled from ViciDial'],
+                            () => resolve()
+                        );
+                    });
+                    console.log(`📅 Inserted ViciDial callback into scheduled_callbacks table for lead ${leadId}`);
+                } catch (e) { /* ignore */ }
+            }
 
             // Save to database (using await for sequential processing)
             const data = JSON.stringify(leadToSave);
@@ -5556,10 +5681,14 @@ app.delete('/api/quotes/:leadId/:quoteId', (req, res) => {
 // Serve uploaded quote files
 app.get('/api/quotes/file/:leadId/:filename', (req, res) => {
     const { leadId, filename } = req.params;
-    console.log(`📎 Serving quote file: ${filename} for lead ${leadId}`);
 
-    // Construct the full path to the file
-    const filePath = path.join(__dirname, '../uploads/quotes', filename);
+    // Prevent directory traversal
+    const safeName = path.basename(filename);
+    const filePath = path.join(__dirname, '../uploads/quotes', safeName);
+    const uploadsRoot = path.resolve(__dirname, '../uploads/quotes');
+    if (!path.resolve(filePath).startsWith(uploadsRoot)) {
+        return res.status(400).json({ error: 'Invalid filename' });
+    }
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
@@ -5593,10 +5722,14 @@ app.get('/api/quotes/file/:leadId/:filename', (req, res) => {
 // Download quote file endpoint
 app.get('/api/quotes/download/:leadId/:filename', (req, res) => {
     const { leadId, filename } = req.params;
-    console.log(`⬇️ Download quote file: ${filename} for lead ${leadId}`);
 
-    // Construct the full path to the file
-    const filePath = path.join(__dirname, '../uploads/quotes', filename);
+    // Prevent directory traversal
+    const safeName = path.basename(filename);
+    const filePath = path.join(__dirname, '../uploads/quotes', safeName);
+    const uploadsRoot = path.resolve(__dirname, '../uploads/quotes');
+    if (!path.resolve(filePath).startsWith(uploadsRoot)) {
+        return res.status(400).json({ error: 'Invalid filename' });
+    }
 
     // Check if file exists
     if (!fs.existsSync(filePath)) {
@@ -6069,7 +6202,13 @@ app.get('/api/leads/:leadId/files', (req, res) => {
     const path = require('path');
 
     try {
-        const uploadDir = path.join('/var/www/vanguard/uploads/loss_runs', leadId);
+        // Prevent directory traversal
+        const safeLeadId = path.basename(leadId);
+        const uploadDir = path.join('/var/www/vanguard/uploads/loss_runs', safeLeadId);
+        const uploadsRoot = path.resolve('/var/www/vanguard/uploads/loss_runs');
+        if (!path.resolve(uploadDir).startsWith(uploadsRoot)) {
+            return res.status(400).json({ error: 'Invalid lead ID', files: [] });
+        }
 
         if (!fs.existsSync(uploadDir)) {
             return res.json({ files: [] });
@@ -8960,9 +9099,9 @@ app.get('/api/agency-files/:fileId/content', (req, res) => {
             if (err || !doc) return res.status(404).json({ success: false, error: 'File not found' });
             const isZip = doc.original_name.toLowerCase().endsWith('.zip');
             if (isZip) {
-                const { exec } = require('child_process');
-                exec(`unzip -p "${doc.file_path}"`, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
-                    if (error) return res.status(500).json({ success: false, error: 'Unzip failed: ' + stderr });
+                const { execFile } = require('child_process');
+                execFile('unzip', ['-p', doc.file_path], { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+                    if (error) return res.status(500).json({ success: false, error: 'Failed to extract file' });
                     const innerName = doc.original_name.replace(/\.zip$/i, '');
                     res.json({ success: true, content: stdout, filename: innerName });
                 });
@@ -8996,31 +9135,26 @@ app.post('/api/ivans/unzip', ivansUpload.single('file'), (req, res) => {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const tmpZip = `/tmp/ivans_${id}.zip`;
     const tmpOut = `/tmp/ivans_${id}.out`;
-    const { exec } = require('child_process');
+    const { execFile } = require('child_process');
     try {
         fs.writeFileSync(tmpZip, req.file.buffer);
-        exec(`unzip -l "${tmpZip}"`, (listErr, listing) => {
+        execFile('unzip', ['-l', tmpZip], (listErr, listing) => {
             const innerMatch = listing && listing.match(/\s(\S+\.(dat|al3|txt|xml))/i);
             const innerName = innerMatch ? innerMatch[1] : req.file.originalname.replace(/\.zip$/i, '');
-            const extractCmd = innerMatch
-                ? `unzip -p "${tmpZip}" "${innerMatch[1]}" > "${tmpOut}"`
-                : `unzip -p "${tmpZip}" > "${tmpOut}"`;
-            exec(extractCmd, (err) => {
+            const extractArgs = innerMatch
+                ? ['-p', tmpZip, innerMatch[1]]
+                : ['-p', tmpZip];
+            execFile('unzip', extractArgs, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout) => {
                 fs.unlink(tmpZip, () => {});
-                if (err && !fs.existsSync(tmpOut)) {
+                if (err && !stdout) {
                     return res.status(500).json({ success: false, error: 'Unzip failed' });
                 }
                 try {
-                    // Read as latin1 to preserve all byte values without encoding corruption
-                    const buf = fs.readFileSync(tmpOut);
-                    fs.unlink(tmpOut, () => {});
+                    const buf = Buffer.from(stdout, 'latin1');
                     const content = buf.toString('latin1');
-                    // Diagnostic: hex of first 300 bytes to identify record separators
-                    const hexPreview = Array.from(buf.slice(0, 300)).map(b => b.toString(16).padStart(2,'0')).join(' ');
-                    res.json({ success: true, content, filename: innerName, hexPreview, totalBytes: buf.length });
+                    res.json({ success: true, content, filename: innerName, totalBytes: buf.length });
                 } catch (readErr) {
-                    fs.unlink(tmpOut, () => {});
-                    res.status(500).json({ success: false, error: readErr.message });
+                    res.status(500).json({ success: false, error: 'Failed to read extracted content' });
                 }
             });
         });

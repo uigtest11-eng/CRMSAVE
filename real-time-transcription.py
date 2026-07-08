@@ -28,16 +28,16 @@ class RealTimeTranscriber:
         """Initialize transcriber with Deepgram"""
         print("Initializing real-time transcriber with Deepgram...")
 
-        # Deepgram API key
-        self.deepgram_api_key = "19b5d4a1221a91a41bc415d5eefc955d94938962"
+        # Deepgram API key from environment
+        self.deepgram_api_key = os.environ.get("DEEPGRAM_API_KEY", "")
 
         # Initialize OpenAI processor for data extraction
         self.openai = OpenAIProcessor() if OpenAIProcessor else None
 
-        # ViciDial credentials
-        self.vicidial_host = "204.13.233.29"
-        self.vicidial_username = "6666"
-        self.vicidial_password = "corp06"
+        # ViciDial credentials from environment
+        self.vicidial_host = os.environ.get("VICIDIAL_HOST", "204.13.233.29")
+        self.vicidial_username = os.environ.get("VICIDIAL_USER", "")
+        self.vicidial_password = os.environ.get("VICIDIAL_PASS", "")
 
         # Setup session
         self.session = requests.Session()

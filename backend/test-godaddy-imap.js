@@ -4,7 +4,7 @@ console.log('Testing GoDaddy IMAP connection...');
 
 const imap = new Imap({
     user: 'contact@vigagency.com',
-    password: '25nickc124!',
+    password: process.env.GODADDY_VIG_PASSWORD || '',
     host: 'imap.secureserver.net',
     port: 993,
     tls: true,

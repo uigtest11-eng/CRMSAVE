@@ -483,10 +483,10 @@ router.get('/policies/:policyId/documents', requirePortalAuth, (req, res) => {
     const db = getDb();
     const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
 
-    // Verify ownership — try both id formats (with and without .0 suffix)
+    // Verify ownership — column match OR JSON clientId fallback (client_id column can be stale)
     db.get(
-        'SELECT id, data FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
-        [policyId, req.portalUser.sub, rawClientId],
+        `SELECT id, data FROM policies WHERE id=? AND (client_id=? OR client_id=? OR data LIKE '%"clientId":"' || ? || '"%')`,
+        [policyId, req.portalUser.sub, rawClientId, rawClientId],
         (err, pol) => {
             if (err || !pol) {
                 db.close();
@@ -601,8 +601,8 @@ router.get('/policies/:policyId/coi/:coiId/download', requirePortalAuth, (req, r
     const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
 
     db.get(
-        'SELECT data FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
-        [policyId, req.portalUser.sub, rawClientId],
+        `SELECT data FROM policies WHERE id=? AND (client_id=? OR client_id=? OR data LIKE '%"clientId":"' || ? || '"%')`,
+        [policyId, req.portalUser.sub, rawClientId, rawClientId],
         (err, pol) => {
             db.close();
             if (err || !pol) return res.status(403).json({ error: 'Not found' });
@@ -632,8 +632,8 @@ router.get('/policies/:policyId/id-card/:cardId/download', requirePortalAuth, (r
 
     // Verify the policy belongs to this user, then fetch the ID card
     db.get(
-        'SELECT id FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
-        [policyId, req.portalUser.sub, rawClientId],
+        `SELECT id FROM policies WHERE id=? AND (client_id=? OR client_id=? OR data LIKE '%"clientId":"' || ? || '"%')`,
+        [policyId, req.portalUser.sub, rawClientId, rawClientId],
         (err, pol) => {
             if (err || !pol) { db.close(); return res.status(403).json({ error: 'Not found' }); }
 
@@ -662,8 +662,8 @@ router.get('/documents/:docId/download', requirePortalAuth, (req, res) => {
     const db = getDb();
     const rawClientId = String(req.portalUser.sub).replace(/\.0$/, '');
     db.get(
-        `SELECT * FROM documents WHERE id=? AND (client_id=? OR client_id=? OR policy_id IN (SELECT id FROM policies WHERE client_id=? OR client_id=?))`,
-        [req.params.docId, req.portalUser.sub, rawClientId, req.portalUser.sub, rawClientId],
+        `SELECT * FROM documents WHERE id=? AND (client_id=? OR client_id=? OR policy_id IN (SELECT id FROM policies WHERE client_id=? OR client_id=? OR data LIKE '%"clientId":"' || ? || '"%'))`,
+        [req.params.docId, req.portalUser.sub, rawClientId, req.portalUser.sub, rawClientId, rawClientId],
         (err, doc) => {
             db.close();
             if (err || !doc) return res.status(404).json({ error: 'Document not found' });
@@ -687,8 +687,8 @@ router.get('/coi-documents/:id/download', requirePortalAuth, (req, res) => {
     db.get(
         `SELECT c.* FROM coi_documents c
          JOIN policies p ON p.id = c.policy_id
-         WHERE c.id=? AND p.client_id=?`,
-        [req.params.id, req.portalUser.sub],
+         WHERE c.id=? AND (p.client_id=? OR p.client_id=? OR p.data LIKE '%"clientId":"' || ? || '"%')`,
+        [req.params.id, req.portalUser.sub, String(req.portalUser.sub).replace(/\.0$/, ''), String(req.portalUser.sub).replace(/\.0$/, '')],
         (err, doc) => {
             db.close();
             if (err || !doc) return res.status(404).json({ error: 'COI not found' });
@@ -799,8 +799,8 @@ router.post('/coi/request', requirePortalAuth, (req, res, next) => {
         // ── 1. Verify ownership & get policy data ───────────────────────
         const pol = await new Promise((resolve, reject) => {
             db.get(
-                'SELECT id, data FROM policies WHERE id=? AND (client_id=? OR client_id=?)',
-                [policyId, req.portalUser.sub, rawClientId],
+                `SELECT id, data FROM policies WHERE id=? AND (client_id=? OR client_id=? OR data LIKE '%"clientId":"' || ? || '"%')`,
+                [policyId, req.portalUser.sub, rawClientId, rawClientId],
                 (err, row) => err ? reject(err) : resolve(row)
             );
         });
@@ -823,7 +823,7 @@ router.post('/coi/request', requirePortalAuth, (req, res, next) => {
         const agencyName  = isUIG ? 'United Insurance Group LLC'  : 'Vanguard Insurance Group LLC';
         const agencyShort = isUIG ? 'UIG Agency'                  : 'VIG Agency';
         const agencyEmail = isUIG ? 'contact@uigagency.com'       : 'contact@vigagency.com';
-        const agencyPass  = isUIG ? 'Jacob2007'                   : (process.env.GODADDY_PASSWORD || '25nickc124!');
+        const agencyPass  = isUIG ? (process.env.GODADDY_UIG_PASSWORD || '') : (process.env.GODADDY_VIG_PASSWORD || '');
         const agencyPhone = isUIG ? '(866) 628-9441'              : '(866) 628-9441';
 
         // ── 2. Always build overlaid PDF from the DB COI + cert holder + date ──
