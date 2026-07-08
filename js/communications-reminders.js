@@ -23,6 +23,20 @@ class CommunicationsReminders {
         }, 30000);
     }
 
+    // Check if a record matches the current agency filter
+    _matchesAgency(agentValue) {
+        const filter = window.currentCommsAgency || '';
+        if (!filter) return true; // All Agencies
+        const agent = (agentValue || '').trim();
+        // Capitalize first letter for comparison
+        const normalizedAgent = agent.charAt(0).toUpperCase() + agent.slice(1).toLowerCase();
+        const vanguardAgents = ['Grant', 'Carson', 'Hunter'];
+        const unitedAgents = ['Maureen'];
+        if (filter === 'Vanguard') return vanguardAgents.includes(normalizedAgent);
+        if (filter === 'United') return unitedAgents.includes(normalizedAgent);
+        return normalizedAgent === filter;
+    }
+
     // Get all reminders (new policies, new clients, and birthdays)
     getReminders() {
         const reminders = [];
@@ -39,7 +53,8 @@ class CommunicationsReminders {
 
         policies.filter(policy => {
             if (_isMaureen) return (policy.agent || '').toLowerCase().includes('maureen');
-            return true;
+            const policyAgent = policy.agent || policy.assignedTo || policy.assignedAgent || policy.producer || '';
+            return this._matchesAgency(policyAgent);
         }).forEach(policy => {
             const createdDate = new Date(policy.createdAt || policy.date);
             if (createdDate >= sevenDaysAgo && createdDate <= new Date()) {
@@ -82,7 +97,8 @@ class CommunicationsReminders {
 
         clients.filter(client => {
             if (_isMaureen) return (client.agent || '').toLowerCase().includes('maureen');
-            return true;
+            const clientAgent = client.agent || client.assignedTo || '';
+            return this._matchesAgency(clientAgent);
         }).forEach(client => {
             if (client.dateOfBirth) {
                 const birthDate = new Date(client.dateOfBirth);
@@ -120,7 +136,8 @@ class CommunicationsReminders {
 
         insurancePolicies.filter(policy => {
             if (_isMaureen) return (policy.agent || '').toLowerCase().includes('maureen');
-            return true;
+            const policyAgent = policy.agent || policy.assignedTo || policy.assignedAgent || policy.producer || '';
+            return this._matchesAgency(policyAgent);
         }).forEach(policy => {
             // Check if policy has Date of Birth/Inception in insured data
             if (policy.insured && policy.insured['Date of Birth/Inception']) {
@@ -210,7 +227,13 @@ class CommunicationsReminders {
             console.log('📅 Loading recent clients from API...');
             const _rcSessionUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
             const _rcIsMaureen = _rcSessionUser === 'maureen';
-            const recentUrl = _rcIsMaureen ? '/api/clients/recent?days=7&agent=maureen' : '/api/clients/recent?days=7';
+            let recentUrl;
+            if (_rcIsMaureen) {
+                recentUrl = '/api/clients/recent?days=7&agent=maureen';
+            } else {
+                const agencyFilter = window.currentCommsAgency || '';
+                recentUrl = agencyFilter ? `/api/clients/recent?days=7&agency=${encodeURIComponent(agencyFilter)}` : '/api/clients/recent?days=7';
+            }
             const response = await fetch(recentUrl);
 
             if (response.ok) {

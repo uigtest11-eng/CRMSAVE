@@ -772,11 +772,30 @@ app.get('/api/clients/recent', (req, res) => {
                 phone: clientData.phone || null,
                 email: clientData.email || null,
                 state: clientData.state || null,
+                agent: clientData.assignedTo || clientData.agent || null,
                 giftSent: false
             };
         });
 
-        res.json(recentClients);
+        // Filter by agent or agency if requested
+        const agentFilter = req.query.agent;
+        const agencyFilter = req.query.agency;
+        let filtered = recentClients;
+        if (agentFilter) {
+            filtered = filtered.filter(c => (c.agent || '').toLowerCase() === agentFilter.toLowerCase());
+        } else if (agencyFilter) {
+            const vanguardAgents = ['grant', 'carson', 'hunter'];
+            const unitedAgents = ['maureen'];
+            if (agencyFilter === 'Vanguard') {
+                filtered = filtered.filter(c => vanguardAgents.includes((c.agent || '').toLowerCase()));
+            } else if (agencyFilter === 'United') {
+                filtered = filtered.filter(c => unitedAgents.includes((c.agent || '').toLowerCase()));
+            } else {
+                filtered = filtered.filter(c => (c.agent || '').toLowerCase() === agencyFilter.toLowerCase());
+            }
+        }
+
+        res.json(filtered);
     });
 });
 
