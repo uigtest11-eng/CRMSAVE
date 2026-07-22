@@ -22888,7 +22888,8 @@ function showIvansReview(parsedPolicies) {
                         const badge = isUpd
                             ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;">UPDATE</span>`
                             : `<span style="background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;">NEW</span>`;
-                        const prem = p.premium ? '$' + parseFloat(p.premium||0).toLocaleString() + '/yr' : '—';
+                        const _rp = _ivansResolvePremium(p);
+                        const prem = _rp > 0 ? '$' + _rp.toLocaleString() + '/yr' : '—';
                         const rowBg = isUpd ? '' : 'background:#f0fdf4;';
                         // Pre-fill producer from existing policy if available
                         const existAgent = p._match ? (p._match.agent || p._match.assignedTo || p._match.producer || '') : '';
@@ -22938,6 +22939,54 @@ function ivansApplyDefaultProducer(producer) {
     });
 }
 
+// Convert IVANS coverages array [{coverageCode, limit1, limit2, deductible, premium, description}]
+// into the CoveragesArray format {CODE: {Code, Description, Amount, Premium, Deductible}} the UI expects
+function _ivansCoveragesToCoveragesArray(coverages) {
+    if (!Array.isArray(coverages) || !coverages.length) return null;
+    // Strip leading zeros from padded AL3 numeric values like "0001000000"
+    const cleanNum = (v) => {
+        if (!v) return '';
+        const s = String(v).trim();
+        if (/^0+\d+$/.test(s)) return String(parseInt(s, 10));
+        return s;
+    };
+    const arr = {};
+    for (const cov of coverages) {
+        const code = cov.coverageCode || cov.code || '';
+        if (!code) continue;
+        const limit = cleanNum(cov.limit1 || cov.limit || '');
+        const limit2 = cleanNum(cov.limit2 || '');
+        const amount = limit2 ? `${limit}/${limit2}` : limit;
+        arr[code] = {
+            Code: code,
+            Description: cov.description || cov.covDesc || '',
+            Amount: amount,
+            Premium: cov.premium || '',
+            Deductible: cleanNum(cov.deductible || ''),
+        };
+    }
+    return Object.keys(arr).length ? arr : null;
+}
+
+// Resolve premium from multiple IVANS fields — FPREM, totalPremium, annualPremium, grandTotal, or coverage sum
+function _ivansResolvePremium(p) {
+    const tryFields = [p.premium, p.totalPremium, p.annualPremium, p.periodPremium, p.grandTotal];
+    for (const v of tryFields) {
+        const n = parseFloat(v);
+        if (!isNaN(n) && n > 0) return n;
+    }
+    // Last resort: sum individual coverage premiums
+    if (Array.isArray(p.coverages) && p.coverages.length) {
+        let sum = 0;
+        for (const c of p.coverages) {
+            const cp = parseFloat(c.premium);
+            if (!isNaN(cp)) sum += cp;
+        }
+        if (sum > 0) return sum;
+    }
+    return 0;
+}
+
 async function confirmIvansImport() {
     const data = window._ivansReviewData;
     if (!data) return;
@@ -22977,9 +23026,9 @@ async function confirmIvansImport() {
                     policies[idx].assignedTo = p._producer;
                     policies[idx].producer   = p._producer;
                 }
-                if (p.premium) {
-                    const n = parseFloat(p.premium);
-                    if (!isNaN(n)) {
+                {
+                    const n = _ivansResolvePremium(p);
+                    if (n > 0) {
                         policies[idx].premium = `$${n.toLocaleString()}/yr`;
                         if (!policies[idx].financial) policies[idx].financial = {};
                         policies[idx].financial['Annual Premium'] = n;
@@ -23019,8 +23068,18 @@ async function confirmIvansImport() {
                 if (p.phone)   conObj['Phone']    = p.phone;
                 policies[idx].contact = conObj;
                 // Coverage, vehicles, drivers
-                if (p.coverages && Object.keys(p.coverages).length)
-                    policies[idx].coverage = Object.assign({}, policies[idx].coverage || {}, p.coverages);
+                // Fix existing coverage if stored as raw array from old imports
+                if (Array.isArray(policies[idx].coverage)) {
+                    const converted = _ivansCoveragesToCoveragesArray(policies[idx].coverage);
+                    policies[idx].coverage = converted ? { CoveragesArray: converted } : {};
+                }
+                if (Array.isArray(p.coverages) && p.coverages.length) {
+                    const updCovArr = _ivansCoveragesToCoveragesArray(p.coverages);
+                    if (updCovArr) {
+                        if (!policies[idx].coverage || typeof policies[idx].coverage !== 'object') policies[idx].coverage = {};
+                        policies[idx].coverage.CoveragesArray = Object.assign({}, policies[idx].coverage.CoveragesArray || {}, updCovArr);
+                    }
+                }
                 if (p.vehicles && p.vehicles.length) policies[idx].vehicles = p.vehicles;
                 if (p.drivers  && p.drivers.length)  policies[idx].drivers  = p.drivers;
                 if (p.state && !policies[idx].policyState) policies[idx].policyState = p.state;
@@ -23080,6 +23139,8 @@ async function confirmIvansImport() {
             if (p.state)   conObj['State']    = p.state;
             if (p.zip)     conObj['Zip Code'] = p.zip;
             if (p.phone)   conObj['Phone']    = p.phone;
+            const resolvedPrem = _ivansResolvePremium(p);
+            const covArray = _ivansCoveragesToCoveragesArray(p.coverages);
             const newPol = {
                 id:             newId,
                 policyNumber:   (p.policyNumber||'').replace(/\s+/g,''),
@@ -23094,8 +23155,8 @@ async function confirmIvansImport() {
                 expirationDate: p.expirationDate||'',
                 term:           _ivansCalcTerm(p.effectiveDate||'', p.expirationDate||''),
                 newRenewal:     _ivansNewRenewal(p.transactionCode),
-                premium:        n ? `$${n.toLocaleString()}/yr` : '',
-                financial:      { 'Annual Premium': n||0 },
+                premium:        resolvedPrem ? `$${resolvedPrem.toLocaleString()}/yr` : '',
+                financial:      { 'Annual Premium': resolvedPrem||0 },
                 lob:            p.lob||'',
                 policyStatus:   'active',
                 source:         'ivans',
@@ -23103,7 +23164,7 @@ async function confirmIvansImport() {
                 ivansUpdated:   new Date().toISOString(),
                 insured:        insObj,
                 contact:        conObj,
-                coverage:       p.coverages || {},
+                coverage:       covArray ? { CoveragesArray: covArray } : {},
                 vehicles:       p.vehicles  || [],
                 drivers:        p.drivers   || [],
                 agent:          p._producer || '',
@@ -24226,6 +24287,11 @@ function generateViewTabContent(tabId, policy) {
                 const _pId = policy.id || policy.policyNumber || '';
                 // Check dedicated override key first (bypasses all 22+ localStorage interceptors)
                 let coveragesArray = coverageData.CoveragesArray;
+                // Fallback: if coverage was stored as raw array from IVANS, convert on the fly
+                if (!coveragesArray && Array.isArray(policy.coverage) && policy.coverage.length) {
+                    coveragesArray = _ivansCoveragesToCoveragesArray(policy.coverage);
+                    if (coveragesArray) console.log('📋 COVERAGE TAB: Converted raw array →', Object.keys(coveragesArray).length, 'entries for', _pId);
+                }
                 try {
                     const _covRaw = Storage.prototype.getItem.call(localStorage, '_covOverride_' + _pId);
                     if (_covRaw) {
