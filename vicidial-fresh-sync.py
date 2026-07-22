@@ -17,8 +17,8 @@ import sys
 import subprocess
 sys.path.append('/var/www/vanguard')
 
-# Deepgram configuration
-DEEPGRAM_API_KEY = "19b5d4a1221a91a41bc415d5eefc955d94938962"
+# Deepgram configuration from environment
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
 
 try:
     exec(open('/var/www/vanguard/openai-processor.py').read())
@@ -30,10 +30,10 @@ except:
 # Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Configuration
-VICIDIAL_HOST = "204.13.233.29"
-VICIDIAL_USERNAME = "6666"
-VICIDIAL_PASSWORD = "corp06"
+# Configuration from environment
+VICIDIAL_HOST = os.environ.get("VICIDIAL_HOST", "204.13.233.29")
+VICIDIAL_USERNAME = os.environ.get("VICIDIAL_USER", "")
+VICIDIAL_PASSWORD = os.environ.get("VICIDIAL_PASS", "")
 DB_PATH = "/var/www/vanguard/vanguard.db"
 PROGRESS_FILE = "/var/www/vanguard/sync-progress.json"
 

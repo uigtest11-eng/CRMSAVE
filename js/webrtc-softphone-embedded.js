@@ -9,9 +9,9 @@ class VanguardWebRTCSoftphone {
         this.session = null;
         this.isRegistered = false;
         this.config = {
-            user: 'Grant',
-            password: 'GrantCorp2006@',
-            realm: 'vanguard1.sip.twilio.com',
+            user: '',
+            password: '',
+            realm: '',
             display: 'Vanguard Agent',
             // Try multiple WebSocket URLs - Twilio SIP domains may use different formats
             wsServers: [
@@ -25,8 +25,18 @@ class VanguardWebRTCSoftphone {
         this.init();
     }
 
-    init() {
-        console.log('📞 Initializing Embedded WebRTC Softphone...');
+    async init() {
+        // Load SIP config from server
+        try {
+            const jwt = sessionStorage.getItem('vanguard_jwt');
+            const resp = await fetch('/api/sip-config', { headers: { Authorization: 'Bearer ' + jwt } });
+            if (resp.ok) {
+                const cfg = await resp.json();
+                this.config.user = cfg.username;
+                this.config.password = cfg.password;
+                this.config.realm = cfg.domain;
+            }
+        } catch (e) { console.warn('Could not load SIP config'); }
         this.createUI();
         this.initializeSIP();
     }

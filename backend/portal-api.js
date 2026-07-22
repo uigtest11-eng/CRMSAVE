@@ -823,7 +823,7 @@ router.post('/coi/request', requirePortalAuth, (req, res, next) => {
         const agencyName  = isUIG ? 'United Insurance Group LLC'  : 'Vanguard Insurance Group LLC';
         const agencyShort = isUIG ? 'UIG Agency'                  : 'VIG Agency';
         const agencyEmail = isUIG ? 'contact@uigagency.com'       : 'contact@vigagency.com';
-        const agencyPass  = isUIG ? 'Jacob2007'                   : (process.env.GODADDY_PASSWORD || '25nickc124!');
+        const agencyPass  = isUIG ? (process.env.GODADDY_UIG_PASSWORD || '') : (process.env.GODADDY_VIG_PASSWORD || '');
         const agencyPhone = isUIG ? '(866) 628-9441'              : '(866) 628-9441';
 
         // ── 2. Always build overlaid PDF from the DB COI + cert holder + date ──

@@ -48,7 +48,7 @@ async function testSIPDomains() {
 
     const sipConfig = {
         username: 'Grant',
-        password: 'GrantCorp2006@',
+        password: 'REDACTED',
         domains: [
             'vanguard1.sip.twilio.com',
             'vanguard1.sip.us1.twilio.com'

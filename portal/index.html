@@ -1,0 +1,2772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Vanguard Client Portal</title>
+  <link rel="icon" href="/images/v-logo.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0A1F3D">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Vanguard">
+  <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+  <meta name="description" content="Manage your insurance policies, request certificates, and view documents.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:       #0A1F3D;
+      --blue-mid:   #14638A;
+      --primary:    #08578C;
+      --text-dark:  #12243D;
+      --text-sec:   #54667D;
+      --bg-home:    #E3EDF7;
+      --bg-docs:    #D6E6F2;
+      --bg-auth:    #EBF5FC;
+      --card:       #F7FAFF;
+      --card-nw:    #F5FAFF;
+      --sel-card:   #D4EBFF;
+      --teal:       #30C7A3;
+      --banner-dk:  #0D3059;
+      --login-from: #0A1F3D;
+      --login-to:   #14638A;
+      --r-sm:  14px;
+      --r-md:  18px;
+      --r-lg:  24px;
+      --r-xl:  28px;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      background: var(--bg-home);
+    }
+
+    /* ── App Shell ── */
+    #app {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      max-width: 430px;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ── Screen System ── */
+    .screen { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .screen.active { display: flex; }
+
+    /* ══════════════════════════════════════════════════
+       LOGIN SCREEN
+    ══════════════════════════════════════════════════ */
+    #screen-login {
+      background: linear-gradient(135deg, var(--login-from), var(--login-to));
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .login-scroll {
+      min-height: 100%;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .login-inner {
+      width: 100%;
+      max-width: 430px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .login-header { display: flex; flex-direction: column; gap: 12px; }
+
+    .logo-banner {
+      background: white;
+      border-radius: var(--r-xl);
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      overflow: hidden;
+      height: 106px;
+    }
+    .logo-banner img {
+      width: 100%;
+      height: 220px;
+      object-fit: cover;
+      object-position: center 45%;
+      display: block;
+      flex-shrink: 0;
+    }
+    .logo-banner-fallback {
+      font-weight: 700;
+      font-size: 17px;
+      color: var(--text-dark);
+      text-align: center;
+      padding: 12px 0;
+    }
+
+    .login-title {
+      font-size: 22px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.92);
+    }
+    .login-sub {
+      font-size: 15px;
+      color: rgba(255,255,255,0.75);
+      line-height: 1.5;
+    }
+
+    .login-card {
+      background: rgba(255,255,255,0.12);
+      border-radius: var(--r-xl);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* ── Form Fields ── */
+    .field-group { display: flex; flex-direction: column; gap: 8px; }
+    .field-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.86);
+    }
+    .field-label.dark { color: var(--text-sec); }
+
+    .portal-input {
+      width: 100%;
+      padding: 14px;
+      background: rgba(255,255,255,0.14);
+      color: white;
+      border: none;
+      border-radius: 16px;
+      font-family: var(--font);
+      font-size: 16px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .portal-input::placeholder { color: rgba(255,255,255,0.45); }
+    .portal-input:focus { background: rgba(255,255,255,0.22); }
+
+    .portal-input.dark {
+      background: rgba(255,255,255,0.95);
+      color: var(--text-dark);
+    }
+    .portal-input.dark::placeholder { color: rgba(84,102,125,0.55); }
+    .portal-input.dark:focus { background: white; }
+
+    /* ── Toggle ── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 15px;
+      color: rgba(255,255,255,0.88);
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 51px;
+      height: 31px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.3);
+      border-radius: 31px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      width: 27px;
+      height: 27px;
+      left: 2px;
+      top: 2px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--teal); }
+    .toggle-switch input:checked + .toggle-track::after { transform: translateX(20px); }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      width: 100%;
+      padding: 16px;
+      background: white;
+      color: var(--navy);
+      border: none;
+      border-radius: var(--r-md);
+      font-family: var(--font);
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      -webkit-appearance: none;
+    }
+    .btn-primary:disabled { opacity: 0.55; cursor: default; }
+    .btn-primary:active:not(:disabled) { opacity: 0.85; }
+
+    .btn-primary.blue {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-primary.white-outlined {
+      background: white;
+      color: var(--text-dark);
+    }
+
+    .btn-ghost {
+      background: none;
+      border: none;
+      color: white;
+      font-family: var(--font);
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 0;
+    }
+
+    .login-features {
+      background: rgba(255,255,255,0.12);
+      border-radius: var(--r-xl);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .login-feature-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.75);
+    }
+    .login-feature-item svg { flex-shrink: 0; }
+
+    .error-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: #FFCFCF;
+    }
+    .error-text.dark { color: #d93025; }
+
+    /* ══════════════════════════════════════════════════
+       MAIN APP (POST-LOGIN)
+    ══════════════════════════════════════════════════ */
+    #screen-app {
+      background: var(--bg-home);
+      overflow: hidden;
+    }
+
+    /* Tab Content Area */
+    .tab-content-area {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-panel {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tab-panel.active { display: flex; }
+    #tab-docs { background: var(--bg-docs); }
+    #tab-home, #tab-profile { background: var(--bg-home); }
+
+    .tab-scroll-inner {
+      padding: 16px 20px;
+      max-width: 430px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding-bottom: 24px;
+    }
+
+    /* ── Bottom Tab Bar ── */
+    .tab-bar {
+      background: white;
+      display: flex;
+      border-top: 1px solid rgba(0,0,0,0.08);
+      padding-bottom: env(safe-area-inset-bottom, 0);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 8px 0 10px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-sec);
+      transition: color 0.15s;
+      -webkit-appearance: none;
+    }
+    .tab-btn.active { color: var(--primary); }
+    .tab-btn svg { width: 24px; height: 24px; }
+
+    /* ── Section Title ── */
+    .section-title {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+
+    /* ── Logo Banner (in main app) ── */
+    .logo-banner-app {
+      background: linear-gradient(135deg, var(--card-nw), #CCE6FA);
+      border-radius: var(--r-xl);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .logo-banner-app .logo-strip {
+      background: white;
+      border-radius: 22px;
+      padding: 8px 10px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .logo-banner-app .logo-strip img {
+      max-height: 88px;
+      max-width: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .welcome-title {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--text-dark);
+    }
+    .welcome-sub {
+      font-size: 15px;
+      color: var(--text-sec);
+      line-height: 1.5;
+    }
+
+    /* ── Wide Stat Bar ── */
+    .wide-stat {
+      background: rgba(255,255,255,0.9);
+      border-radius: 20px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+    }
+    .wide-stat-icon {
+      width: 42px;
+      height: 42px;
+      background: white;
+      border-radius: var(--r-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .wide-stat-icon svg { color: var(--primary); }
+    .wide-stat-label {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-sec);
+      flex: 1;
+    }
+    .wide-stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+
+    /* ── Policy Card ── */
+    .policy-card {
+      background: var(--card);
+      border-radius: var(--r-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .policy-card.selected {
+      background: var(--sel-card);
+      border-color: var(--primary);
+    }
+
+    .policy-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .policy-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+    .status-badge {
+      background: rgba(52,199,89,0.15);
+      color: #1a9a38;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 10px;
+      border-radius: 99px;
+      white-space: nowrap;
+    }
+    .policy-number {
+      font-size: 13px;
+      color: var(--text-sec);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .policy-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: nowrap;
+    }
+    .policy-chip {
+      flex: 1;
+      min-width: 0;
+      background: rgba(255,255,255,0.92);
+      border: none;
+      border-radius: 99px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dark);
+      white-space: nowrap;
+      -webkit-appearance: none;
+      transition: background 0.1s;
+    }
+    .policy-chip:active { background: #e8f0fa; }
+    .policy-chip svg { color: var(--primary); flex-shrink: 0; width: 14px; height: 14px; }
+
+    /* ── Empty Policies ── */
+    .empty-card {
+      background: var(--card);
+      border-radius: var(--r-lg);
+      padding: 20px;
+    }
+    .empty-card-title { font-size: 16px; font-weight: 700; color: var(--text-dark); margin-bottom: 8px; }
+    .empty-card-sub { font-size: 15px; color: var(--text-sec); line-height: 1.5; }
+
+    /* ── Documents List ── */
+    #documents-list { display: flex; flex-direction: column; gap: 10px; }
+    .doc-list-item {
+      background: rgba(247,250,255,0.97);
+      border-radius: var(--r-lg);
+      padding: 18px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      text-align: left;
+      font-family: var(--font);
+      -webkit-appearance: none;
+    }
+    .doc-list-item:active { opacity: 0.85; }
+    .doc-icon {
+      width: 42px;
+      height: 42px;
+      background: white;
+      border-radius: var(--r-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .doc-icon svg { color: var(--primary); }
+    .doc-title { font-size: 16px; font-weight: 700; color: var(--text-dark); }
+
+    /* ── Profile ── */
+    .profile-card {
+      background: var(--card);
+      border-radius: var(--r-xl);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .profile-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+    }
+    .profile-name { font-size: 20px; font-weight: 700; color: var(--text-dark); }
+    .profile-company, .profile-email { font-size: 15px; color: var(--text-sec); margin-top: 4px; }
+    .profile-divider { border: none; border-top: 1px solid rgba(0,0,0,0.08); }
+
+    .labeled-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .labeled-key { font-size: 15px; color: var(--text-sec); flex-shrink: 0; }
+    .labeled-val { font-size: 15px; font-weight: 500; color: var(--text-dark); text-align: right; }
+
+    .account-card {
+      background: var(--card);
+      border-radius: var(--r-xl);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 15px;
+    }
+    .detail-row-key { color: var(--text-sec); flex-shrink: 0; max-width: 40%; }
+    .detail-row-val { color: var(--text-dark); text-align: right; line-height: 1.4; }
+
+    /* ── Loading Spinner ── */
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid rgba(8,87,140,0.15);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex: 1;
+      padding: 40px;
+    }
+    .loading-center p {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dark);
+    }
+
+    /* ══════════════════════════════════════════════════
+       MODAL OVERLAY SYSTEM
+    ══════════════════════════════════════════════════ */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-overlay.fullscreen { align-items: stretch; }
+
+    .modal-sheet {
+      background: var(--bg-auth);
+      border-radius: 28px 28px 0 0;
+      width: 100%;
+      max-width: 430px;
+      max-height: 94vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+      animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(40px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .modal-sheet.fullscreen {
+      border-radius: 0;
+      max-height: 100vh;
+      height: 100%;
+    }
+
+    .modal-header {
+      padding: 20px 20px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .modal-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 22px;
+      color: var(--text-sec);
+      cursor: pointer;
+      line-height: 1;
+      padding: 4px;
+      -webkit-appearance: none;
+    }
+
+    .modal-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      flex: 1;
+    }
+
+    /* ── Auth Flow Container (create/reset password) ── */
+    .auth-flow {
+      background: var(--bg-auth);
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .auth-flow-inner {
+      padding: 24px;
+      max-width: 430px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .auth-logo-banner {
+      background: white;
+      border-radius: var(--r-xl);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+    }
+    .auth-logo-banner img {
+      max-height: 78px;
+      max-width: 100%;
+      object-fit: contain;
+    }
+
+    .auth-flow-head { display: flex; flex-direction: column; gap: 8px; }
+    .auth-flow-title { font-size: 24px; font-weight: 700; color: var(--text-dark); }
+    .auth-flow-sub { font-size: 15px; color: var(--text-sec); line-height: 1.5; }
+    .auth-flow-email { font-size: 13px; font-weight: 700; color: var(--primary); }
+
+    .auth-flow-card {
+      background: #EEF4FB;
+      border-radius: var(--r-lg);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .token-display {
+      background: white;
+      border-radius: var(--r-sm);
+      padding: 12px;
+      font-size: 13px;
+      font-family: monospace;
+      color: var(--text-dark);
+      word-break: break-all;
+    }
+    .token-display-label {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-dark);
+      margin-bottom: 8px;
+    }
+
+    /* ── COI Request ── */
+    .radio-option {
+      background: var(--card-nw);
+      border-radius: var(--r-md);
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      border: none;
+      width: 100%;
+      font-family: var(--font);
+      -webkit-appearance: none;
+    }
+    .radio-option:active { opacity: 0.85; }
+    .radio-circle {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .radio-circle.selected::after {
+      content: '';
+      width: 12px;
+      height: 12px;
+      background: var(--primary);
+      border-radius: 50%;
+    }
+    .radio-label {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-dark);
+    }
+
+    .cert-holder-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .saved-holders-btn {
+      background: white;
+      border: none;
+      border-radius: var(--r-md);
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      font-family: var(--font);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--primary);
+      width: 100%;
+      -webkit-appearance: none;
+    }
+    .saved-holders-btn svg { flex-shrink: 0; }
+    .saved-holders-btn .chevron { margin-left: auto; }
+
+    .recipients-box {
+      background: var(--card-nw);
+      border-radius: 20px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .recipient-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .recipient-input {
+      flex: 1;
+      padding: 14px;
+      background: white;
+      border: none;
+      border-radius: 16px;
+      font-family: var(--font);
+      font-size: 16px;
+      color: var(--text-dark);
+      outline: none;
+      -webkit-appearance: none;
+    }
+    .recipient-input::placeholder { color: rgba(84,102,125,0.55); }
+
+    .trash-btn {
+      width: 42px;
+      height: 42px;
+      background: white;
+      border: none;
+      border-radius: var(--r-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      -webkit-appearance: none;
+    }
+    .trash-btn svg { color: #d93025; }
+    .trash-btn:disabled svg { color: rgba(0,0,0,0.2); }
+    .trash-btn:disabled { cursor: default; }
+
+    .add-recipient-btn {
+      background: none;
+      border: none;
+      font-family: var(--font);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--primary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+      -webkit-appearance: none;
+    }
+
+    .action-pair {
+      display: flex;
+      gap: 12px;
+    }
+    .action-pair .btn-primary { flex: 1; }
+
+    /* ── Document Banner ── */
+    .doc-banner {
+      background: var(--banner-dk);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .doc-banner-text { flex: 1; }
+    .doc-banner-title { font-size: 16px; font-weight: 700; color: white; }
+    .doc-banner-sub { font-size: 14px; color: rgba(255,255,255,0.78); margin-top: 2px; }
+    .doc-banner-close {
+      width: 38px;
+      height: 38px;
+      background: rgba(255,255,255,0.14);
+      border: none;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      -webkit-appearance: none;
+    }
+    .doc-banner-close svg { color: white; }
+
+    /* ── Document Viewer Modal ── */
+    #modal-doc-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: none;
+      flex-direction: column;
+      background: #EDF4FC;
+    }
+    #modal-doc-viewer.show { display: flex; }
+
+    .doc-viewer-scroll {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 20px;
+    }
+    .doc-viewer-inner {
+      max-width: 430px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* ── Document Cards in Viewer ── */
+    .doc-content-card {
+      background: white;
+      border-radius: var(--r-lg);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .doc-content-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .doc-content-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-dark);
+    }
+    .dl-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      -webkit-appearance: none;
+    }
+    .dl-btn svg { width: 26px; height: 26px; }
+
+    .id-card-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 14px;
+    }
+    .id-card-key {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sec);
+    }
+    .id-card-val {
+      font-size: 15px;
+      font-weight: 500;
+      color: #141C2E;
+      text-align: right;
+    }
+
+    .acord-doc-row {
+      display: flex;
+      gap: 16px;
+      padding-bottom: 4px;
+    }
+    .acord-cell { flex: 1; }
+    .acord-cell-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-sec);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .acord-cell-val {
+      font-size: 15px;
+      font-weight: 500;
+      color: #141C2E;
+    }
+    .coverage-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 15px;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(0,0,0,0.07);
+    }
+    .coverage-line:last-child { border-bottom: none; }
+    .coverage-line-key { color: #384759; }
+    .coverage-line-val { font-weight: 600; color: #141C2E; }
+
+    .embedded-doc-frame {
+      width: 100%;
+      min-height: 520px;
+      border: none;
+      border-radius: var(--r-md);
+      display: block;
+    }
+
+    .doc-loading {
+      min-height: 320px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+    }
+    .doc-loading p { font-size: 13px; font-weight: 600; color: var(--text-dark); }
+
+    /* ── Saved Certificate Holders ── */
+    .holders-section { display: flex; flex-direction: column; gap: 12px; }
+    .holders-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .holders-section-title { font-size: 17px; font-weight: 700; color: var(--text-dark); }
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: white;
+      border-radius: var(--r-sm);
+      padding: 10px 12px;
+      width: 170px;
+    }
+    .search-box svg { color: var(--text-sec); flex-shrink: 0; width: 16px; height: 16px; }
+    .search-box input {
+      border: none;
+      background: none;
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text-dark);
+      outline: none;
+      width: 100%;
+    }
+
+    .holders-list { display: flex; flex-direction: column; gap: 12px; max-height: 210px; overflow-y: auto; }
+
+    .holder-card {
+      background: white;
+      border-radius: var(--r-md);
+      padding: 16px;
+      cursor: pointer;
+      border: none;
+      text-align: left;
+      font-family: var(--font);
+      width: 100%;
+      -webkit-appearance: none;
+    }
+    .holder-card:active { opacity: 0.85; }
+    .holder-name { font-size: 16px; font-weight: 700; color: var(--text-dark); margin-bottom: 4px; }
+    .holder-addr, .holder-city { font-size: 14px; color: var(--text-sec); }
+    .holder-email { font-size: 12px; color: var(--primary); margin-top: 2px; }
+
+    .no-holders {
+      font-size: 14px;
+      color: var(--text-sec);
+      padding: 16px;
+      text-align: center;
+    }
+
+    /* ── Notification Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 96px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--text-dark);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 99px;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 999;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      max-width: 90%;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ── Skeleton Loader ── */
+    .skeleton {
+      background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.06) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.2s ease infinite;
+      border-radius: 8px;
+    }
+    @keyframes shimmer {
+      from { background-position: 200% 0; }
+      to   { background-position: -200% 0; }
+    }
+
+    /* ── Desktop-only elements: hidden on mobile by default ── */
+    .login-brand-panel { display: none; }
+    .sidebar-brand { display: none; }
+
+    /* ── Responsive tweaks ── */
+    @media (min-height: 812px) {
+      .login-scroll { padding: 40px 24px; }
+    }
+    @media (min-width: 430px) {
+      #app { border-left: 1px solid rgba(0,0,0,0.08); border-right: 1px solid rgba(0,0,0,0.08); }
+      html, body { background: #d0dce8; }
+    }
+
+    /* ══════════════════════════════════════════════════
+       TABLET  (768px – 1023px)
+    ══════════════════════════════════════════════════ */
+    @media (min-width: 768px) {
+      html, body { overflow: auto; background: #C5D5E5; }
+
+      #app { max-width: 100%; border: none; }
+
+      /* Login: centered card, no split yet */
+      #screen-login { overflow-y: auto; }
+      .login-brand-panel { display: none; }
+      /* Reset logo-banner to normal on tablet+ */
+      .logo-banner { overflow: visible; height: auto; padding: 8px 12px; min-height: unset; }
+      .logo-banner img { width: auto; height: auto; max-height: 88px; max-width: 100%; object-fit: contain; }
+      .login-scroll { padding: 56px 32px; background: linear-gradient(160deg, rgba(74,144,196,0.88) 0%, rgba(110,176,216,0.82) 50%, rgba(168,208,236,0.78) 100%), url('/images/login-truck-bg.jpg') center/cover no-repeat; }
+      .login-inner { max-width: 520px; }
+      /* auth-flow-card color scheme for login-card on tablet+ */
+      .login-card { background: #EEF4FB; }
+      .login-card .field-label { color: var(--text-sec); }
+      .login-card .portal-input { background: rgba(255,255,255,0.95); color: var(--text-dark); }
+      .login-card .portal-input::placeholder { color: rgba(84,102,125,0.55); }
+      .login-card .portal-input:focus { background: white; }
+      .login-card .toggle-row { color: var(--text-dark); }
+      .login-card .btn-ghost { color: var(--primary); }
+      .login-card .btn-primary { background: var(--primary); color: white; }
+
+      /* Modals: centered pop-up instead of bottom sheet */
+      .modal-overlay { align-items: center; }
+      .modal-sheet {
+        border-radius: var(--r-xl);
+        max-width: 540px;
+        max-height: 88vh;
+      }
+      .modal-sheet.fullscreen {
+        border-radius: var(--r-xl);
+        max-height: 88vh;
+        height: auto;
+        max-width: 680px;
+      }
+      @keyframes slideUp {
+        from { transform: translateY(20px) scale(0.98); opacity: 0; }
+        to   { transform: translateY(0)    scale(1);    opacity: 1; }
+      }
+      .auth-flow-inner { max-width: 520px; }
+
+      /* Content panels wider */
+      .tab-scroll-inner { max-width: 700px; padding: 28px 32px; }
+      .doc-viewer-inner { max-width: 700px; }
+      .doc-viewer-scroll { padding: 28px 32px; }
+    }
+
+    /* ══════════════════════════════════════════════════
+       DESKTOP  (1024px+)
+    ══════════════════════════════════════════════════ */
+    @media (min-width: 1024px) {
+      html, body { overflow: hidden; background: #B8CCE0; height: 100%; }
+
+      #app {
+        max-width: 100%;
+        width: 100%;
+        flex-direction: row;
+        height: 100vh;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      /* ─── LOGIN: Two-panel split ─── */
+      #screen-login {
+        flex-direction: row;
+        overflow: hidden;
+      }
+
+      /* Left brand panel */
+      .login-brand-panel {
+        display: flex;
+        flex: 0 0 440px;
+        background: linear-gradient(160deg, var(--login-from) 0%, var(--login-to) 100%);
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
+        padding: 0;
+        overflow: hidden;
+      }
+      .login-brand-inner {
+        padding: 56px 48px;
+        display: flex;
+        flex-direction: column;
+        gap: 36px;
+        height: 100%;
+        justify-content: center;
+      }
+      .login-brand-logo {
+        background: #ffffff;
+        border-radius: var(--r-xl);
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        height: 110px;
+      }
+      .login-brand-logo img {
+        width: 100%;
+        height: 120px; /* light crop top/bottom */
+        object-fit: cover;
+        object-position: center 50%; /* show middle third only */
+        display: block;
+        flex-shrink: 0;
+      }
+      .login-brand-title {
+        font-size: 34px;
+        font-weight: 800;
+        color: white;
+        line-height: 1.2;
+      }
+      .login-brand-sub {
+        font-size: 16px;
+        color: rgba(255,255,255,0.78);
+        line-height: 1.6;
+        margin-top: 10px;
+      }
+      .login-brand-features {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .login-brand-feat {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 15px;
+        font-weight: 500;
+        color: rgba(255,255,255,0.88);
+      }
+      .login-brand-feat svg { flex-shrink: 0; }
+
+      /* Right form panel */
+      .login-scroll {
+        flex: 1;
+        background: linear-gradient(160deg, rgba(74,144,196,0.85) 0%, rgba(110,176,216,0.80) 50%, rgba(168,208,236,0.75) 100%), url('/images/login-truck-bg.jpg') center/cover no-repeat;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        overflow-y: auto;
+        padding: 48px 48px;
+      }
+      .login-inner {
+        max-width: 420px;
+        width: 100%;
+        gap: 28px;
+      }
+      /* Hide left-panel duplicates on the right */
+      .login-inner .login-header { display: none; }
+      .login-inner .login-features { display: none; }
+
+      /* ─── APP: Sidebar layout ─── */
+      #screen-app {
+        flex-direction: row;
+        overflow: hidden;
+      }
+
+      /* Sidebar */
+      .tab-bar {
+        flex-direction: column;
+        width: 220px;
+        flex-shrink: 0;
+        height: 100%;
+        border-top: none;
+        border-right: 1px solid rgba(0,0,0,0.08);
+        padding: 0;
+        justify-content: flex-start;
+        align-items: stretch;
+        background: white;
+        overflow: hidden;
+      }
+      .sidebar-brand {
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+        padding: 20px 16px 16px;
+        border-bottom: 1px solid rgba(0,0,0,0.07);
+        flex-shrink: 0;
+      }
+      .sidebar-brand img { max-height: 52px; max-width: 100%; object-fit: contain; display: block; }
+
+      .tab-btn {
+        flex: none;
+        flex-direction: row;
+        justify-content: flex-start;
+        padding: 13px 18px;
+        font-size: 14px;
+        font-weight: 600;
+        gap: 12px;
+        border-radius: var(--r-sm);
+        margin: 3px 10px;
+        width: calc(100% - 20px);
+        color: var(--text-sec);
+      }
+      .tab-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
+      .tab-btn.active {
+        color: var(--primary);
+        background: rgba(8,87,140,0.08);
+      }
+      .tab-btn:hover:not(.active) { background: rgba(0,0,0,0.04); }
+
+      /* Content area */
+      .tab-content-area {
+        flex: 1;
+        overflow: hidden;
+        background: var(--bg-home);
+      }
+      #tab-docs { background: var(--bg-docs); }
+
+      .tab-scroll-inner {
+        max-width: 900px;
+        padding: 32px 40px;
+      }
+
+      /* Policies: 2-column grid */
+      #policies-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+      }
+
+      /* Profile tab: 2-column grid for cards */
+      #tab-profile .tab-scroll-inner { flex-direction: column; }
+
+      /* Documents: 3-column grid */
+      #documents-list {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+
+      /* Doc viewer: wider, centered */
+      #modal-doc-viewer .doc-viewer-inner { max-width: 900px; }
+      #modal-doc-viewer .doc-viewer-scroll { padding: 32px 40px; }
+      .embedded-doc-frame { min-height: 680px; }
+
+      /* Modals: centered dialog */
+      .modal-overlay { align-items: center; }
+      .modal-sheet {
+        border-radius: var(--r-xl);
+        max-width: 580px;
+        max-height: 82vh;
+      }
+      .modal-sheet.fullscreen {
+        border-radius: var(--r-xl);
+        max-width: 720px;
+        max-height: 88vh;
+        height: auto;
+      }
+      @keyframes slideUp {
+        from { transform: translateY(16px) scale(0.97); opacity: 0; }
+        to   { transform: translateY(0)    scale(1);    opacity: 1; }
+      }
+
+      /* Toast adjusts for no bottom tab bar */
+      .toast { bottom: 32px; }
+    }
+
+    /* ─── Sidebar brand hidden on mobile ─── */
+    .sidebar-brand { display: none; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════ LOGIN SCREEN ══════════ -->
+  <div id="screen-login" class="screen active">
+    <!-- Desktop-only left branding panel -->
+    <div class="login-brand-panel">
+      <div class="login-brand-inner">
+        <div class="login-brand-logo">
+          <img src="/images/vanguard-logo.png" alt="Vanguard Insurance Group"
+               onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <span style="display:none;font-weight:800;font-size:20px;color:white">Vanguard Insurance Group</span>
+        </div>
+        <div class="login-brand-text">
+          <p class="login-brand-title">Your Insurance,<br>All in One Place</p>
+          <p class="login-brand-sub">Access your policies, request certificates, and manage your coverage — anytime, anywhere.</p>
+        </div>
+        <div class="login-brand-features">
+          <div class="login-brand-feat">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+            <span>Policy summaries &amp; status</span>
+          </div>
+          <div class="login-brand-feat">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/></svg>
+            <span>Digital ID cards &amp; COIs</span>
+          </div>
+          <div class="login-brand-feat">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/></svg>
+            <span>Certificate requests in seconds</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="login-scroll">
+      <div class="login-inner">
+        <!-- Header -->
+        <div class="login-header">
+          <div class="logo-banner">
+            <img src="/images/vanguard-logo.png" alt="Vanguard Insurance Group"
+                 onerror="this.parentNode.innerHTML='<div class=\'logo-banner-fallback\'>Vanguard Insurance Group</div>'">
+          </div>
+          <p class="login-title">Client Portal</p>
+          <p class="login-sub">Review policies, request certificates, and manage your profile after sign in.</p>
+        </div>
+
+        <!-- Fields -->
+        <div class="login-card">
+          <div class="field-group">
+            <label class="field-label" for="login-email">Email</label>
+            <input id="login-email" class="portal-input" type="email" autocomplete="email"
+                   autocapitalize="none" autocorrect="off" spellcheck="false"
+                   placeholder="you@example.com">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="login-password">Password</label>
+            <input id="login-password" class="portal-input" type="password" autocomplete="current-password"
+                   placeholder="Password">
+          </div>
+
+          <div class="toggle-row">
+            <span>Keep me signed in</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="login-remember" checked>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+
+          <p id="login-error" class="error-text" style="display:none"></p>
+
+          <button class="btn-primary" id="btn-sign-in">Sign In</button>
+          <button class="btn-ghost" id="btn-forgot">Forgot Password?</button>
+          <button class="btn-ghost" id="btn-create-password-open">Create Password</button>
+        </div>
+
+        <!-- Feature bullets -->
+        <div class="login-features">
+          <div class="login-feature-item">
+            <!-- checkmark.shield.fill → shield check -->
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.75)">
+              <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
+            </svg>
+            <span>Policy summaries</span>
+          </div>
+          <div class="login-feature-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.75)">
+              <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM6 20V4h7v5h5v11H6z"/>
+            </svg>
+            <span>Digital ID cards</span>
+          </div>
+          <div class="login-feature-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(255,255,255,0.75)">
+              <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z"/>
+            </svg>
+            <span>Certificate requests</span>
+          </div>
+        </div>
+        <a href="/portal/privacy.html" style="display:block;text-align:center;margin-top:16px;font-size:12px;color:rgba(255,255,255,0.5);text-decoration:none;">Privacy Policy</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ MAIN APP SCREEN ══════════ -->
+  <div id="screen-app" class="screen">
+    <div class="tab-content-area">
+
+      <!-- HOME TAB -->
+      <div id="tab-home" class="tab-panel active">
+        <div class="tab-scroll-inner">
+
+          <!-- Header Card -->
+          <div class="logo-banner-app" id="home-header-card">
+            <div class="logo-strip">
+              <img src="/portal/images/vig-logo-wide.png" alt="Vanguard Insurance Group"
+                   onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:12px 0\'>Vanguard Insurance Group</div>'">
+            </div>
+            <p class="welcome-title" id="welcome-name">Welcome back</p>
+            <p class="welcome-sub">Manage your active commercial policies, billing, and client requests from one place.</p>
+            <div class="wide-stat">
+              <div class="wide-stat-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+                </svg>
+              </div>
+              <span class="wide-stat-label">Active Policies</span>
+              <span class="wide-stat-value" id="policy-count">0</span>
+            </div>
+          </div>
+
+          <!-- Policies Section -->
+          <p class="section-title">My Policies</p>
+          <div id="policies-list">
+            <div class="loading-center">
+              <div class="spinner"></div>
+              <p>Loading policies…</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- DOCUMENTS TAB -->
+      <div id="tab-docs" class="tab-panel">
+        <div class="tab-scroll-inner">
+          <p class="section-title">Documents</p>
+          <div id="documents-list">
+            <button class="doc-list-item" onclick="openDocViewer('idCards')">
+              <div class="doc-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+              </div>
+              <span class="doc-title">ID Cards</span>
+              <svg style="margin-left:auto;color:var(--text-sec);width:16px;height:16px" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+            </button>
+            <button class="doc-list-item" onclick="openDocViewer('declarations')">
+              <div class="doc-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+              </div>
+              <span class="doc-title">Policy Declarations</span>
+              <svg style="margin-left:auto;color:var(--text-sec);width:16px;height:16px" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+            </button>
+            <button class="doc-list-item" onclick="openDocViewer('billing')">
+              <div class="doc-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>
+              </div>
+              <span class="doc-title">Billing Schedule</span>
+              <svg style="margin-left:auto;color:var(--text-sec);width:16px;height:16px" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PROFILE TAB -->
+      <div id="tab-profile" class="tab-panel">
+        <div class="tab-scroll-inner" style="position:relative">
+          <button onclick="logout()" style="position:absolute;top:0;right:0;background:none;border:none;padding:4px 0 4px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--text-sec)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+            Sign Out
+          </button>
+          <!-- Profile Card -->
+          <div class="profile-card" id="profile-card">
+            <div class="loading-center" style="padding:20px">
+              <div class="spinner"></div>
+            </div>
+          </div>
+          <!-- Account Overview -->
+          <div class="account-card" id="account-card" style="display:none">
+            <p class="section-title">Account Overview</p>
+            <div id="account-details"></div>
+          </div>
+          <!-- Legal links -->
+          <div style="text-align:center;padding:16px 0 8px;display:flex;justify-content:center;gap:16px;">
+            <a href="/portal/privacy.html" style="font-size:13px;color:var(--text-sec);text-decoration:none;">Privacy Policy</a>
+            <span style="color:var(--text-sec);opacity:0.4;">|</span>
+            <a href="/portal/delete-account.html" style="font-size:13px;color:var(--text-sec);text-decoration:none;">Delete Account</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Bottom Tab Bar / Desktop Sidebar -->
+    <div class="tab-bar">
+      <div class="sidebar-brand">
+        <img src="/images/vanguard-logo.png" alt="Vanguard"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+        <span style="display:none;font-weight:700;font-size:14px;color:var(--text-dark)">Vanguard</span>
+      </div>
+      <button class="tab-btn active" data-tab="home" onclick="switchTab('home', this)">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h1v7c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-7h1l-9-9-9 9zm7 7v-5h4v5h-4z"/></svg>
+        Home
+      </button>
+      <button class="tab-btn" data-tab="docs" onclick="switchTab('docs', this)">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+        Documents
+      </button>
+      <button class="tab-btn" data-tab="profile" onclick="switchTab('profile', this)">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Profile
+      </button>
+    </div>
+  </div>
+
+</div><!-- end #app -->
+
+<!-- ══════════════════════════════════
+     AUTH FLOW MODALS
+══════════════════════════════════ -->
+
+<!-- Create Password Modal -->
+<div class="modal-overlay" id="modal-create-password">
+  <div class="modal-sheet" style="max-height:96vh">
+    <div class="auth-flow">
+      <div class="auth-flow-inner">
+        <div class="auth-logo-banner">
+          <img src="/images/vanguard-logo.png" alt="Vanguard"
+               onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:10px 0\'>Vanguard Insurance Group</div>'">
+        </div>
+        <div class="auth-flow-head">
+          <p class="auth-flow-title">Create Password</p>
+          <p class="auth-flow-sub">Set your first portal password and continue straight into your client account.</p>
+          <p class="auth-flow-email" id="create-pw-email"></p>
+        </div>
+        <div class="auth-flow-card">
+          <div class="field-group" id="create-pw-email-row" style="display:none">
+            <label class="field-label dark" for="create-pw-email-input">Email</label>
+            <input id="create-pw-email-input" class="portal-input dark" type="email" autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="you@example.com">
+          </div>
+          <div class="field-group">
+            <label class="field-label dark" for="create-pw-new">New Password</label>
+            <input id="create-pw-new" class="portal-input dark" type="password" autocomplete="new-password" placeholder="New Password">
+          </div>
+          <div class="field-group">
+            <label class="field-label dark" for="create-pw-confirm">Confirm Password</label>
+            <input id="create-pw-confirm" class="portal-input dark" type="password" autocomplete="new-password" placeholder="Confirm Password">
+          </div>
+          <p id="create-pw-error" class="error-text dark" style="display:none"></p>
+          <button class="btn-primary blue" id="btn-create-pw">Create Password</button>
+          <button class="btn-primary white-outlined" onclick="closeModal('modal-create-password')">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reset Password Modal -->
+<div class="modal-overlay" id="modal-reset-password">
+  <div class="modal-sheet" style="max-height:96vh">
+    <div class="auth-flow">
+      <div class="auth-flow-inner">
+        <div class="auth-logo-banner">
+          <img src="/images/vanguard-logo.png" alt="Vanguard"
+               onerror="this.parentNode.innerHTML='<div style=\'font-weight:700;font-size:15px;color:#12243D;padding:10px 0\'>Vanguard Insurance Group</div>'">
+        </div>
+        <div class="auth-flow-head">
+          <p class="auth-flow-title">Reset Password</p>
+          <p class="auth-flow-sub">Request a token, set a new password, and sign back into the portal.</p>
+          <p class="auth-flow-email" id="reset-pw-email"></p>
+        </div>
+        <div class="auth-flow-card">
+          <div id="reset-token-display" style="display:none">
+            <p class="token-display-label">Reset Token</p>
+            <div class="token-display" id="reset-token-value"></div>
+          </div>
+          <div class="field-group">
+            <label class="field-label dark" for="reset-pw-token">Reset Token</label>
+            <input id="reset-pw-token" class="portal-input dark" type="text" autocapitalize="none" autocomplete="off" placeholder="Paste token here">
+          </div>
+          <div class="field-group">
+            <label class="field-label dark" for="reset-pw-new">New Password</label>
+            <input id="reset-pw-new" class="portal-input dark" type="password" autocomplete="new-password" placeholder="New Password">
+          </div>
+          <div class="field-group">
+            <label class="field-label dark" for="reset-pw-confirm">Confirm Password</label>
+            <input id="reset-pw-confirm" class="portal-input dark" type="password" autocomplete="new-password" placeholder="Confirm Password">
+          </div>
+          <p id="reset-pw-error" class="error-text dark" style="display:none"></p>
+          <button class="btn-primary" style="background:none;border:none;color:var(--primary);font-weight:600;font-size:15px;text-align:left;padding:0;width:auto"
+                  id="btn-request-reset-token">Request New Reset Token</button>
+          <button class="btn-primary blue" id="btn-reset-pw">Reset Password</button>
+          <button class="btn-primary white-outlined" onclick="closeModal('modal-reset-password')">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- COI Request Sheet -->
+<div class="modal-overlay" id="modal-coi">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Send COI</span>
+      <button class="modal-close" onclick="closeModal('modal-coi')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div>
+        <p style="font-size:19px;font-weight:700;color:var(--text-dark)" id="coi-policy-name"></p>
+        <p style="font-size:15px;color:var(--text-sec);margin-top:4px" id="coi-policy-number"></p>
+      </div>
+
+      <!-- Certificate For -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <p style="font-size:17px;font-weight:700;color:var(--text-dark)">Certificate For</p>
+        <button class="radio-option" onclick="setCOIAudience('business',this)" id="radio-business">
+          <div class="radio-circle selected" id="radio-circle-business"></div>
+          <span class="radio-label">For myself/business</span>
+        </button>
+        <button class="radio-option" onclick="setCOIAudience('thirdParty',this)" id="radio-thirdParty">
+          <div class="radio-circle" id="radio-circle-thirdParty"></div>
+          <span class="radio-label">For third party/subcontractor</span>
+        </button>
+      </div>
+
+      <!-- Certificate Holder (third party only) -->
+      <div id="cert-holder-section" style="display:none" class="cert-holder-section">
+        <button class="saved-holders-btn" onclick="openSavedHolders()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+          <span>Saved Certificate Holders</span>
+          <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+        </button>
+        <p style="font-size:17px;font-weight:700;color:var(--text-dark)">Certificate Holder</p>
+        <div class="field-group">
+          <label class="field-label dark" for="holder-name">Certificate Holder Name</label>
+          <input id="holder-name" class="portal-input dark" type="text" placeholder="Certificate Holder Name">
+        </div>
+        <div class="field-group">
+          <label class="field-label dark" for="holder-street">Street Address</label>
+          <input id="holder-street" class="portal-input dark" type="text" placeholder="Street Address">
+        </div>
+        <div class="field-group">
+          <label class="field-label dark" for="holder-city">City, State, ZIP</label>
+          <input id="holder-city" class="portal-input dark" type="text" placeholder="City, State, ZIP">
+        </div>
+      </div>
+
+      <!-- Email Recipients -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <p style="font-size:17px;font-weight:700;color:var(--text-dark)">Email Recipients</p>
+          <button class="add-recipient-btn" onclick="addRecipient()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+            Add Recipient
+          </button>
+        </div>
+        <div class="recipients-box" id="recipients-list">
+          <!-- dynamic rows -->
+        </div>
+      </div>
+
+      <p id="coi-error" class="error-text dark" style="display:none"></p>
+
+      <div class="action-pair">
+        <button class="btn-primary blue" id="btn-send-coi">Send Certificate</button>
+        <button class="btn-primary white-outlined" onclick="closeModal('modal-coi')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Saved Certificate Holders Sheet -->
+<div class="modal-overlay" id="modal-saved-holders">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <span class="modal-title">Certificate Holders</span>
+      <button class="modal-close" onclick="closeModal('modal-saved-holders')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Global holders -->
+      <div class="holders-section">
+        <div class="holders-section-head">
+          <p class="holders-section-title">Global Certificate Holders</p>
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" placeholder="Search" id="global-search" oninput="filterHolders()">
+          </div>
+        </div>
+        <div class="holders-list" id="global-holders-list"></div>
+      </div>
+      <!-- Saved holders -->
+      <div class="holders-section">
+        <div class="holders-section-head">
+          <p class="holders-section-title">Saved Certificate Holders</p>
+          <div class="search-box">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" placeholder="Search" id="saved-search" oninput="filterHolders()">
+          </div>
+        </div>
+        <div class="holders-list" id="saved-holders-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Document Viewer (full screen) -->
+<div id="modal-doc-viewer">
+  <div class="doc-banner">
+    <div class="doc-banner-text">
+      <p class="doc-banner-title" id="viewer-title">Document</p>
+      <p class="doc-banner-sub" id="viewer-subtitle"></p>
+    </div>
+    <button class="doc-banner-close" onclick="closeDocViewer()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    </button>
+  </div>
+  <div class="doc-viewer-scroll">
+    <div class="doc-viewer-inner" id="viewer-content"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════════ */
+const State = {
+  token: null,
+  profile: null,
+  policies: [],
+  documentsByPolicyId: {},
+  globalHolders: [],
+  savedHolders: [],
+  selectedPolicyId: null,
+  coiAudience: 'business',
+  coiPolicyId: null,
+  recipients: [],
+};
+
+/* ═══════════════════════════════════════════════════════════
+   API
+═══════════════════════════════════════════════════════════ */
+const API = '/api/portal';
+
+async function apiCall(method, path, body, token) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API + path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.message || data.error || 'Request failed');
+    err.code = data.code;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   BOOT
+═══════════════════════════════════════════════════════════ */
+(async () => {
+  // Purge bloated CRM keys that share this domain's localStorage and blow the quota
+  try {
+    ['id_cards', 'insurance_leads', 'coi_documents', 'insurance_policies'].forEach(k => {
+      const v = localStorage.getItem(k);
+      if (v && v.length > 50000) localStorage.removeItem(k);
+    });
+  } catch(e) { /* ignore */ }
+
+  const stored = localStorage.getItem('portal_token');
+  if (stored) {
+    // Validate token hasn't expired before showing app
+    try {
+      const parts = stored.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          // Token expired — go straight to login
+          localStorage.removeItem('portal_token');
+          return;
+        }
+      }
+    } catch { localStorage.removeItem('portal_token'); return; }
+
+    State.token = stored;
+    showApp();
+    await loadPortalData();
+  }
+})();
+
+/* ═══════════════════════════════════════════════════════════
+   LOGIN FLOW
+═══════════════════════════════════════════════════════════ */
+document.getElementById('btn-sign-in').addEventListener('click', handleLogin);
+document.getElementById('login-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleLogin();
+});
+document.getElementById('btn-forgot').addEventListener('click', handleForgotPassword);
+
+async function handleLogin() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const remember = document.getElementById('login-remember').checked;
+
+  if (!email || !password) return;
+
+  setLoginLoading(true);
+  clearLoginError();
+
+  try {
+    const data = await apiCall('POST', '/login', { email, password });
+    State.token = data.token;
+    try { if (remember) localStorage.setItem('portal_token', data.token); } catch(e) { /* quota */ }
+    showApp();
+    await loadPortalData();
+  } catch (err) {
+    setLoginLoading(false);
+    if (err.code === 'PASSWORD_NOT_SET') {
+      document.getElementById('create-pw-email').textContent = email;
+      document.getElementById('create-pw-email-row').style.display = 'none';
+      document.getElementById('create-pw-new').value = '';
+      document.getElementById('create-pw-confirm').value = '';
+      document.getElementById('create-pw-error').style.display = 'none';
+      openModal('modal-create-password');
+    } else if (err.code === 'EMAIL_NOT_FOUND') {
+      showLoginError('No account found for that email.');
+    } else if (err.code === 'WRONG_PASSWORD') {
+      showLoginError('Incorrect password.');
+    } else if (err.code === 'MISSING_FIELDS') {
+      showLoginError('Enter your email and password.');
+    } else {
+      showLoginError(err.message || 'Sign in failed.');
+    }
+  }
+}
+
+async function handleForgotPassword() {
+  const email = document.getElementById('login-email').value.trim();
+  if (!email) { showLoginError('Enter your email first.'); return; }
+
+  setLoginLoading(true);
+  clearLoginError();
+
+  try {
+    const data = await apiCall('POST', '/request-password-reset', { email });
+    document.getElementById('reset-pw-email').textContent = email;
+    document.getElementById('reset-pw-token').value = '';
+    document.getElementById('reset-pw-new').value = '';
+    document.getElementById('reset-pw-confirm').value = '';
+
+    if (data.resetToken) {
+      document.getElementById('reset-token-display').style.display = 'block';
+      document.getElementById('reset-token-value').textContent = data.resetToken;
+      document.getElementById('reset-pw-token').value = data.resetToken;
+    } else {
+      document.getElementById('reset-token-display').style.display = 'none';
+    }
+    openModal('modal-reset-password');
+  } catch (err) {
+    showLoginError(err.message || 'Could not send reset email.');
+  } finally {
+    setLoginLoading(false);
+  }
+}
+
+function setLoginLoading(loading) {
+  document.getElementById('btn-sign-in').disabled = loading;
+  document.getElementById('btn-sign-in').textContent = loading ? 'Signing In…' : 'Sign In';
+}
+function showLoginError(msg) {
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function clearLoginError() {
+  document.getElementById('login-error').style.display = 'none';
+}
+
+/* ── Open Create Password from login button ── */
+document.getElementById('btn-create-password-open').addEventListener('click', () => {
+  document.getElementById('create-pw-email').textContent = '';
+  document.getElementById('create-pw-email-row').style.display = 'flex';
+  document.getElementById('create-pw-email-input').value = '';
+  document.getElementById('create-pw-new').value = '';
+  document.getElementById('create-pw-confirm').value = '';
+  document.getElementById('create-pw-error').style.display = 'none';
+  openModal('modal-create-password');
+});
+
+/* ── Create Password ── */
+document.getElementById('btn-create-pw').addEventListener('click', async () => {
+  const emailRow  = document.getElementById('create-pw-email-row');
+  const manualMode = emailRow.style.display !== 'none';
+  const email   = manualMode
+    ? document.getElementById('create-pw-email-input').value.trim()
+    : document.getElementById('create-pw-email').textContent.trim();
+  const pw      = document.getElementById('create-pw-new').value;
+  const confirm = document.getElementById('create-pw-confirm').value;
+  const errEl   = document.getElementById('create-pw-error');
+  errEl.style.display = 'none';
+
+  if (manualMode && !email) { errEl.textContent = 'Please enter your email.'; errEl.style.display = 'block'; return; }
+  if (pw.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.style.display = 'block'; return; }
+  if (pw !== confirm) { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
+
+  document.getElementById('btn-create-pw').disabled = true;
+  document.getElementById('btn-create-pw').textContent = 'Creating…';
+
+  try {
+    const data = await apiCall('POST', '/setup-password', { email, newPassword: pw });
+    State.token = data.token;
+    try { localStorage.setItem('portal_token', data.token); } catch(e) { /* quota */ }
+    closeModal('modal-create-password');
+    showApp();
+    await loadPortalData();
+  } catch (err) {
+    const msg = err.message || '';
+    errEl.textContent = (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no account') || err.status === 404)
+      ? 'No account found for that email.'
+      : (msg || 'Failed to create password.');
+    errEl.style.display = 'block';
+  } finally {
+    document.getElementById('btn-create-pw').disabled = false;
+    document.getElementById('btn-create-pw').textContent = 'Create Password';
+  }
+});
+
+/* ── Reset Password ── */
+document.getElementById('btn-request-reset-token').addEventListener('click', async () => {
+  const email = document.getElementById('reset-pw-email').textContent;
+  if (!email) return;
+  try {
+    const data = await apiCall('POST', '/request-password-reset', { email });
+    if (data.resetToken) {
+      document.getElementById('reset-token-display').style.display = 'block';
+      document.getElementById('reset-token-value').textContent = data.resetToken;
+      document.getElementById('reset-pw-token').value = data.resetToken;
+    }
+    showToast('Reset token sent.');
+  } catch (err) {
+    const errEl = document.getElementById('reset-pw-error');
+    errEl.textContent = err.message || 'Request failed.';
+    errEl.style.display = 'block';
+  }
+});
+
+document.getElementById('btn-reset-pw').addEventListener('click', async () => {
+  const token   = document.getElementById('reset-pw-token').value.trim();
+  const pw      = document.getElementById('reset-pw-new').value;
+  const confirm = document.getElementById('reset-pw-confirm').value;
+  const errEl   = document.getElementById('reset-pw-error');
+  errEl.style.display = 'none';
+
+  if (!token) { errEl.textContent = 'Enter the reset token.'; errEl.style.display = 'block'; return; }
+  if (pw.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.style.display = 'block'; return; }
+  if (pw !== confirm) { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
+
+  document.getElementById('btn-reset-pw').disabled = true;
+  document.getElementById('btn-reset-pw').textContent = 'Resetting…';
+
+  try {
+    const data = await apiCall('POST', '/complete-password-reset', { resetToken: token, newPassword: pw });
+    State.token = data.token;
+    try { localStorage.setItem('portal_token', data.token); } catch(e) { /* quota */ }
+    closeModal('modal-reset-password');
+    showApp();
+    await loadPortalData();
+  } catch (err) {
+    errEl.textContent = err.message || 'Reset failed.';
+    errEl.style.display = 'block';
+  } finally {
+    document.getElementById('btn-reset-pw').disabled = false;
+    document.getElementById('btn-reset-pw').textContent = 'Reset Password';
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   SHOW APP / LOAD DATA
+═══════════════════════════════════════════════════════════ */
+function showApp() {
+  document.getElementById('screen-login').classList.remove('active');
+  document.getElementById('screen-app').classList.add('active');
+}
+
+async function loadPortalData() {
+  try {
+    const [profileData, policiesData, holdersData] = await Promise.all([
+      apiCall('GET', '/me', null, State.token),
+      apiCall('GET', '/policies', null, State.token),
+      apiCall('GET', '/certificate-holders', null, State.token).catch(() => []),
+    ]);
+
+    State.profile = profileData;
+    State.policies = policiesData.policies || [];
+    const holders = holdersData?.certificateHolders || holdersData || [];
+    State.globalHolders = holders.filter(h => h.isGlobal);
+    State.savedHolders  = holders.filter(h => !h.isGlobal);
+    State.selectedPolicyId = State.policies[0]?.policyId || null;
+
+    renderHome();
+    renderProfile();
+
+    // Pre-load documents in background
+    for (const policy of State.policies) {
+      apiCall('GET', '/policies/' + policy.policyId + '/documents', null, State.token)
+        .then(res => {
+          const arr = res?.documents ?? res;
+          State.documentsByPolicyId[policy.policyId] = Array.isArray(arr) ? arr : [];
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) {
+      logout();
+    } else {
+      // Network error or unexpected failure — show in UI instead of infinite spinner
+      const errMsg = err.message || 'Connection error. Please try again.';
+      const errHTML = `<div class="empty-card"><p class="empty-card-title">Could not load data</p><p class="empty-card-sub">${errMsg}</p><button class="btn-primary blue" style="margin-top:16px;padding:12px" onclick="loadPortalData()">Retry</button></div>`;
+      const list = document.getElementById('policies-list');
+      if (list) list.innerHTML = errHTML;
+      const profileCard = document.getElementById('profile-card');
+      if (profileCard) profileCard.innerHTML = errHTML;
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RENDER HOME
+═══════════════════════════════════════════════════════════ */
+function renderHome() {
+  const p = State.profile;
+  if (p) {
+    const first = (p.fullName || p.name || '').split(' ')[0] || 'there';
+    document.getElementById('welcome-name').textContent = 'Welcome back, ' + first;
+  }
+
+  document.getElementById('policy-count').textContent = State.policies.length;
+
+  const list = document.getElementById('policies-list');
+  if (State.policies.length === 0) {
+    list.innerHTML = `
+      <div class="empty-card">
+        <p class="empty-card-title">No Active Policies</p>
+        <p class="empty-card-sub">This client portal is active, but no bound policies are attached to the account yet.</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = State.policies.map(pol => `
+    <div class="policy-card ${pol.policyId === State.selectedPolicyId ? 'selected' : ''}"
+         id="pcard-${CSS.escape(pol.policyId)}"
+         onclick="selectPolicy('${esc(pol.policyId)}')">
+      <div class="policy-card-header">
+        <span class="policy-name">${esc(pol.policyName)}</span>
+        <span class="status-badge">${esc(pol.status || 'Active')}</span>
+      </div>
+      <div class="policy-number">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color:var(--text-sec)"><path d="M5 7h2v2H5V7zm0 4h2v2H5v-2zm0 4h2v2H5v-2zm12-8h-6v2h6V7zm0 4h-6v2h6v-2zm0 4h-6v2h6v-2zM3 3v18h18V3H3zm16 16H5V5h14v14z"/></svg>
+        ${esc(pol.policyNumber)}
+      </div>
+      <div class="policy-actions">
+        <button class="policy-chip" onclick="event.stopPropagation();openCOIRequest('${esc(pol.policyId)}')">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          Send COI
+        </button>
+        <button class="policy-chip" onclick="event.stopPropagation();viewCOI('${esc(pol.policyId)}')">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+          View COI
+        </button>
+        <button class="policy-chip" onclick="event.stopPropagation();viewIDCards('${esc(pol.policyId)}')">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4v-8h16v8zm-8-7h6v5h-6v-5zM4 8h10v2H4V8zM4 11h4v1H4v-1zm0 2h4v1H4v-1z"/></svg>
+          ID Cards
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectPolicy(policyId) {
+  State.selectedPolicyId = policyId;
+  document.querySelectorAll('.policy-card').forEach(el => {
+    el.classList.toggle('selected', el.id === 'pcard-' + policyId);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RENDER PROFILE
+═══════════════════════════════════════════════════════════ */
+function renderProfile() {
+  const p = State.profile;
+  if (!p) return;
+
+  const fullName = p.fullName || p.name || 'Unknown';
+  const initials = fullName.split(' ').slice(0,2).map(n => n[0]).join('');
+  const company  = p.businessName || '';
+  const email    = p.email || '';
+  const phone    = p.phone || '';
+  const address  = [p.address, p.city, p.state, p.zip].filter(Boolean).join(', ');
+  const zip      = p.zip || '';
+  const acctId   = p.accountId || '';
+  const agent    = p.assignedAgent || '';
+
+  document.getElementById('profile-card').innerHTML = `
+    <div class="profile-header">
+      <div class="avatar">${initials}</div>
+      <div>
+        <p class="profile-name">${esc(fullName)}</p>
+        <p class="profile-company">${esc(company)}</p>
+        <p class="profile-email">${esc(email)}</p>
+      </div>
+    </div>
+    <hr class="profile-divider">
+    <div class="labeled-row"><span class="labeled-key">Policyholder ID</span><span class="labeled-val">${esc(acctId)}</span></div>
+    <div class="labeled-row"><span class="labeled-key">Phone</span><span class="labeled-val">${esc(phone)}</span></div>
+    <div class="labeled-row"><span class="labeled-key">Garage ZIP</span><span class="labeled-val">${esc(zip)}</span></div>
+  `;
+
+  const daysToRenewal = computeRenewalDays();
+
+  // Determine agency: United if any policy is flagged united or agent is Maureen
+  const isUnited = State.policies.some(pol => pol.united === true || pol.united === 'true') ||
+                   agent.toLowerCase().includes('maureen');
+  const agency = isUnited ? 'United' : 'Vanguard';
+
+  document.getElementById('account-card').style.display = 'flex';
+  document.getElementById('account-details').innerHTML = `
+    <div class="detail-row"><span class="detail-row-key">Primary Address</span><span class="detail-row-val">${esc(address)}</span></div>
+    <div class="detail-row"><span class="detail-row-key">Preferred Contact</span><span class="detail-row-val">Email and SMS alerts</span></div>
+    <div class="detail-row"><span class="detail-row-key">Agency</span><span class="detail-row-val">${esc(agency)}</span></div>
+    <div class="detail-row"><span class="detail-row-key">Agent</span><span class="detail-row-val">${esc(agent)}</span></div>
+  `;
+
+  // Swap header logo based on agency
+  const logoImg = document.querySelector('#home-header-card .logo-strip img');
+  if (logoImg) {
+    logoImg.src = isUnited ? '/portal/images/uig-logo-wide.png' : '/portal/images/vig-logo-wide.png';
+    logoImg.alt = isUnited ? 'United Insurance Group' : 'Vanguard Insurance Group';
+  }
+}
+
+function computeRenewalDays() {
+  let nearest = null;
+  for (const pol of State.policies) {
+    if (pol.expirationDate) {
+      const d = new Date(pol.expirationDate);
+      if (!isNaN(d) && (nearest === null || d < nearest)) nearest = d;
+    }
+  }
+  if (!nearest) return '—';
+  const diff = Math.ceil((nearest - Date.now()) / 86400000);
+  if (diff < 0) return 'Expired';
+  return diff + ' days remaining';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAB SWITCHING
+═══════════════════════════════════════════════════════════ */
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   COI REQUEST
+═══════════════════════════════════════════════════════════ */
+function openCOIRequest(policyId) {
+  const pol = State.policies.find(p => p.policyId === policyId);
+  if (!pol) return;
+
+  State.coiPolicyId = policyId;
+  State.coiAudience = 'business';
+  State.recipients  = [{ id: Date.now(), email: '' }];
+
+  document.getElementById('coi-policy-name').textContent   = pol.policyName || '';
+  document.getElementById('coi-policy-number').textContent = pol.policyNumber || '';
+  document.getElementById('coi-error').style.display = 'none';
+  document.getElementById('cert-holder-section').style.display = 'none';
+  document.getElementById('holder-name').value = '';
+  document.getElementById('holder-street').value = '';
+  document.getElementById('holder-city').value = '';
+
+  updateAudienceUI();
+  renderRecipients();
+  openModal('modal-coi');
+}
+
+function setCOIAudience(val) {
+  State.coiAudience = val;
+  updateAudienceUI();
+}
+
+function updateAudienceUI() {
+  ['business','thirdParty'].forEach(v => {
+    document.getElementById('radio-circle-' + v).className =
+      'radio-circle' + (State.coiAudience === v ? ' selected' : '');
+  });
+  document.getElementById('cert-holder-section').style.display =
+    State.coiAudience === 'thirdParty' ? 'flex' : 'none';
+}
+
+function renderRecipients() {
+  const list = document.getElementById('recipients-list');
+  list.innerHTML = State.recipients.map(r => `
+    <div class="recipient-row" id="rrow-${r.id}">
+      <input class="recipient-input" type="email" autocapitalize="none" placeholder="Email"
+             value="${esc(r.email)}"
+             oninput="updateRecipientEmail(${r.id}, this.value)">
+      <button class="trash-btn" ${State.recipients.length === 1 ? 'disabled' : ''}
+              onclick="removeRecipient(${r.id})">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+function updateRecipientEmail(id, val) {
+  const r = State.recipients.find(r => r.id === id);
+  if (r) r.email = val;
+}
+
+function addRecipient() {
+  State.recipients.push({ id: Date.now(), email: '' });
+  renderRecipients();
+}
+
+function removeRecipient(id) {
+  if (State.recipients.length <= 1) return;
+  State.recipients = State.recipients.filter(r => r.id !== id);
+  renderRecipients();
+}
+
+document.getElementById('btn-send-coi').addEventListener('click', async () => {
+  const errEl = document.getElementById('coi-error');
+  errEl.style.display = 'none';
+
+  const emails = State.recipients.map(r => r.email.trim()).filter(Boolean);
+  if (emails.length === 0) {
+    errEl.textContent = 'Add at least one recipient email.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  let holder = { name: "Insured's Copy", company: '', address: '', city: '', state: '', zip: '' };
+  if (State.coiAudience === 'thirdParty') {
+    const name   = document.getElementById('holder-name').value.trim();
+    const street = document.getElementById('holder-street').value.trim();
+    const city   = document.getElementById('holder-city').value.trim();
+    if (name && street && city) {
+      const parts = city.split(',').map(s => s.trim());
+      const cityName = parts[0] || '';
+      const stateZip = (parts[1] || '').split(' ').filter(Boolean);
+      holder = {
+        name,
+        company: '',
+        address: street,
+        city: cityName,
+        state: stateZip[0] || '',
+        zip:   stateZip.slice(1).join(' '),
+      };
+    }
+  }
+
+  document.getElementById('btn-send-coi').disabled = true;
+  document.getElementById('btn-send-coi').textContent = 'Sending…';
+
+  try {
+    const pol = State.policies.find(p => p.policyId === State.coiPolicyId);
+    await apiCall('POST', '/coi/request', {
+      policyId:          State.coiPolicyId,
+      policyNumber:      pol?.policyNumber || '',
+      requestType:       State.coiAudience === 'thirdParty' ? 'third_party' : 'standard',
+      recipientEmails:   emails,
+      certificateHolder: holder,
+      additionalNotes:   '',
+    }, State.token);
+
+    closeModal('modal-coi');
+    showToast('Certificate request submitted!');
+  } catch (err) {
+    errEl.textContent = err.message || 'Request failed.';
+    errEl.style.display = 'block';
+  } finally {
+    document.getElementById('btn-send-coi').disabled = false;
+    document.getElementById('btn-send-coi').textContent = 'Send Certificate';
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════
+   SAVED CERTIFICATE HOLDERS
+═══════════════════════════════════════════════════════════ */
+function openSavedHolders() {
+  filterHolders();
+  openModal('modal-saved-holders');
+}
+
+function filterHolders() {
+  const gQuery = (document.getElementById('global-search').value || '').toLowerCase();
+  const sQuery = (document.getElementById('saved-search').value || '').toLowerCase();
+
+  renderHolderList(
+    document.getElementById('global-holders-list'),
+    State.globalHolders.filter(h => matchesHolder(h, gQuery))
+  );
+  renderHolderList(
+    document.getElementById('saved-holders-list'),
+    State.savedHolders.filter(h => matchesHolder(h, sQuery))
+  );
+}
+
+function matchesHolder(h, q) {
+  if (!q) return true;
+  return (h.name||'').toLowerCase().includes(q) ||
+         (h.address||'').toLowerCase().includes(q) ||
+         (h.city||'').toLowerCase().includes(q) ||
+         (h.email||'').toLowerCase().includes(q);
+}
+
+function renderHolderList(container, holders) {
+  if (holders.length === 0) {
+    container.innerHTML = '<p class="no-holders">No holders found</p>';
+    return;
+  }
+  container.innerHTML = holders.map(h => {
+    const cityLine = [h.city, h.state, h.zip].filter(Boolean).join(', ');
+    return `
+      <button class="holder-card" onclick="selectHolder('${esc(h.id)}')">
+        <p class="holder-name">${esc(h.name)}</p>
+        <p class="holder-addr">${esc(h.address || '')}</p>
+        <p class="holder-city">${esc(cityLine)}</p>
+        ${h.email ? `<p class="holder-email">${esc(h.email)}</p>` : ''}
+      </button>
+    `;
+  }).join('');
+}
+
+function selectHolder(id) {
+  const holder = [...State.globalHolders, ...State.savedHolders].find(h => h.id === id);
+  if (!holder) return;
+
+  document.getElementById('holder-name').value   = holder.name || '';
+  document.getElementById('holder-street').value = holder.address || '';
+  const cityLine = [holder.city, holder.state, holder.zip].filter(Boolean).join(', ');
+  document.getElementById('holder-city').value   = cityLine;
+
+  if (State.recipients.length > 0 && !State.recipients[0].email && holder.email) {
+    State.recipients[0].email = holder.email;
+    renderRecipients();
+  }
+
+  closeModal('modal-saved-holders');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DOCUMENT VIEWER
+═══════════════════════════════════════════════════════════ */
+async function viewCOI(policyId) {
+  const pol = State.policies.find(p => p.policyId === policyId);
+  if (!pol) return;
+
+  const docs = await refreshPolicyDocs(policyId, true);
+  const liveCOI = docs.find(d => getDocType(d) === 'coi');
+
+  document.getElementById('viewer-title').textContent    = pol.policyName || 'COI';
+  document.getElementById('viewer-subtitle').textContent = pol.policyNumber || '';
+
+  if (liveCOI) {
+    renderLiveDoc('viewer-content', liveCOI, pol, 'ACORD Certificate');
+  } else {
+    renderMockCOI('viewer-content', pol);
+  }
+
+  document.getElementById('modal-doc-viewer').classList.add('show');
+}
+
+async function viewIDCards(policyId) {
+  const pol = State.policies.find(p => p.policyId === policyId);
+  if (!pol) return;
+
+  const docs = await refreshPolicyDocs(policyId, true);
+  const liveIDCard = docs.find(d => getDocType(d) === 'id_card');
+
+  document.getElementById('viewer-title').textContent    = pol.policyName || 'ID Cards';
+  document.getElementById('viewer-subtitle').textContent = pol.policyNumber || '';
+
+  if (liveIDCard) {
+    renderLiveDoc('viewer-content', liveIDCard, pol, 'Insurance ID Card');
+  } else {
+    renderMockIDCards('viewer-content', pol);
+  }
+
+  document.getElementById('modal-doc-viewer').classList.add('show');
+}
+
+async function openDocViewer(type) {
+  if (State.policies.length === 0) {
+    showToast('No policies available.');
+    return;
+  }
+
+  const titleMap = { idCards: 'ID Cards', declarations: 'Policy Declarations', billing: 'Billing Schedule' };
+  document.getElementById('viewer-title').textContent    = titleMap[type] || type;
+  document.getElementById('viewer-subtitle').textContent = 'All Active Policies';
+
+  const content = document.getElementById('viewer-content');
+  content.innerHTML = '';
+
+  for (const pol of State.policies) {
+    const docs = await refreshPolicyDocs(pol.policyId, true);
+    const divider = document.createElement('div');
+    divider.style.cssText = 'margin-bottom:4px';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:8px 0 12px';
+    header.innerHTML = `
+      <p style="font-size:17px;font-weight:700;color:var(--text-dark)">${esc(pol.policyName)}</p>
+      <p style="font-size:14px;color:var(--text-sec);margin-top:2px">${esc(pol.policyNumber)}</p>
+    `;
+    content.appendChild(header);
+
+    let matchDoc = null;
+    if (type === 'idCards')       matchDoc = docs.find(d => getDocType(d) === 'id_card');
+    else if (type === 'declarations') matchDoc = docs.find(d => { const t = getDocType(d); return t === 'declaration' || t === 'dec_page'; });
+    else if (type === 'billing')  matchDoc = docs.find(d => { const t = getDocType(d); return t === 'billing' || t === 'payment_schedule'; });
+
+    const wrapper = document.createElement('div');
+    if (matchDoc) {
+      renderLiveDocInto(wrapper, matchDoc, pol, titleMap[type]);
+    } else {
+      if (type === 'idCards')          renderMockIDCardsInto(wrapper, pol);
+      else if (type === 'declarations') renderMockDeclarationsInto(wrapper, pol);
+      else if (type === 'billing')      renderMockBillingInto(wrapper, pol);
+    }
+    content.appendChild(wrapper);
+
+    if (pol !== State.policies[State.policies.length - 1]) {
+      const hr = document.createElement('hr');
+      hr.style.cssText = 'border:none;border-top:1px solid rgba(0,0,0,0.1);margin:12px 0';
+      content.appendChild(hr);
+    }
+  }
+
+  document.getElementById('modal-doc-viewer').classList.add('show');
+}
+
+async function refreshPolicyDocs(policyId, forceFetch) {
+  if (forceFetch || !Array.isArray(State.documentsByPolicyId[policyId]) || State.documentsByPolicyId[policyId].length === 0) {
+    try {
+      const res = await apiCall('GET', '/policies/' + policyId + '/documents', null, State.token);
+      const arr = res?.documents ?? res;
+      State.documentsByPolicyId[policyId] = Array.isArray(arr) ? arr : [];
+    } catch { State.documentsByPolicyId[policyId] = []; }
+  }
+  return State.documentsByPolicyId[policyId];
+}
+
+function getDocType(d) {
+  if (d.docType) return d.docType; // API returns structured docType directly
+  return normalizeDocType(d.original_name || d.filename || d.name || '');
+}
+
+function normalizeDocType(name) {
+  const n = name.toLowerCase();
+  if (n.includes('id-card') || n.includes('id_card') || n.includes('idcard')) return 'id_card';
+  if (n.includes('coi') || n.includes('certificate')) return 'coi';
+  if (n.includes('declaration') || n.includes('dec ') || n.includes('_dec_')) return 'declaration';
+  if (n.includes('billing') || n.includes('invoice')) return 'billing';
+  return 'document';
+}
+
+function renderLiveDoc(containerId, doc, pol, label) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  renderLiveDocInto(c, doc, pol, label);
+}
+
+function renderLiveDocInto(container, doc, pol, label) {
+  const card = document.createElement('div');
+  card.className = 'doc-content-card';
+
+  const header = document.createElement('div');
+  header.className = 'doc-content-card-header';
+  header.innerHTML = `
+    <span class="doc-content-title">${esc(doc.name || label)}</span>
+    <a class="dl-btn" href="${buildDocURL(doc)}" target="_blank" download>
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+    </a>
+  `;
+  card.appendChild(header);
+
+  const docUrl = buildDocURL(doc);
+  if (docUrl) {
+    // Use an iframe with Authorization via a proxy approach — fetch blob
+    const loadDiv = document.createElement('div');
+    loadDiv.className = 'doc-loading';
+    loadDiv.innerHTML = '<div class="spinner"></div><p>Loading document…</p>';
+    card.appendChild(loadDiv);
+
+    fetch(docUrl, { headers: { Authorization: 'Bearer ' + State.token } })
+      .then(r => r.blob())
+      .then(blob => {
+        const blobURL = URL.createObjectURL(blob);
+        const iframe = document.createElement('iframe');
+        iframe.className = 'embedded-doc-frame';
+        iframe.src = blobURL;
+        iframe.onload = () => loadDiv.remove();
+        card.replaceChild(iframe, loadDiv);
+        // also update download link
+        const dlLink = header.querySelector('a.dl-btn');
+        if (dlLink) dlLink.href = blobURL;
+      })
+      .catch(() => {
+        loadDiv.innerHTML = '<p style="color:var(--text-sec);text-align:center">Could not load document preview.</p>';
+      });
+  }
+
+  container.appendChild(card);
+}
+
+function buildDocURL(doc) {
+  const path = doc.downloadUrl || doc.download_url || doc.path || '';
+  if (!path) return null;
+  if (path.startsWith('http')) return path;
+  if (path.startsWith('/api/portal')) return path; // already absolute
+  return '/api/portal' + (path.startsWith('/') ? '' : '/') + path;
+}
+
+function renderMockCOI(containerId, pol) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  renderMockCOIInto(c, pol);
+}
+
+function renderMockCOIInto(container, pol) {
+  const card = document.createElement('div');
+  card.className = 'doc-content-card';
+  card.style.cssText = 'text-align:center;padding:40px 20px;';
+  card.innerHTML = `
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" style="margin-bottom:16px">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <p style="font-size:16px;font-weight:600;color:var(--text-dark);margin:0 0 8px">No Certificate of Insurance on file</p>
+    <p style="font-size:14px;color:var(--text-sec);margin:0 0 16px;line-height:1.5">Please contact your agent to have your certificate added, or use the <strong>Send COI</strong> button on your policy card.</p>
+  `;
+  container.appendChild(card);
+}
+
+function renderMockIDCards(containerId, pol) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  renderMockIDCardsInto(c, pol);
+}
+
+function renderMockIDCardsInto(container, pol) {
+  const card = document.createElement('div');
+  card.className = 'doc-content-card';
+  card.style.cssText = 'text-align:center;padding:40px 20px;';
+  card.innerHTML = `
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" style="margin-bottom:16px">
+      <rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="8" cy="12" r="2"/><path d="M14 10h4M14 14h4"/>
+    </svg>
+    <p style="font-size:16px;font-weight:600;color:var(--text-dark);margin:0 0 8px">No ID cards on file</p>
+    <p style="font-size:14px;color:var(--text-sec);margin:0;line-height:1.5">Please contact your agent to have your insurance ID cards added.</p>
+  `;
+  container.appendChild(card);
+}
+
+function renderMockDeclarationsInto(container, pol) {
+  const card = document.createElement('div');
+  card.className = 'doc-content-card';
+  card.style.cssText = 'text-align:center;padding:40px 20px;';
+  card.innerHTML = `
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" style="margin-bottom:16px">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>
+    </svg>
+    <p style="font-size:16px;font-weight:600;color:var(--text-dark);margin:0 0 8px">No declarations on file</p>
+    <p style="font-size:14px;color:var(--text-sec);margin:0;line-height:1.5">Please contact your agent to have your policy declarations added.</p>
+  `;
+  container.appendChild(card);
+}
+
+function renderMockBillingInto(container, pol) {
+  const card = document.createElement('div');
+  card.className = 'doc-content-card';
+  card.style.cssText = 'text-align:center;padding:40px 20px;';
+  card.innerHTML = `
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5" style="margin-bottom:16px">
+      <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 8v4l2 2"/><line x1="6" y1="16" x2="6" y2="16.01"/>
+    </svg>
+    <p style="font-size:16px;font-weight:600;color:var(--text-dark);margin:0 0 8px">No billing schedule on file</p>
+    <p style="font-size:14px;color:var(--text-sec);margin:0;line-height:1.5">Please contact your agent for billing information.</p>
+  `;
+  container.appendChild(card);
+}
+
+function closeDocViewer() {
+  document.getElementById('modal-doc-viewer').classList.remove('show');
+  document.getElementById('viewer-content').innerHTML = '';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LOGOUT
+═══════════════════════════════════════════════════════════ */
+function logout() {
+  State.token = null;
+  State.profile = null;
+  State.policies = [];
+  State.documentsByPolicyId = {};
+  localStorage.removeItem('portal_token');
+  document.getElementById('screen-app').classList.remove('active');
+  document.getElementById('screen-login').classList.add('active');
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-password').value = '';
+  clearLoginError();
+  setLoginLoading(false);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MODAL HELPERS
+═══════════════════════════════════════════════════════════ */
+function openModal(id) {
+  document.getElementById(id).classList.add('show');
+}
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+// Close on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeModal(overlay.id);
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════════════════════ */
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   UTIL
+═══════════════════════════════════════════════════════════ */
+function esc(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+</script>
+<script>
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js')
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.log('SW registration failed:', err));
+  });
+}
+</script>
+</body>
+</html>

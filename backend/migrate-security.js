@@ -27,11 +27,13 @@ async function migrate() {
     )`);
 
     // Seed users with bcrypt-hashed passwords
+    // Default passwords are hashed by bcrypt below — change these after first login!
+    // IMPORTANT: Change all default passwords via the CRM settings after deployment.
     const users = [
-        { username: 'grant',   password: '25Nickc124!', role: 'admin', portal: null },
-        { username: 'maureen', password: 'maureen',     role: 'admin', portal: 'united' },
-        { username: 'carson',  password: 'carson',      role: 'agent', portal: 'vanguard' },
-        { username: 'hunter',  password: 'hunter',      role: 'agent', portal: 'vanguard' }
+        { username: 'grant',   password: process.env.ADMIN_INIT_PASSWORD || 'CHANGE_ME_IMMEDIATELY', role: 'admin', portal: null },
+        { username: 'maureen', password: process.env.ADMIN_INIT_PASSWORD || 'CHANGE_ME_IMMEDIATELY', role: 'admin', portal: 'united' },
+        { username: 'carson',  password: process.env.AGENT_INIT_PASSWORD || 'CHANGE_ME_IMMEDIATELY', role: 'agent', portal: 'vanguard' },
+        { username: 'hunter',  password: process.env.AGENT_INIT_PASSWORD || 'CHANGE_ME_IMMEDIATELY', role: 'agent', portal: 'vanguard' }
     ];
 
     for (const u of users) {

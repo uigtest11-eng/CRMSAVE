@@ -212,7 +212,7 @@ function checkTwilioAccountStatus() {
         issues.push('🚨 Username appears to be a placeholder - may not be a real Twilio SIP user');
     }
 
-    if (!config.password || config.password === 'GrantCorp2006@') {
+    if (!config.password || config.password === 'REDACTED') {
         issues.push('🚨 Password appears to be a placeholder - likely not valid Twilio credentials');
     }
 

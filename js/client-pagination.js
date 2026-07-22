@@ -72,7 +72,7 @@
                         </select>` : ''}
                         <select class="filter-select" id="clientNameDisplayFilter" onchange="applyClientNameDisplay()" style="min-width:160px;">
                             <option value="person">Person's Name</option>
-                            <option value="business">Business Name</option>
+                            <option value="business" selected>Business Name</option>
                         </select>
                         <button class="btn-filter" id="missing-data-btn" onclick="toggleMissingDataFilter()" style="transition:0.2s;">
                             <i class="fas fa-exclamation-triangle"></i> Missing Data

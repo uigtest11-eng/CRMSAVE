@@ -28,10 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ViciDial Configuration
-USERNAME = "6666"
-PASSWORD = "corp06"
-VICIDIAL_HOST = "204.13.233.29"
+# ViciDial Configuration from environment
+USERNAME = os.environ.get("VICIDIAL_USER", "")
+PASSWORD = os.environ.get("VICIDIAL_PASS", "")
+VICIDIAL_HOST = os.environ.get("VICIDIAL_HOST", "204.13.233.29")
 DB_PATH = "/var/www/vanguard/vanguard.db"
 
 class VanguardViciDialSelectiveSync:

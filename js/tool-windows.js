@@ -612,7 +612,7 @@ function generateSIPTab(phoneId) {
 
                 <div>
                     <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">Password</label>
-                    <input type="password" id="${phoneId}-sip-password" value="${savedConfig.password || 'GrantCorp2006@'}"
+                    <input type="password" id="${phoneId}-sip-password" value="${savedConfig.password || ''}"
                            style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 4px;">
                 </div>
 

@@ -530,7 +530,7 @@ async function sendCOIEmail(recipientEmail, policyNumber, certificateHolder, pdf
         secure: true,
         auth: {
             user: 'contact@vigagency.com',
-            pass: '25nickc124!' // This should be in environment variables
+            pass: process.env.GODADDY_VIG_PASSWORD || ''
         },
         tls: {
             rejectUnauthorized: false
@@ -631,7 +631,7 @@ app.post('/api/coi/send-request', (req, res, next) => {
             secure: true,
             auth: {
                 user: 'contact@vigagency.com',
-                pass: '25nickc124!' // This should be in environment variables
+                pass: process.env.GODADDY_VIG_PASSWORD || ''
             },
             tls: {
                 rejectUnauthorized: false

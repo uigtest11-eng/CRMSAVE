@@ -9928,11 +9928,7 @@ async function saveNewLead(event) {
 
     // Save to server first
     try {
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'https://localhost:3001'
-            : `https://${window.location.hostname}:3001`;
-
-        const response = await fetch(`${apiUrl}/api/leads`, {
+        const response = await fetch('/api/leads', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -17422,6 +17418,15 @@ function loadCommunicationsView() {
             <header class="content-header">
                 <h1>Communications Hub</h1>
                 <div class="header-actions">
+                    <select class="filter-select" id="commsAgencyFilter" onchange="filterCommunicationsAgency()">
+                        <option value="">All Agencies</option>
+                        <option value="Vanguard" selected style="font-weight:700;color:#2563eb;">Vanguard</option>
+                        <option value="Grant">&nbsp;&nbsp;Grant</option>
+                        <option value="Carson">&nbsp;&nbsp;Carson</option>
+                        <option value="Hunter">&nbsp;&nbsp;Hunter</option>
+                        <option value="United" style="font-weight:700;color:#2563eb;">United</option>
+                        <option value="Maureen">&nbsp;&nbsp;Maureen</option>
+                    </select>
                     <button id="new-campaign-btn" class="btn-primary" style="display:none" onclick="createNewCampaign()">
                         <i class="fas fa-paper-plane"></i> New Campaign
                     </button>
@@ -17996,6 +18001,16 @@ function loadCommunicationTab(tabName) {
 
             // Initialize reminders after content is loaded
             setTimeout(() => {
+                // Set agency filter default — Maureen sees only United
+                const _commsUser = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').username || '').toLowerCase();
+                const _commsDropdown = document.getElementById('commsAgencyFilter');
+                if (_commsUser === 'maureen' && _commsDropdown) {
+                    _commsDropdown.innerHTML = '<option value="Maureen" selected>Maureen</option>';
+                    window.currentCommsAgency = 'Maureen';
+                } else {
+                    window.currentCommsAgency = _commsDropdown ? _commsDropdown.value : 'Vanguard';
+                }
+
                 if (window.communicationsReminders) {
                     window.communicationsReminders.init();
                     loadReminderCards();
@@ -18724,7 +18739,8 @@ function selectQuoteToAttach(type, leadName, quoteIndex) {
 
 // Function to calculate real carrier statistics from policies
 function calculateCarrierStats(carrierName, agentNames) {
-    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const policiesRaw = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const policies = Array.isArray(policiesRaw) ? policiesRaw : [];
     const agentSet = agentNames ? new Set(agentNames.map(a => a.toLowerCase())) : null;
     const carrierPolicies = policies.filter(policy => {
         const policyCarrier = (policy.carrier || policy.insurance_company || '').toLowerCase();
@@ -18744,8 +18760,9 @@ function calculateCarrierStats(carrierName, agentNames) {
     });
 
     // Format premium as currency
-    const formattedPremium = totalPremium > 0 ?
-        `$${(totalPremium / 1000).toFixed(0)}K` : '$0';
+    const formattedPremium = totalPremium >= 1000000 ?
+        `$${(totalPremium / 1000000).toFixed(1)}M` :
+        totalPremium > 0 ? `$${(totalPremium / 1000).toFixed(0)}K` : '$0';
 
     return {
         policies: carrierPolicies.length,
@@ -23979,7 +23996,7 @@ function generateViewTabContent(tabId, policy) {
                         ${_fOV('parentCompany','Parent Company / Broker', policy.parentCompany||'')}
                         ${_fOV('commissionPlan','Commission Plan', policy.commissionPlan||'')}
                         ${_fOV('policyState','Policy State', policy.policyState||'')}
-                        ${_fOV('agent','User / Agent', policy.agent||'')}
+                        ${_fOV('agent','User / Agent', policy.agent || (policy.overview && policy.overview.Agent) || '')}
                         ${_sOV('agency','Agency', policy.agency||'Vanguard', ['Vanguard','United'])}
                     </div>
                     <!-- Card 2: Term & Dates -->
@@ -24846,6 +24863,10 @@ window.overviewSave = async function(policyId) {
         return;
     }
     Object.assign(policies[idx], updates);
+    // Keep overview sub-object agent in sync with top-level agent
+    if (updates.agent && policies[idx].overview) {
+        policies[idx].overview.Agent = updates.agent;
+    }
     // Keep financial sub-object in sync so table row shows updated premium
     if (updates.premium) {
         if (!policies[idx].financial) policies[idx].financial = {};
@@ -24853,6 +24874,27 @@ window.overviewSave = async function(policyId) {
         policies[idx].financial['Premium'] = updates.premium;
     }
     localStorage.setItem('insurance_policies', JSON.stringify(policies));
+
+    // Sync agent to client record so client list stays consistent
+    if (updates.agent && policies[idx].clientId) {
+        try {
+            const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const cr = await fetch(`${API}/api/clients/${policies[idx].clientId}`, {
+                headers: { 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' }
+            });
+            if (cr.ok) {
+                const clientData = await cr.json();
+                clientData.assignedTo = updates.agent;
+                clientData.agent = updates.agent;
+                await fetch(`${API}/api/clients/${policies[idx].clientId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                    body: JSON.stringify(clientData)
+                });
+            }
+        } catch(e) { console.warn('Could not sync agent to client:', e); }
+    }
 
     // Update the policy list table row premium without full reload
     const policyRow = document.querySelector(`tr[data-policy-id="${policyId}"]`);
@@ -35843,6 +35885,19 @@ function addCommunicationStyles() {
 
 // Initialize communication styles
 addCommunicationStyles();
+
+// Agency filter for Communications Hub
+window.currentCommsAgency = 'Vanguard'; // default
+
+function filterCommunicationsAgency() {
+    const sel = document.getElementById('commsAgencyFilter');
+    window.currentCommsAgency = sel ? sel.value : '';
+    if (window.communicationsReminders) {
+        window.communicationsReminders.loadRecentClients().then(() => {
+            loadReminderCards();
+        });
+    }
+}
 
 // Load reminder cards for the reminders tab
 function loadReminderCards() {

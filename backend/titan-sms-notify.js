@@ -21,13 +21,13 @@ const CONFIG = {
         host: 'imap.secureserver.net',
         port: 993,
         secure: true,
-        auth: { user: 'contact@vigagency.com', pass: '25nickc124!' },
+        auth: { user: 'contact@vigagency.com', pass: process.env.GODADDY_VIG_PASSWORD || '' },
         logger: false,
         tls: { rejectUnauthorized: false }
     },
     clicksend: {
         username: 'grant.corp2006@gmail.com',
-        apiKey:   'C55BB02C-21A2-2843-9554-75028F0F773C',
+        apiKey:   process.env.CLICKSEND_API_KEY || '',
         toPhone:  '+13302417570'
     },
     db: path.join(__dirname, '../vanguard.db')

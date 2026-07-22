@@ -23,19 +23,19 @@ function removeTelnyxCalling() {
 }
 
 // Step 2: Setup correct Twilio SIP configuration
-function setupTwilioSIPConfig() {
+async function setupTwilioSIPConfig() {
     console.log('⚙️ Setting up Twilio SIP configuration...');
 
-    const correctTwilioConfig = {
-        username: 'Grant',
-        password: 'GrantCorp2006@',
-        domain: 'vanguard1.sip.us1.twilio.com', // Try the .us1 domain
-        proxy: 'sip.twilio.com',
-        callerId: '+13306369079',
-        // Additional SIP settings
-        wsServer: 'wss://vanguard1.sip.us1.twilio.com:443',
-        realm: 'vanguard1.sip.us1.twilio.com'
-    };
+    // Load SIP config from server instead of hardcoding
+    let correctTwilioConfig = { username: '', password: '', domain: 'vanguard1.sip.us1.twilio.com', proxy: 'sip.twilio.com', callerId: '', wsServer: '', realm: '' };
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt');
+        const resp = await fetch('/api/sip-config', { headers: { Authorization: 'Bearer ' + jwt } });
+        if (resp.ok) {
+            const cfg = await resp.json();
+            correctTwilioConfig = { username: cfg.username, password: cfg.password, domain: cfg.domain || 'vanguard1.sip.us1.twilio.com', proxy: 'sip.twilio.com', callerId: cfg.callerId, wsServer: 'wss://' + (cfg.domain || 'vanguard1.sip.us1.twilio.com') + ':443', realm: cfg.domain || 'vanguard1.sip.us1.twilio.com' };
+        }
+    } catch (e) { console.warn('Could not load SIP config'); }
 
     // Save to localStorage
     localStorage.setItem('sipConfig', JSON.stringify(correctTwilioConfig));

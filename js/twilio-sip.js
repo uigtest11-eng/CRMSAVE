@@ -14,12 +14,20 @@ class TwilioSipPhone {
             // Load JsSIP library for SIP calling
             await this.loadJsSIP();
 
+            // Load SIP credentials from server
+            let sipUser = '', sipPass = '', sipDomain = 'vanguard1.sip.us1.twilio.com';
+            try {
+                const jwt = sessionStorage.getItem('vanguard_jwt');
+                const resp = await fetch('/api/sip-config', { headers: { Authorization: 'Bearer ' + jwt } });
+                if (resp.ok) { const cfg = await resp.json(); sipUser = cfg.username; sipPass = cfg.password; sipDomain = cfg.domain || sipDomain; }
+            } catch (e) { console.warn('Could not load SIP config'); }
+
             // SIP configuration for Twilio SIP Domain
             const sipConfig = {
-                uri: 'sip:Grant@vanguard1.sip.us1.twilio.com',
-                password: 'GrantCorp2006@',
-                ws_servers: ['wss://vanguard1.sip.us1.twilio.com:443'],
-                display_name: 'Grant',
+                uri: `sip:${sipUser}@${sipDomain}`,
+                password: sipPass,
+                ws_servers: [`wss://${sipDomain}:443`],
+                display_name: sipUser,
                 register: true,
                 register_expires: 300,
                 session_timers: false,

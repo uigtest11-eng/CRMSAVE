@@ -29,7 +29,7 @@ const emailConfig = {
     smtpPort: 465,
     smtpSecure: true,
     smtpUser: 'contact@vigagency.com',
-    smtpPass: process.env.GODADDY_PASSWORD || '25nickc124!',
+    smtpPass: process.env.GODADDY_VIG_PASSWORD || '',
     fromEmail: 'contact@vigagency.com'
 };
 

@@ -8,7 +8,7 @@ import json
 import time
 import os
 
-DEEPGRAM_API_KEY = "19b5d4a1221a91a41bc415d5eefc955d94938962"
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
 
 def transcribe_with_deepgram(audio_file_path):
     """Transcribe audio using Deepgram REST API"""

@@ -43,13 +43,6 @@ window.filterPolicies = function() {
 
     const rows = tbody.querySelectorAll('tr');
 
-    // 4-char gate: CSR users only
-    if (isCsrUser && searchValue.length < 4) {
-        rows.forEach(row => { row.style.display = 'none'; });
-        const countDisplay = document.querySelector('.showing-info');
-        if (countDisplay) countDisplay.textContent = 'Type 4+ characters to search policies';
-        return;
-    }
 
     console.log(`🔍 Filtering policies: Type="${typeValue}", Carrier="${carrierValue}", Status="${statusValue}", Search="${searchValue}"`);
     let visibleCount = 0;
