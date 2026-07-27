@@ -355,12 +355,47 @@ async function loadClientsFromServer(limit = 500) {
                     _toSuppress.add(String(c.id));
                 }
             });
-            const dedupedClients = _toSuppress.size > 0
+            const _bizDeduped = _toSuppress.size > 0
                 ? mergedClients.filter(c => !_toSuppress.has(String(c.id)))
                 : mergedClients;
 
+            // === Suppress same-person duplicates (same phone or email, different IDs) ===
+            // Keep the most recently updated record when duplicates share phone or email.
+            const _dupIds = new Set();
+            const _byPhone = {};
+            const _byEmail = {};
+            _bizDeduped.forEach(c => {
+                const ph = _np(c.phone);
+                const em = (c.email || '').toLowerCase().trim();
+                if (ph.length >= 10) {
+                    if (_byPhone[ph]) _byPhone[ph].push(c);
+                    else _byPhone[ph] = [c];
+                }
+                if (em) {
+                    if (_byEmail[em]) _byEmail[em].push(c);
+                    else _byEmail[em] = [c];
+                }
+            });
+            const _pickBest = (group) => {
+                if (group.length <= 1) return;
+                // Sort by updated_at desc, then by id length desc (longer IDs are newer format)
+                group.sort((a, b) => {
+                    const aTime = new Date(a.updatedAt || a.lastModified || a.createdAt || 0).getTime();
+                    const bTime = new Date(b.updatedAt || b.lastModified || b.createdAt || 0).getTime();
+                    return bTime - aTime;
+                });
+                for (let i = 1; i < group.length; i++) {
+                    _dupIds.add(String(group[i].id));
+                }
+            };
+            Object.values(_byPhone).forEach(_pickBest);
+            Object.values(_byEmail).forEach(_pickBest);
+            const dedupedClients = _dupIds.size > 0
+                ? _bizDeduped.filter(c => !_dupIds.has(String(c.id)))
+                : _bizDeduped;
+
             localStorage.setItem('insurance_clients', JSON.stringify(dedupedClients));
-            console.log(`💾 Stored ${dedupedClients.length} clients in localStorage (${mergedClients.length - dedupedClients.length} biz-name dupes suppressed, ${localOnlyClients.length} local-only preserved)`);
+            console.log(`💾 Stored ${dedupedClients.length} clients in localStorage (${_toSuppress.size} biz-name dupes, ${_dupIds.size} same-person dupes suppressed, ${localOnlyClients.length} local-only preserved)`);
 
             // Store pagination info for later use
             if (data.total) {
@@ -21058,10 +21093,19 @@ async function savePolicyForClient(clientId) {
     policyData.id = Date.now();
     policyData.policyNumber = policyData.policyNumber || `POL-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     policyData.createdAt = new Date().toISOString();
-    
+
     // Get clients and update the specific client
     const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
     const clientIndex = clients.findIndex(c => c.id == clientId);
+
+    // Inherit agent from client if not already set on the policy
+    if (clientIndex !== -1 && !policyData.agent && !policyData.assignedTo) {
+        const clientAgent = clients[clientIndex].assignedTo || clients[clientIndex].agent || '';
+        if (clientAgent) {
+            policyData.agent = clientAgent;
+            policyData.assignedTo = clientAgent;
+        }
+    }
     
     if (clientIndex === -1) {
         showNotification('Client not found', 'error');
@@ -22166,16 +22210,27 @@ function deleteClient(id) {
     if (confirm(`Are you sure you want to delete client "${client.name}"? This action cannot be undone.`)) {
         // Remove client from array
         const updatedClients = clients.filter(c => c.id !== id);
-        
+
         // Save updated clients list
         localStorage.setItem('insurance_clients', JSON.stringify(updatedClients));
-        
+
+        // Delete from server so it doesn't reappear on refresh
+        fetch(`/api/clients/${id}`, { method: 'DELETE' }).then(resp => {
+            if (resp.ok) {
+                console.log(`✅ Client "${client.name}" deleted from server`);
+            } else {
+                console.error(`❌ Failed to delete client from server: ${resp.status}`);
+            }
+        }).catch(err => {
+            console.error('❌ Error deleting client from server:', err);
+        });
+
         // Show success notification
         showNotification(`Client "${client.name}" has been deleted successfully`, 'success');
-        
+
         // Reload the clients view
         loadClientsView();
-        
+
         // Update dashboard stats if needed
         if (window.DashboardStats) {
             const dashboardStats = new DashboardStats();
@@ -43286,7 +43341,9 @@ function filterTodosBySchedule(todos, scheduleView) {
 .chat-empty { text-align:center; color:#9ca3af; font-size:13px; margin:auto; padding:20px; }
 #chat-bubble-btn { position:fixed; bottom:20px; right:20px; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,#dc2626,#991b1b); border:none; color:#fff; box-shadow:0 4px 14px rgba(220,38,38,0.45); cursor:pointer; display:none; align-items:center; justify-content:center; font-size:22px; z-index:9998; transition:transform 0.15s; }
 #chat-bubble-btn:hover { transform:scale(1.08); }
-.chat-notif-stack { position:fixed; bottom:20px; right:80px; display:flex; flex-direction:column-reverse; gap:8px; z-index:10001; pointer-events:none; }
+#suggestion-bubble-btn { position:fixed; bottom:20px; right:80px; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,#2563eb,#1e40af); border:none; color:#fff; box-shadow:0 4px 14px rgba(37,99,235,0.45); cursor:pointer; display:none; align-items:center; justify-content:center; font-size:22px; z-index:9998; transition:transform 0.15s; }
+#suggestion-bubble-btn:hover { transform:scale(1.08); }
+.chat-notif-stack { position:fixed; bottom:20px; right:140px; display:flex; flex-direction:column-reverse; gap:8px; z-index:10001; pointer-events:none; }
 .chat-notif-toast { background:#fff; border-left:4px solid #2563eb; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); padding:10px 14px; min-width:240px; max-width:300px; pointer-events:all; animation:chatNotifIn 0.25s ease; position:relative; overflow:hidden; }
 .chat-notif-toast.removing { animation:chatNotifOut 0.2s ease forwards; }
 @keyframes chatNotifIn { from{opacity:0;transform:translateX(30px)} to{opacity:1;transform:translateX(0)} }
@@ -43558,6 +43615,16 @@ function filterTodosBySchedule(todos, scheduleView) {
         _chatBubble.innerHTML = `<i class="fas fa-bug"></i>`;
         _chatBubble.onclick = () => { if (window.openBugReport) window.openBugReport(); };
         document.body.appendChild(_chatBubble);
+
+        if (!document.getElementById('suggestion-bubble-btn')) {
+            const sugBtn = document.createElement('button');
+            sugBtn.id = 'suggestion-bubble-btn';
+            sugBtn.title = 'Make a Suggestion';
+            sugBtn.innerHTML = '<i class="fas fa-lightbulb"></i>';
+            sugBtn.onclick = () => { if (window.openSuggestion) window.openSuggestion(); };
+            document.body.appendChild(sugBtn);
+            sugBtn.style.display = 'flex';
+        }
     }
 
     window.openTeamChat = function() {
@@ -44008,9 +44075,20 @@ function filterTodosBySchedule(todos, scheduleView) {
     font-size: 22px; z-index: 9998; transition: transform 0.15s;
 }
 #chat-bubble-btn:hover { transform: scale(1.08); }
+#suggestion-bubble-btn {
+    position: fixed; bottom: 20px; right: 80px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: linear-gradient(135deg,#2563eb,#1e40af);
+    border: none; color: #fff;
+    box-shadow: 0 4px 14px rgba(37,99,235,0.45);
+    cursor: pointer; display: none;
+    align-items: center; justify-content: center;
+    font-size: 22px; z-index: 9998; transition: transform 0.15s;
+}
+#suggestion-bubble-btn:hover { transform: scale(1.08); }
 
 .chat-notif-stack {
-    position: fixed; bottom: 20px; right: 80px;
+    position: fixed; bottom: 20px; right: 140px;
     display: flex; flex-direction: column-reverse; gap: 8px;
     z-index: 10001; pointer-events: none;
 }
@@ -44322,6 +44400,17 @@ function filterTodosBySchedule(todos, scheduleView) {
         _chatBubble.innerHTML = '<i class="fas fa-bug"></i>';
         _chatBubble.onclick = () => { if (window.openBugReport) window.openBugReport(); };
         document.body.appendChild(_chatBubble);
+
+        // Add suggestion button next to bug button
+        if (!document.getElementById('suggestion-bubble-btn')) {
+            const sugBtn = document.createElement('button');
+            sugBtn.id = 'suggestion-bubble-btn';
+            sugBtn.title = 'Make a Suggestion';
+            sugBtn.innerHTML = '<i class="fas fa-lightbulb"></i>';
+            sugBtn.onclick = () => { if (window.openSuggestion) window.openSuggestion(); };
+            document.body.appendChild(sugBtn);
+            sugBtn.style.display = 'flex';
+        }
     }
 
     window.openTeamChat = function() {
@@ -44855,6 +44944,117 @@ function filterTodosBySchedule(todos, scheduleView) {
             errEl.style.display = 'block';
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Bug Report';
+        }
+    };
+
+    // ── Suggestion Report ──────────────────────────────────────────────────────
+
+    window.openSuggestion = function() {
+        if (document.getElementById('suggestion-report-modal')) {
+            document.getElementById('suggestion-report-modal').remove();
+        }
+
+        let user = 'Unknown';
+        try {
+            const raw = sessionStorage.getItem('vanguard_user') || '';
+            const parsed = JSON.parse(raw);
+            user = parsed.username || parsed.name || raw || 'Unknown';
+        } catch { user = sessionStorage.getItem('vanguard_user') || 'Unknown'; }
+
+        const modal = document.createElement('div');
+        modal.id = 'suggestion-report-modal';
+        modal.dataset.reportUser = user;
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div style="background:white;border-radius:12px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="background:#2563eb;color:white;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;">
+                    <h2 style="margin:0;font-size:18px;"><i class="fas fa-lightbulb" style="margin-right:8px;"></i>Make a Suggestion</h2>
+                    <button onclick="document.getElementById('suggestion-report-modal').remove()" style="background:none;border:none;color:white;font-size:22px;cursor:pointer;padding:0 4px;">&times;</button>
+                </div>
+                <div style="padding:20px;">
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Area</label>
+                        <select id="suggestion-area" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">
+                            <option value="">Select area...</option>
+                            <option value="Dashboard">Dashboard</option>
+                            <option value="Lead Management">Lead Management</option>
+                            <option value="Active Clients">Active Clients</option>
+                            <option value="Policies">Policies</option>
+                            <option value="Generate Leads">Generate Leads</option>
+                            <option value="Calendar">Calendar</option>
+                            <option value="Phone System">Phone System</option>
+                            <option value="Email / Outlook">Email / Outlook</option>
+                            <option value="Agent Performance">Agent Performance</option>
+                            <option value="Client Portal">Client Portal</option>
+                            <option value="COI / Documents">COI / Documents</option>
+                            <option value="IVANS Sync">IVANS Sync</option>
+                            <option value="JenesisNow Sync">JenesisNow Sync</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Suggestion Title</label>
+                        <input id="suggestion-title" type="text" placeholder="Brief summary of your idea" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Description</label>
+                        <textarea id="suggestion-description" rows="5" placeholder="Describe your suggestion. What would you like to see? How would it help?" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+                    </div>
+                    <p id="suggestion-error" style="display:none;color:#dc2626;font-size:13px;margin-bottom:10px;"></p>
+                    <button id="suggestion-submit-btn" onclick="window._submitSuggestion()" style="width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:0.2s;">
+                        <i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Suggestion
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+        document.getElementById('suggestion-title').focus();
+    };
+
+    window._submitSuggestion = async function() {
+        const title = document.getElementById('suggestion-title').value.trim();
+        const description = document.getElementById('suggestion-description').value.trim();
+        const area = document.getElementById('suggestion-area').value;
+        const reportedBy = document.getElementById('suggestion-report-modal').dataset.reportUser || 'Unknown';
+        const errEl = document.getElementById('suggestion-error');
+        const btn = document.getElementById('suggestion-submit-btn');
+
+        errEl.style.display = 'none';
+
+        if (!title) { errEl.textContent = 'Please enter a suggestion title.'; errEl.style.display = 'block'; return; }
+        if (!description) { errEl.textContent = 'Please describe your suggestion.'; errEl.style.display = 'block'; return; }
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Sending...';
+
+        try {
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const resp = await fetch('/api/suggestion', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+                body: JSON.stringify({
+                    title,
+                    area,
+                    description,
+                    reportedBy,
+                    url: window.location.href,
+                    timestamp: new Date().toLocaleString()
+                })
+            });
+
+            if (!resp.ok) throw new Error('Server error');
+
+            document.getElementById('suggestion-report-modal').remove();
+            if (typeof showNotification === 'function') {
+                showNotification('Suggestion sent! Thank you.', 'success');
+            }
+        } catch (e) {
+            errEl.textContent = 'Failed to send suggestion. Please try again.';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Suggestion';
         }
     };
 })();

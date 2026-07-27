@@ -201,7 +201,7 @@ app.use('/api/auth', authRoutes);
 
 // Protect all /api/* routes except public paths
 app.use('/api', (req, res, next) => {
-    const publicPaths = ['/auth/', '/health', '/portal/', '/bug-report',
+    const publicPaths = ['/auth/', '/health', '/portal/', '/bug-report', '/suggestion',
                          '/twilio/incoming-call',
                          '/twilio/call-status', '/twilio/recording-status',
                          '/twilio/voicemail-transcription', '/twilio/recording-complete',
@@ -9987,6 +9987,59 @@ app.post('/api/bug-report', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error('Bug report email failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/api/suggestion', async (req, res) => {
+    const { title, area, description, reportedBy, url, timestamp } = req.body;
+
+    if (!title || !description) {
+        return res.status(400).json({ success: false, error: 'Title and description are required' });
+    }
+
+    try {
+        const nodemailer = require('nodemailer');
+        const transporter = nodemailer.createTransport({
+            host: 'smtpout.secureserver.net',
+            port: 465,
+            secure: true,
+            auth: {
+                user: 'contact@vigagency.com',
+                pass: process.env.GODADDY_VIG_PASSWORD || process.env.GODADDY_PASSWORD
+            }
+        });
+
+        const html = `
+<div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;">
+  <div style="background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
+    <h2 style="margin:0;">Suggestion</h2>
+    <p style="margin:4px 0 0;opacity:.85;">Vanguard CRM</p>
+  </div>
+  <div style="background:#f8fafc;padding:24px;border:1px solid #e2e8f0;border-radius:0 0 8px 8px;">
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px;">
+      <tr><td style="width:120px;color:#666;padding:6px 0;font-weight:600;">Submitted By</td><td style="color:#111;font-weight:500;">${reportedBy || 'Unknown'}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">Area</td><td>${area || 'Not specified'}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">Title</td><td style="font-weight:700;color:#111;">${title}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">Time</td><td>${timestamp || new Date().toLocaleString()}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">URL</td><td style="font-size:12px;word-break:break-all;">${url || ''}</td></tr>
+    </table>
+    <h3 style="margin:0 0 8px;color:#111;font-size:15px;">Description</h3>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:14px;margin-bottom:20px;white-space:pre-wrap;font-size:14px;line-height:1.6;">${description}</div>
+  </div>
+</div>`;
+
+        await transporter.sendMail({
+            from: '"VIG Suggestion" <contact@vigagency.com>',
+            to: 'Grant@vigagency.com',
+            subject: `[SUGGESTION] ${title} — from ${reportedBy || 'Unknown'}`,
+            html
+        });
+
+        console.log('Suggestion sent from', reportedBy, ':', title);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Suggestion email failed:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

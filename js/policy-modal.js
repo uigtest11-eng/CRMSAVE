@@ -1584,6 +1584,20 @@ async function savePolicy() {
             console.log('No client ID found - policy not associated with any client');
         }
 
+        // Inherit agent from linked client if not already set on the policy
+        if (policyData.clientId && !policyData.agent) {
+            const _clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+            const _linkedClient = _clients.find(c => c.id === policyData.clientId);
+            if (_linkedClient) {
+                const _clientAgent = _linkedClient.assignedTo || _linkedClient.agent || '';
+                if (_clientAgent) {
+                    policyData.agent = _clientAgent;
+                    policyData.assignedTo = _clientAgent;
+                    console.log('Inherited agent from client:', _clientAgent);
+                }
+            }
+        }
+
         // Get data from each tab
         const tabs = document.querySelectorAll('.tab-content');
         tabs.forEach(tab => {
