@@ -952,6 +952,12 @@ protectedFunctions.updateAppStageField = function(leadId, field, value) {
 
         // Update the specific field
         leads[leadIndex].appStage[field] = value;
+        // Track when the app stage was last updated for goals tracking
+        if (value) {
+            const now = new Date().toISOString();
+            leads[leadIndex].stageUpdatedAt = now;
+            leads[leadIndex].lastModified = now;
+        }
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
         console.log('APP Stage field updated:', field, value);
 
@@ -960,7 +966,9 @@ protectedFunctions.updateAppStageField = function(leadId, field, value) {
 
         // Save to server database
         const updateData = {
-            appStage: leads[leadIndex].appStage
+            appStage: leads[leadIndex].appStage,
+            stageUpdatedAt: leads[leadIndex].stageUpdatedAt,
+            lastModified: leads[leadIndex].lastModified
         };
 
         fetch(`/api/leads/${leadId}`, {

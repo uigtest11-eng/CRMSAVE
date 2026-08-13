@@ -74,6 +74,7 @@ class QuoteApplication {
             autoHauler: lead.autoHauler || '0',
             boxTruck: lead.boxTruck || '0',
             reefer: lead.reefer || '0',
+            hopperBottom: lead.hopperBottom || '0',
             otherClass: lead.otherClass || '0',
             
             // INSURANCE HISTORY
@@ -402,6 +403,9 @@ class QuoteApplication {
                             <td style="padding: 5px;">Auto Hauler: ${data.autoHauler || '0'}%</td>
                             <td style="padding: 5px;">Box Truck: ${data.boxTruck || '0'}%</td>
                             <td style="padding: 5px;">Reefer: ${data.reefer || '0'}%</td>
+                            <td style="padding: 5px;">Hopper-Bottom Trailer: ${data.hopperBottom || '0'}%</td>
+                        </tr>
+                        <tr>
                             <td style="padding: 5px;">Other: ${data.otherClass || '0'}%</td>
                         </tr>
                     </table>
@@ -696,6 +700,10 @@ function showApplicationFormModal(application, lead) {
                                 <input type="number" id="reefer" value="${data.reefer || '0'}" min="0" max="100">
                             </div>
                             <div class="form-group">
+                                <label>Hopper-Bottom Trailer</label>
+                                <input type="number" id="hopperBottom" value="${data.hopperBottom || '0'}" min="0" max="100">
+                            </div>
+                            <div class="form-group">
                                 <label>Other</label>
                                 <input type="number" id="otherClass" value="${data.otherClass || '0'}" min="0" max="100">
                             </div>
@@ -900,6 +908,7 @@ function collectFormData() {
         autoHauler: document.getElementById('autoHauler').value,
         boxTruck: document.getElementById('boxTruck').value,
         reefer: document.getElementById('reefer').value,
+        hopperBottom: document.getElementById('hopperBottom').value,
         otherClass: document.getElementById('otherClass').value,
         
         // Vehicles

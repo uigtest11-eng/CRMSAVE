@@ -6732,13 +6732,15 @@ function renderPersonalGoals(data, period) {
         });
     });
 
-    // Apps to market
+    // Apps to market — use the timestamp when the app action occurred, not lead creation
     let appsInRange = 0;
     leads.filter(l => (l.assignedTo || '').toLowerCase() === currentUser).forEach(lead => {
-        const createdStr = lead.created_at || lead.created || '';
-        const d = createdStr ? new Date(createdStr) : null;
-        if (!d || d < startTs || d > endTs) return;
-        if (lead.stage === 'app_sent' || lead.appStage?.app || lead.appStage?.lossRuns || lead.appStage?.iftas || lead.appStage?.saa) appsInRange++;
+        const isApp = lead.stage === 'app_sent' || lead.appStage?.app || lead.appStage?.lossRuns || lead.appStage?.iftas || lead.appStage?.saa;
+        if (!isApp) return;
+        // Prefer appSentAt or stageUpdatedAt (when the app action happened), fall back to updated_at/created
+        const appDateStr = lead.appSentAt || lead.stageUpdatedAt || lead.updated_at || lead.lastModified || lead.created_at || lead.createdAt || lead.created || '';
+        const d = appDateStr ? new Date(appDateStr) : null;
+        if (d && d >= startTs && d <= endTs) appsInRange++;
     });
 
     // Scheduled callback %
@@ -6758,12 +6760,23 @@ function renderPersonalGoals(data, period) {
     const cbPct = connectedLeads > 0 ? (leadsWithCB / connectedLeads) * 100 : 0;
     const avgTalkSecs = callsInRange > 0 ? callSecsInRange / callsInRange : 0;
 
-    // New leads in range (leads created/assigned in the period)
+    // New leads in range (leads created OR first worked on in the period)
     const newLeadsInRange = leads.filter(l => {
         if ((l.assignedTo || '').toLowerCase() !== currentUser) return false;
-        const createdStr = l.created_at || l.created || '';
+        // Check lead creation date
+        const createdStr = l.created_at || l.createdAt || l.created || '';
         const d = createdStr ? new Date(createdStr) : null;
-        return d && d >= startTs && d <= endTs;
+        if (d && d >= startTs && d <= endTs) return true;
+        // Also check first stageTimestamp — captures when agent first actively worked a ViciDial lead
+        const stageTs = l.stageTimestamps;
+        if (stageTs && typeof stageTs === 'object') {
+            const firstWork = Object.values(stageTs).reduce((earliest, ts) => {
+                const t = new Date(ts);
+                return (!earliest || t < earliest) ? t : earliest;
+            }, null);
+            if (firstWork && firstWork >= startTs && firstWork <= endTs) return true;
+        }
+        return false;
     }).length;
 
     const p = period;
@@ -7861,7 +7874,7 @@ function getLeadNameStyling(lead) {
 // Helper function to generate lead rows
 function generateSimpleLeadRows(leads) {
     if (!leads || leads.length === 0) {
-        return '<tr><td colspan="12" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
+        return '<tr><td colspan="13" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
     }
 
     console.log(`🔥 generateSimpleLeadRows: Processing ${leads.length} leads for highlighting`);
@@ -8191,6 +8204,7 @@ function generateSimpleLeadRows(leads) {
                         return `<div style="font-weight: bold; color: ${color};">${result}</div>`;
                     })()}
                 </td>
+                <td style="text-align:center;">${lead.state ? lead.state.toUpperCase() : ''}</td>
                 <td>${lead.renewalDate || 'N/A'}</td>
                 <td>${lead.assignedTo || 'Unassigned'}</td>
                 <td>${generateCarrierBadge(lead)}</td>
@@ -8262,7 +8276,7 @@ function isHighValueLead(lead) {
 // Enhanced version with dividers for different agents and closed leads
 function generateSimpleLeadRowsWithDividers(leads) {
     if (!leads || leads.length === 0) {
-        return '<tr><td colspan="12" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
+        return '<tr><td colspan="13" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
     }
 
     // Group leads by assigned agent and status
@@ -8406,7 +8420,7 @@ function generateSimpleLeadRowsWithDividers(leads) {
 
         return `
             <tr class="lead-divider" style="background: #374151 !important; border: none;">
-                <td colspan="12" style="position:relative;padding: 12px 20px; font-weight: bold; color: #9ca3af; font-size: 16px; text-align: center; text-transform: uppercase; letter-spacing: 1px; text-shadow: none;">
+                <td colspan="13" style="position:relative;padding: 12px 20px; font-weight: bold; color: #9ca3af; font-size: 16px; text-align: center; text-transform: uppercase; letter-spacing: 1px; text-shadow: none;">
                     ${checkboxHTML}${title}${greenBlueDisplay} (${count} ${count === 1 ? 'lead' : 'leads'})
                 </td>
             </tr>
@@ -9673,6 +9687,12 @@ async function loadLeadsView() {
                                 </span>
                             </th>
                             <th>To Do</th>
+                            <th class="sortable" onclick="sortLeads('state')" data-sort="state">
+                                State
+                                <span class="sort-arrow" id="sort-state">
+                                    <i class="fas fa-sort"></i>
+                                </span>
+                            </th>
                             <th class="sortable" onclick="sortLeads('renewalDate')" data-sort="renewalDate">
                                 Renewal Date
                                 <span class="sort-arrow" id="sort-renewalDate">
@@ -25480,7 +25500,7 @@ window.showVehicleDetailModal = function(startIndex) {
 
     const _eH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
-    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
+    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Hopper-Bottom Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
     const STATES = ['','AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','INTL'];
 
     const IS = 'width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;';
@@ -28560,10 +28580,18 @@ function runAgentPerformanceReport() {
             const m = getAgent(agent);
             m.totalLeads++;
 
-            // Lead in date range (by created_at or lead.created)
-            const createdStr = lead.created_at || lead.created || lead.lastActivity || '';
+            // Lead in date range (by created_at, lead.created, or first stageTimestamp)
+            const createdStr = lead.created_at || lead.createdAt || lead.created || lead.lastActivity || '';
             const createdDate = createdStr ? new Date(createdStr) : null;
-            const leadInRange = createdDate && createdDate >= startTs && createdDate <= endTs;
+            let leadInRange = createdDate && createdDate >= startTs && createdDate <= endTs;
+            // Also check first stageTimestamp — captures when agent first actively worked a ViciDial lead
+            if (!leadInRange && lead.stageTimestamps && typeof lead.stageTimestamps === 'object') {
+                const firstWork = Object.values(lead.stageTimestamps).reduce((earliest, ts) => {
+                    const t = new Date(ts);
+                    return (!earliest || t < earliest) ? t : earliest;
+                }, null);
+                if (firstWork && firstWork >= startTs && firstWork <= endTs) leadInRange = true;
+            }
             if (leadInRange) {
                 m.leadsInRange++;
                 // Stage breakdown only for in-range leads
@@ -28571,10 +28599,15 @@ function runAgentPerformanceReport() {
                 m.stages[stage] = (m.stages[stage] || 0) + 1;
             }
 
-            // Apps to market — green checkmark leads (doc emailed) within date range
-            const docEmailed = lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0));
-            if (leadInRange && docEmailed) {
-                m.appsToMarket++;
+            // Apps to market — use app action timestamp, not lead creation date
+            const docEmailed = lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))
+                || lead.appStage?.app || lead.appStage?.lossRuns || lead.appStage?.iftas || lead.appStage?.saa;
+            if (docEmailed) {
+                const appDateStr = lead.appSentAt || lead.stageUpdatedAt || lead.updated_at || lead.lastModified || createdStr || '';
+                const appDate = appDateStr ? new Date(appDateStr) : null;
+                if (appDate && appDate >= startTs && appDate <= endTs) {
+                    m.appsToMarket++;
+                }
             }
 
             // All-time counters from lead profile trackers (Attempts / Connected / Voicemail)

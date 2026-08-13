@@ -585,6 +585,13 @@ window.createQuoteApplicationSimple = function(leadId) {
                             <span style="margin-left: 3px;">%</span>
                         </div>
                     </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 3px; font-size: 12px;">Hopper-Bottom Trailer:</label>
+                        <div style="display: flex; align-items: center;">
+                            <input type="text" value="" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
+                            <span style="margin-left: 3px;">%</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -1168,7 +1175,7 @@ function prefillApplicationForm(applicationData) {
             const parentDiv = input.closest('div');
             const foundLabel = parentDiv?.querySelector('label')?.textContent?.trim().replace(':', '') ||
                              parentDiv?.previousElementSibling?.textContent?.trim().replace(':', '') ||
-                             parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker)/)?.[1];
+                             parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker|Hopper-Bottom Trailer)/)?.[1];
             if (foundLabel) {
                 label = foundLabel;
             }
@@ -1205,6 +1212,7 @@ function prefillApplicationForm(applicationData) {
             'Dumptruck': formData['Dumptruck'],
             'Dump Trailer': formData['Dump Trailer'],
             'Tanker': formData['Tanker'],
+            'Hopper-Bottom Trailer': formData['Hopper-Bottom Trailer'],
 
             // Coverage fields
             'Auto Liability': formData['Auto Liability'],
@@ -1499,7 +1507,7 @@ window.saveQuoteApplication = async function() {
                     // Try to find the label within the same container
                     const label = parentDiv?.querySelector('label')?.textContent?.trim().replace(':', '') ||
                                  parentDiv?.previousElementSibling?.textContent?.trim().replace(':', '') ||
-                                 parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker)/)?.[1];
+                                 parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker|Hopper-Bottom Trailer)/)?.[1];
 
                     if (label) {
                         rawLabel = label;
@@ -1531,7 +1539,7 @@ window.saveQuoteApplication = async function() {
 
                 // Log Class of Risk fields specifically for debugging
                 if (rawLabel.includes('Dry Van') || rawLabel.includes('Flatbed') || rawLabel.includes('Heavy Haul') ||
-                    rawLabel.includes('Auto Hauler') || rawLabel.includes('Box Truck') || rawLabel.includes('Reefer') || rawLabel.includes('Dumptruck') || rawLabel.includes('Dump Trailer') || rawLabel.includes('Tanker')) {
+                    rawLabel.includes('Auto Hauler') || rawLabel.includes('Box Truck') || rawLabel.includes('Reefer') || rawLabel.includes('Dumptruck') || rawLabel.includes('Dump Trailer') || rawLabel.includes('Tanker') || rawLabel.includes('Hopper-Bottom Trailer')) {
                     console.log(`🔍 Class of Risk field: "${rawLabel}" = "${value}"`);
                 }
             }
@@ -1676,6 +1684,9 @@ window.saveQuoteApplication = async function() {
             } else if (parentText.includes('Tanker') || grandparentText.includes('Tanker')) {
                 formData['Tanker'] = value;
                 console.log(`🎯 Explicitly captured Tanker: "${value}"`);
+            } else if (parentText.includes('Hopper-Bottom Trailer') || grandparentText.includes('Hopper-Bottom Trailer')) {
+                formData['Hopper-Bottom Trailer'] = value;
+                console.log(`🎯 Explicitly captured Hopper-Bottom Trailer: "${value}"`);
             }
         });
 
@@ -2182,6 +2193,13 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                         <label style="display: block; margin-bottom: 3px; font-size: 12px;">Tanker:</label>
                         <div style="display: flex; align-items: center;">
                             <input type="text" value="${getSavedValue('Tanker', '')}" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
+                            <span style="margin-left: 3px;">%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 3px; font-size: 12px;">Hopper-Bottom Trailer:</label>
+                        <div style="display: flex; align-items: center;">
+                            <input type="text" value="${getSavedValue('Hopper-Bottom Trailer', '')}" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
                             <span style="margin-left: 3px;">%</span>
                         </div>
                     </div>
@@ -2758,6 +2776,9 @@ window.downloadQuoteApplicationPDF = function() {
             } else if (parentText.includes('Tanker') || grandparentText.includes('Tanker')) {
                 formData['Tanker'] = value;
                 console.log(`🎯 Download: Captured Tanker: "${value}"`);
+            } else if (parentText.includes('Hopper-Bottom Trailer') || grandparentText.includes('Hopper-Bottom Trailer')) {
+                formData['Hopper-Bottom Trailer'] = value;
+                console.log(`🎯 Download: Captured Hopper-Bottom Trailer: "${value}"`);
             }
         });
 
@@ -3230,6 +3251,18 @@ function generateApplicationPDF(lead, formData) {
             <div class="field">
                 <div class="field-label">Dumptruck:</div>
                 <div class="field-value">${formData['Dumptruck'] || ''}${formData['Dumptruck'] ? '%' : ''}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Dump Trailer:</div>
+                <div class="field-value">${formData['Dump Trailer'] || ''}${formData['Dump Trailer'] ? '%' : ''}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Tanker:</div>
+                <div class="field-value">${formData['Tanker'] || ''}${formData['Tanker'] ? '%' : ''}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Hopper-Bottom Trailer:</div>
+                <div class="field-value">${formData['Hopper-Bottom Trailer'] || ''}${formData['Hopper-Bottom Trailer'] ? '%' : ''}</div>
             </div>
         </div>
     </div>
@@ -3782,7 +3815,17 @@ function populateClassOfRisk(modal, commodities) {
         'gravel': 'Dump Truck',
         'dirt': 'Dump Truck',
         'rock': 'Dump Truck',
-        'demolition': 'Dump Truck'
+        'demolition': 'Dump Truck',
+
+        // Hopper-Bottom Trailer commodities
+        'grain': 'Hopper-Bottom Trailer',
+        'wheat': 'Hopper-Bottom Trailer',
+        'corn': 'Hopper-Bottom Trailer',
+        'soybeans': 'Hopper-Bottom Trailer',
+        'feed': 'Hopper-Bottom Trailer',
+        'seed': 'Hopper-Bottom Trailer',
+        'fertilizer': 'Hopper-Bottom Trailer',
+        'agricultural': 'Hopper-Bottom Trailer'
     };
 
     // Count occurrences of each risk category
