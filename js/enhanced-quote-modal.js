@@ -1242,7 +1242,16 @@ function prefillApplicationForm(applicationData) {
             }
         }
 
-        if (value) {
+        if (value && value !== '__custom__') {
+            // For selects, add custom value as an option if it doesn't exist
+            if (input.tagName === 'SELECT' && !Array.from(input.options).some(o => o.value === value)) {
+                const customOpt = document.createElement('option');
+                customOpt.value = value;
+                customOpt.text = value;
+                // Insert before "Custom..." option if present, otherwise append
+                const customPlaceholder = Array.from(input.options).find(o => o.value === '__custom__');
+                input.insertBefore(customOpt, customPlaceholder || null);
+            }
             input.value = value;
             console.log(`✅ Pre-filled "${label}" with: "${value}"`);
         } else if (label) {
@@ -1533,7 +1542,9 @@ window.saveQuoteApplication = async function() {
                     mappedKey = 'taxId';
                 }
 
-                const value = input.value?.trim() || '';
+                let value = input.value?.trim() || '';
+                // Don't save the "__custom__" placeholder — it means the user opened the custom input but didn't type anything
+                if (value === '__custom__') value = '';
                 formData[mappedKey] = value;
                 formData[rawLabel] = value; // Also keep original label
 
@@ -2047,12 +2058,16 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
     // Helper function to get saved value or default
     // Helper function to generate dropdown options with correct selection
     function generateDropdownOptions(options, selectedValue) {
-        const isCustom = selectedValue && !options.includes(selectedValue);
+        const isCustom = selectedValue && selectedValue !== '__custom__' && !options.includes(selectedValue);
         const opts = options.map(option =>
             `<option value="${option}" ${option === selectedValue ? 'selected' : ''}>${option}</option>`
         ).join('');
-        const customOpt = `<option value="__custom__" ${isCustom ? 'selected' : ''}>Custom...</option>`;
-        return opts + customOpt;
+        // If a custom value was previously saved, add it as a real option so it persists
+        const savedCustomOpt = isCustom
+            ? `<option value="${selectedValue}" selected>${selectedValue}</option>`
+            : '';
+        const customOpt = `<option value="__custom__">Custom...</option>`;
+        return opts + savedCustomOpt + customOpt;
     }
 
     function getSavedValue(key, defaultValue = '') {
@@ -2738,7 +2753,8 @@ window.downloadQuoteApplicationPDF = function() {
                              input.name ||
                              input.id ||
                              `field_${index}`;
-                formData[label] = input.value || '';
+                const val = input.value || '';
+                formData[label] = val === '__custom__' ? '' : val;
             }
         });
 
