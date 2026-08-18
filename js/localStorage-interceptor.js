@@ -60,23 +60,10 @@ console.log('🛡️ localStorage Interceptor - Blocking bad lead data');
             return true;
         }
 
-        if (lead.name && exclusion.names.has(lead.name.toLowerCase().trim())) {
-            console.log(`🚫 BLOCKED archived lead by name: ${lead.name}`);
-            return true;
-        }
-
-        if (lead.phone) {
-            const cleanPhone = lead.phone.replace(/\D/g, '');
-            if (cleanPhone && exclusion.phones.has(cleanPhone)) {
-                console.log(`🚫 BLOCKED archived lead by phone: ${lead.name} (${lead.phone})`);
-                return true;
-            }
-        }
-
-        if (lead.email && exclusion.emails.has(lead.email.toLowerCase().trim())) {
-            console.log(`🚫 BLOCKED archived lead by email: ${lead.name} (${lead.email})`);
-            return true;
-        }
+        // NOTE: Name/phone/email matching REMOVED — it caused false positives
+        // where active leads sharing a phone/email/name with an archived lead
+        // were silently deleted on every localStorage write (e.g. Triple A Transport bug).
+        // Only block by exact lead ID, which is reliable.
 
         return false;
     }

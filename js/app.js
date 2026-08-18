@@ -508,9 +508,7 @@ function cleanupDuplicateLeads() {
     // Clean the main leads list
     const cleanedLeads = allLeads.map(lead => {
         // If this lead matches ANY archived identifier, mark it as archived
-        if (archivedIds.has(String(lead.id)) ||
-            (lead.phone && archivedPhones.has(lead.phone.replace(/\D/g, ''))) ||
-            (lead.email && archivedEmails.has(lead.email.toLowerCase()))) {
+        if (archivedIds.has(String(lead.id))) {
 
             if (!lead.archived) {
                 lead.archived = true;
@@ -8855,11 +8853,11 @@ async function loadLeadsView() {
         let allLeads = insuranceLeads.length > 0 ? insuranceLeads : regularLeads;
 
         // Filter out archived leads from server data
+        // NOTE: Only filter by archived ID — name/phone/email matching removed
+        // because it caused false positives (active leads sharing a phone/email/name
+        // with an archived lead were silently removed, e.g. Triple A Transport bug).
         const activeLeads = allLeads.filter(lead => {
             if (archivedIds.has(String(lead.id))) return false;
-            if (lead.phone && archivedPhones.has(lead.phone.replace(/\D/g, ''))) return false;
-            if (lead.email && archivedEmails.has(lead.email.toLowerCase())) return false;
-            if (lead.name && archivedNames.has(lead.name.toLowerCase())) return false;
             return true;
         });
 
