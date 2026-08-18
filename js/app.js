@@ -17108,9 +17108,14 @@ async function fetchLeadsFromServer() {
         const serverLeads = await response.json();
         console.log(`✅ DEBUG: Fetched ${serverLeads.length} leads from server`);
 
-        // Store in localStorage for future use
-        localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
-        console.log('💾 DEBUG: Stored leads in localStorage as insurance_leads');
+        // Smart merge: preserve any localStorage-only leads (e.g. manually added leads
+        // whose POST may not have completed yet) instead of direct overwrite
+        const existingLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const serverIdSet = new Set(serverLeads.map(l => String(l.id)));
+        const localOnly = existingLeads.filter(l => !serverIdSet.has(String(l.id)));
+        const merged = [...serverLeads, ...localOnly];
+        localStorage.setItem('insurance_leads', JSON.stringify(merged));
+        console.log(`💾 DEBUG: Smart-merged ${serverLeads.length} server + ${localOnly.length} local-only leads`);
 
         return serverLeads;
 
@@ -29604,8 +29609,11 @@ async function fetchLeadsForReport(agentName) {
         const serverLeads = await response.json();
         console.log(`Fetched ${serverLeads.length} leads from server`);
 
-        // Save to localStorage for future use
-        localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
+        // Smart merge: preserve localStorage-only leads instead of direct overwrite
+        const existingLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const serverIdSet = new Set(serverLeads.map(l => String(l.id)));
+        const localOnly = existingLeads.filter(l => !serverIdSet.has(String(l.id)));
+        localStorage.setItem('insurance_leads', JSON.stringify([...serverLeads, ...localOnly]));
 
         // Now call the original download function with fresh data
         downloadAgentReport(agentName);
