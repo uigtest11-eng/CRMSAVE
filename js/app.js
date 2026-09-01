@@ -10651,6 +10651,13 @@ function updateLeadsNavBadge() {
 }
 window.updateLeadsNavBadge = updateLeadsNavBadge;
 
+// Run badge update on page load at several intervals to catch whenever leads land in localStorage
+setTimeout(updateLeadsNavBadge, 500);
+setTimeout(updateLeadsNavBadge, 1500);
+setTimeout(updateLeadsNavBadge, 3000);
+setTimeout(updateLeadsNavBadge, 6000);
+setInterval(updateLeadsNavBadge, 30000); // Keep synced every 30s
+
 // Function to update a specific lead row in the table without refreshing the entire table
 function updateLeadRowInTable(leadId, updatedLead) {
     const tableBody = document.getElementById('leadsTableBody');
