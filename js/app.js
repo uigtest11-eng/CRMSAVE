@@ -8071,7 +8071,7 @@ function generateSimpleLeadRows(leads) {
 
         // OVERRIDE: Blue highlight for producer/admin when CSR completed a task awaiting review
         if (!_isCsrRow && lead.csrTodoDone && !lead.csrTodoAcknowledged) {
-            rowStyle = 'style="background-color: #dbeafe !important; border-left: 4px solid #3b82f6 !important; border-right: 2px solid #3b82f6 !important;"';
+            rowStyle = 'style="background-color: #93c5fd !important; border-left: 4px solid #1d4ed8 !important; border-right: 2px solid #1d4ed8 !important;"';
             rowClass = 'csr-done-pending force-persistent-highlight';
             console.log(`🔵 Built-in highlighting: ${lead.name} -> BLUE (CSR task done, awaiting producer review)`);
         }
@@ -8607,6 +8607,8 @@ window.toggleCsrTodoDone = async function(leadId, done) {
             memLead.csrTodo = lead.csrTodo;
             memLead.csrTodoDone = lead.csrTodoDone;
             memLead.csrTodoOriginal = lead.csrTodoOriginal;
+            memLead.csrTodoAcknowledged = lead.csrTodoAcknowledged;
+            memLead.csrTodoDenied = lead.csrTodoDenied;
         }
     }
     if (window.filteredLeads) {
@@ -8615,6 +8617,8 @@ window.toggleCsrTodoDone = async function(leadId, done) {
             memLead2.csrTodo = lead.csrTodo;
             memLead2.csrTodoDone = lead.csrTodoDone;
             memLead2.csrTodoOriginal = lead.csrTodoOriginal;
+            memLead2.csrTodoAcknowledged = lead.csrTodoAcknowledged;
+            memLead2.csrTodoDenied = lead.csrTodoDenied;
         }
     }
 
@@ -8682,12 +8686,7 @@ window.acknowledgeCsrTodo = async function(leadId, approved) {
         }
     });
 
-    // Refresh profile so checkboxes disappear and textarea returns
-    if (typeof window.viewLead === 'function') {
-        setTimeout(() => window.viewLead(leadId), 100);
-    }
-
-    // Sync to server
+    // Sync to server FIRST — viewLead fetches fresh server data, so save must complete before it runs
     try {
         const apiUrl = window.location.hostname === 'localhost'
             ? 'https://localhost:3001'
@@ -8698,6 +8697,11 @@ window.acknowledgeCsrTodo = async function(leadId, approved) {
             body: JSON.stringify(lead)
         });
     } catch (e) { console.warn('Failed to save CSR todo acknowledgment to server:', e); }
+
+    // Refresh profile so checkboxes disappear and textarea returns (server is now updated)
+    if (typeof window.viewLead === 'function') {
+        window.viewLead(leadId);
+    }
 
     // Re-render table to remove blue highlight
     if (typeof refreshLeadsTable === 'function') {
