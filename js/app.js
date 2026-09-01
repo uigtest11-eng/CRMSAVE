@@ -13792,16 +13792,15 @@ async function loadRenewalTaskBadges() {
         }
     }
 
-    // Recount Month View button badge using actual DOM card states after all updates
-    // (API-based count ran before DOM checks, so recount here is more accurate)
+    // Recount Month View button badge by counting visible red badges after all updates.
+    // This is more reliable than color checks — if a card's red badge is hidden, it's done.
     if (isMonthView) {
         const monthCards = document.querySelectorAll('.month-view .renewal-card[data-policy-id]');
         let stillNotDone = 0;
         monthCards.forEach(c => {
-            const bl = c.style.borderLeft || '';
-            const bg = c.style.background || c.style.backgroundColor || '';
-            const isGreen = bl.includes('16, 185, 129') || bg.includes('209, 250, 229') || bg.includes('167, 243, 208');
-            if (!isGreen) stillNotDone++;
+            const policyId = c.getAttribute('data-policy-id');
+            const redBadge = document.getElementById(`red-badge-${policyId}`);
+            if (redBadge && redBadge.style.display !== 'none') stillNotDone++;
         });
         const monthBtn = document.getElementById('monthViewBtnBadge');
         if (monthBtn) {
