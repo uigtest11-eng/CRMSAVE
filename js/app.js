@@ -12,7 +12,9 @@ async function loadPoliciesFromServer() {
             console.log(`Loaded ${serverPolicies.length} policies from server`);
 
             // Merge: preserve local clientId/clientName when server doesn't have them
-            const existingLocal = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            let existingLocal;
+            try { existingLocal = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { existingLocal = []; }
+            if (!Array.isArray(existingLocal)) existingLocal = [];
             const localById = {};
             existingLocal.forEach(p => { if (p.id) localById[p.id] = p; });
             const mergedPolicies = serverPolicies.map(sp => {
@@ -35,12 +37,13 @@ async function loadPoliciesFromServer() {
             return serverPolicies;
         } else {
             console.error('Failed to load policies:', response.status);
-            return JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            let fb; try { fb = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { fb = []; }
+            return Array.isArray(fb) ? fb : [];
         }
     } catch (error) {
         console.error('Error loading policies from server:', error);
-        // Fallback to localStorage
-        return JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        let fb; try { fb = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { fb = []; }
+        return Array.isArray(fb) ? fb : [];
     }
 }
 
@@ -12814,7 +12817,9 @@ function loadPoliciesView() {
     }
 
     // Load policies from localStorage first, then update from server in background
-    let policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    let policies;
+    try { policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { policies = []; }
+    if (!Array.isArray(policies)) policies = [];
     console.log('📊 Loading policies from localStorage:', policies.length);
 
     // ── Filter by agent BEFORE computing stats — non-admins only see their own ──
@@ -13220,8 +13225,11 @@ async function loadRenewalsView() {
     }
 
     // Get real policy data from localStorage (now fresh for CSR)
-    let allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    let clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    let allPolicies, clients;
+    try { allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { allPolicies = []; }
+    if (!Array.isArray(allPolicies)) allPolicies = [];
+    try { clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]'); } catch(e) { clients = []; }
+    if (!Array.isArray(clients)) clients = [];
 
     // Agency → agent mapping (same as Carriers tab)
     const RENEWAL_AGENCY_AGENTS = {
