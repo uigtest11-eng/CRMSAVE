@@ -1,6 +1,12 @@
 // FINAL APP SENT FIX - Ultimate override for all TODO text generation
 
 (function() {
+    // CSR users: skip entirely
+    try {
+        var _fasf = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((_fasf.role || '') === 'csr') return;
+    } catch(e) {}
+
     // Function to force fix all app sent leads immediately
     function forceFixAppSentLeads() {
         try {
@@ -48,6 +54,9 @@
         rows.forEach(row => {
             const checkbox = row.querySelector('.lead-checkbox');
             if (!checkbox || String(checkbox.value) !== String(leadId)) return;
+
+            // Skip CSR-pending blue rows — blue takes priority over green
+            if (row.classList.contains('csr-done-pending') || row.getAttribute('data-highlight') === 'blue') return;
 
             // This is the app sent lead row
             const todoCell = row.querySelectorAll('td')[7]; // TODO column is 8th column (index 7)
