@@ -12925,23 +12925,38 @@ window.transcribeRecording = async function(leadId, recordingPath) {
     }
 };
 
-// Open Call Recording + Transcript in a new popup tab
+// Open Call Recording + Transcript in a new popup tab (with full word-highlight sync)
 window.openRecordingPopout = function(leadId) {
     const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
     const lead = leads.find(l => String(l.id) === String(leadId));
     if (!lead) { alert('Lead not found.'); return; }
 
     const recordingPath = lead.recordingPath || '';
-    const transcriptHtml = (lead.transcriptWords && lead.transcriptWords.length)
-        ? lead.transcriptWords.map(w => `<span>${w.word || w} </span>`).join('')
-        : (lead.transcriptText
-            ? lead.transcriptText.replace(/\n/g, '<br>')
-            : '<span style="color:#9ca3af;">No transcript yet.</span>');
+    const leadName = ((lead.firstName || '') + ' ' + (lead.lastName || '')).trim();
 
-    const leadName = (lead.firstName || '') + ' ' + (lead.lastName || '');
+    // Build word-span HTML identical to main profile (clickable + highlight-ready)
+    let transcriptHtml = '';
+    const words = lead.transcriptWords || [];
+    if (words.length) {
+        let currentSpeaker = null;
+        for (const w of words) {
+            if (w.speaker !== currentSpeaker) {
+                if (currentSpeaker !== null) transcriptHtml += '<br>';
+                currentSpeaker = w.speaker;
+                const label = w.speaker === 0 ? 'Agent' : 'Customer';
+                transcriptHtml += `<strong style="color:#374151;">${label}:</strong> `;
+            }
+            transcriptHtml += `<span class="tw" data-s="${w.start}" data-e="${w.end}" style="cursor:pointer;" title="Click to seek" onclick="seekAudio(+this.dataset.s)">${w.word} </span>`;
+        }
+    } else if (lead.transcriptText) {
+        transcriptHtml = `<span style="color:#9ca3af;">${lead.transcriptText.replace(/\n/g, '<br>')}</span>`;
+    } else {
+        transcriptHtml = '<span style="color:#9ca3af;">No transcript yet.</span>';
+    }
+
     const html = `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Recording – ${leadName.trim() || leadId}</title>
+<title>Recording \u2013 ${leadName || leadId}</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 <style>
   body{font-family:system-ui,sans-serif;background:#f3f4f6;margin:0;padding:24px;}
@@ -12949,12 +12964,12 @@ window.openRecordingPopout = function(leadId) {
   .card{background:#fff;border-radius:10px;padding:20px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,.1);}
   .card h3{margin:0 0 14px;color:#374151;font-size:16px;}
   audio{width:100%;height:40px;}
-  .transcript{width:100%;min-height:200px;max-height:500px;overflow-y:auto;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-family:monospace;font-size:13px;line-height:1.9;background:#fafafa;}
+  #popout-transcript{width:100%;min-height:200px;max-height:500px;overflow-y:auto;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-family:monospace;font-size:13px;line-height:1.9;background:#fff;box-sizing:border-box;}
 </style></head><body>
-<h2><i class="fas fa-play-circle" style="color:#10b981;margin-right:8px;"></i>${leadName.trim() || 'Lead'} – Call Recording &amp; Transcript</h2>
+<h2><i class="fas fa-play-circle" style="color:#10b981;margin-right:8px;"></i>${leadName || 'Lead'} \u2013 Call Recording &amp; Transcript</h2>
 <div class="card">
   <h3><i class="fas fa-play-circle" style="color:#10b981;margin-right:6px;"></i> Call Recording</h3>
-  <audio controls preload="none">
+  <audio id="popout-audio" controls preload="none">
     <source src="${recordingPath}" type="audio/mpeg">
     <source src="${recordingPath}" type="audio/wav">
     Your browser does not support audio.
@@ -12962,8 +12977,39 @@ window.openRecordingPopout = function(leadId) {
 </div>
 <div class="card">
   <h3><i class="fas fa-microphone" style="margin-right:6px;"></i> Call Transcript</h3>
-  <div class="transcript">${transcriptHtml}</div>
+  <div id="popout-transcript">${transcriptHtml}</div>
 </div>
+<script>
+function seekAudio(t) {
+    var a = document.getElementById('popout-audio');
+    if (a) { a.currentTime = t; a.play(); }
+}
+window.addEventListener('load', function() {
+    var audio = document.getElementById('popout-audio');
+    var display = document.getElementById('popout-transcript');
+    if (!audio || !display) return;
+    audio.addEventListener('timeupdate', function() {
+        var t = audio.currentTime;
+        var scrollTarget = null;
+        display.querySelectorAll('span.tw').forEach(function(span) {
+            var s = +span.dataset.s;
+            var e = +span.dataset.e;
+            if (t >= e) {
+                span.style.color = '#2563eb';
+                span.style.fontWeight = '';
+            } else if (t >= s) {
+                span.style.color = '#1d4ed8';
+                span.style.fontWeight = 'bold';
+                scrollTarget = span;
+            } else {
+                span.style.color = '';
+                span.style.fontWeight = '';
+            }
+        });
+        if (scrollTarget) scrollTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+});
+<\/script>
 </body></html>`;
 
     const win = window.open('', '_blank', 'width=800,height=700,resizable=yes,scrollbars=yes');
