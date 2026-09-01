@@ -13566,6 +13566,7 @@ function renderMonthView(policies, isAdmin = false) {
                          data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
                          style="position:relative;">
                         <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
+                        <span id="red-badge-${policy.id}" style="display:none;position:absolute;top:-8px;left:-8px;background:#ef4444;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
                         <div class="renewal-header">
                             <div class="renewal-info">
                                 <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
@@ -13682,8 +13683,9 @@ async function loadRenewalTaskBadges() {
         }
     }
 
-    // Update card badges and handle 30-45 view filtering
+    // Update card badges and handle view-specific logic
     const is30to45View = !!document.querySelector('.thirty45-view');
+    const isMonthView = !!document.querySelector('.month-view');
     const cards = document.querySelectorAll('[data-policy-id]');
 
     await Promise.all(Array.from(cards).map(async (card) => {
@@ -13709,6 +13711,27 @@ async function loadRenewalTaskBadges() {
         if (cardBadge && completedCount > 0) {
             cardBadge.textContent = completedCount;
             cardBadge.style.display = 'inline-block';
+        }
+
+        // Month view: red badge for incomplete tasks, green card when fully done
+        if (isMonthView) {
+            const allDone = tasks && tasks.length > 0 && tasks.every(t => t.completed);
+            if (allDone) {
+                // All tasks completed — turn card green
+                card.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
+                card.style.setProperty('border-left', '4px solid #10b981', 'important');
+                card.style.setProperty('border-right', '2px solid #10b981', 'important');
+                const redBadge = document.getElementById(`red-badge-${policyId}`);
+                if (redBadge) redBadge.style.display = 'none';
+            } else {
+                // Not fully done — show red badge with incomplete count
+                const redBadge = document.getElementById(`red-badge-${policyId}`);
+                if (redBadge) {
+                    const incompleteCount = tasks ? tasks.filter(t => !t.completed).length : '!';
+                    redBadge.textContent = incompleteCount;
+                    redBadge.style.display = 'inline-block';
+                }
+            }
         }
 
         // 30-45 view: hide cards that already have tasks started
