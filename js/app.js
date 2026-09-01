@@ -13603,7 +13603,7 @@ function render30to45View(policies, isAdmin = false) {
     if (filtered.length === 0) {
         return `
             <div class="thirty45-view">
-                <h3>Renewals Due in 30–45 Days — No Tasks Started</h3>
+                <h3>Renewals Due in 30–45 Days</h3>
                 <p style="color:#6b7280;padding:20px 0;">No renewals fall in this window.</p>
             </div>
         `;
@@ -13611,9 +13611,7 @@ function render30to45View(policies, isAdmin = false) {
 
     return `
         <div class="thirty45-view">
-            <h3>Renewals Due in 30–45 Days — No Tasks Started
-                <span id="thirty45StatusMsg" style="font-size:.8em;color:#6b7280;font-weight:normal;margin-left:8px;">checking...</span>
-            </h3>
+            <h3>Renewals Due in 30–45 Days</h3>
             <div class="renewal-list" id="thirty45List">
                 ${filtered.map(policy => `
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
@@ -13779,22 +13777,10 @@ async function loadRenewalTaskBadges() {
             }
         }
 
-        // 30-45 view: hide cards that already have tasks started
-        if (is30to45View && tasks) {
-            card.style.display = 'none';
-        }
+        // 30-45 view: cards always stay visible regardless of task status
     }));
 
-    // Update status message for 30-45 view
-    if (is30to45View) {
-        const statusMsg = document.getElementById('thirty45StatusMsg');
-        if (statusMsg) {
-            const allCards = document.querySelectorAll('.thirty45-view .renewal-card');
-            let visibleCount = 0;
-            allCards.forEach(c => { if (c.style.display !== 'none') visibleCount++; });
-            statusMsg.textContent = `— ${visibleCount} need attention`;
-        }
-    }
+
 
     // Recount Month View button badge by counting visible red badges after all updates.
     // This is more reliable than color checks — if a card's red badge is hidden, it's done.
