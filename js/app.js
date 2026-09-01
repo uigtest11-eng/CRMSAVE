@@ -355,12 +355,47 @@ async function loadClientsFromServer(limit = 500) {
                     _toSuppress.add(String(c.id));
                 }
             });
-            const dedupedClients = _toSuppress.size > 0
+            const _bizDeduped = _toSuppress.size > 0
                 ? mergedClients.filter(c => !_toSuppress.has(String(c.id)))
                 : mergedClients;
 
+            // === Suppress same-person duplicates (same phone or email, different IDs) ===
+            // Keep the most recently updated record when duplicates share phone or email.
+            const _dupIds = new Set();
+            const _byPhone = {};
+            const _byEmail = {};
+            _bizDeduped.forEach(c => {
+                const ph = _np(c.phone);
+                const em = (c.email || '').toLowerCase().trim();
+                if (ph.length >= 10) {
+                    if (_byPhone[ph]) _byPhone[ph].push(c);
+                    else _byPhone[ph] = [c];
+                }
+                if (em) {
+                    if (_byEmail[em]) _byEmail[em].push(c);
+                    else _byEmail[em] = [c];
+                }
+            });
+            const _pickBest = (group) => {
+                if (group.length <= 1) return;
+                // Sort by updated_at desc, then by id length desc (longer IDs are newer format)
+                group.sort((a, b) => {
+                    const aTime = new Date(a.updatedAt || a.lastModified || a.createdAt || 0).getTime();
+                    const bTime = new Date(b.updatedAt || b.lastModified || b.createdAt || 0).getTime();
+                    return bTime - aTime;
+                });
+                for (let i = 1; i < group.length; i++) {
+                    _dupIds.add(String(group[i].id));
+                }
+            };
+            Object.values(_byPhone).forEach(_pickBest);
+            Object.values(_byEmail).forEach(_pickBest);
+            const dedupedClients = _dupIds.size > 0
+                ? _bizDeduped.filter(c => !_dupIds.has(String(c.id)))
+                : _bizDeduped;
+
             localStorage.setItem('insurance_clients', JSON.stringify(dedupedClients));
-            console.log(`💾 Stored ${dedupedClients.length} clients in localStorage (${mergedClients.length - dedupedClients.length} biz-name dupes suppressed, ${localOnlyClients.length} local-only preserved)`);
+            console.log(`💾 Stored ${dedupedClients.length} clients in localStorage (${_toSuppress.size} biz-name dupes, ${_dupIds.size} same-person dupes suppressed, ${localOnlyClients.length} local-only preserved)`);
 
             // Store pagination info for later use
             if (data.total) {
@@ -6695,13 +6730,15 @@ function renderPersonalGoals(data, period) {
         });
     });
 
-    // Apps to market
+    // Apps to market — use the timestamp when the app action occurred, not lead creation
     let appsInRange = 0;
     leads.filter(l => (l.assignedTo || '').toLowerCase() === currentUser).forEach(lead => {
-        const createdStr = lead.created_at || lead.created || '';
-        const d = createdStr ? new Date(createdStr) : null;
-        if (!d || d < startTs || d > endTs) return;
-        if (lead.stage === 'app_sent' || lead.appStage?.app || lead.appStage?.lossRuns || lead.appStage?.iftas || lead.appStage?.saa) appsInRange++;
+        const isApp = lead.stage === 'app_sent' || lead.appStage?.app || lead.appStage?.lossRuns || lead.appStage?.iftas || lead.appStage?.saa;
+        if (!isApp) return;
+        // Prefer appSentAt or stageUpdatedAt (when the app action happened), fall back to updated_at/created
+        const appDateStr = lead.appSentAt || lead.stageUpdatedAt || lead.updated_at || lead.lastModified || lead.created_at || lead.createdAt || lead.created || '';
+        const d = appDateStr ? new Date(appDateStr) : null;
+        if (d && d >= startTs && d <= endTs) appsInRange++;
     });
 
     // Scheduled callback %
@@ -6721,12 +6758,23 @@ function renderPersonalGoals(data, period) {
     const cbPct = connectedLeads > 0 ? (leadsWithCB / connectedLeads) * 100 : 0;
     const avgTalkSecs = callsInRange > 0 ? callSecsInRange / callsInRange : 0;
 
-    // New leads in range (leads created/assigned in the period)
+    // New leads in range (leads created OR first worked on in the period)
     const newLeadsInRange = leads.filter(l => {
         if ((l.assignedTo || '').toLowerCase() !== currentUser) return false;
-        const createdStr = l.created_at || l.created || '';
+        // Check lead creation date
+        const createdStr = l.created_at || l.createdAt || l.created || '';
         const d = createdStr ? new Date(createdStr) : null;
-        return d && d >= startTs && d <= endTs;
+        if (d && d >= startTs && d <= endTs) return true;
+        // Also check first stageTimestamp — captures when agent first actively worked a ViciDial lead
+        const stageTs = l.stageTimestamps;
+        if (stageTs && typeof stageTs === 'object') {
+            const firstWork = Object.values(stageTs).reduce((earliest, ts) => {
+                const t = new Date(ts);
+                return (!earliest || t < earliest) ? t : earliest;
+            }, null);
+            if (firstWork && firstWork >= startTs && firstWork <= endTs) return true;
+        }
+        return false;
     }).length;
 
     const p = period;
@@ -7824,7 +7872,7 @@ function getLeadNameStyling(lead) {
 // Helper function to generate lead rows
 function generateSimpleLeadRows(leads) {
     if (!leads || leads.length === 0) {
-        return '<tr><td colspan="12" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
+        return '<tr><td colspan="13" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
     }
 
     console.log(`🔥 generateSimpleLeadRows: Processing ${leads.length} leads for highlighting`);
@@ -8021,6 +8069,13 @@ function generateSimpleLeadRows(leads) {
             }
         }
 
+        // OVERRIDE: Blue highlight for producer/admin when CSR completed a task awaiting review
+        if (!_isCsrRow && lead.csrTodoDone && !lead.csrTodoAcknowledged) {
+            rowStyle = 'style="background-color: #dbeafe !important; border-left: 4px solid #3b82f6 !important; border-right: 2px solid #3b82f6 !important;"';
+            rowClass = 'csr-done-pending force-persistent-highlight';
+            console.log(`🔵 Built-in highlighting: ${lead.name} -> BLUE (CSR task done, awaiting producer review)`);
+        }
+
         // SPECIAL: Apply gold border for leads with 60+ minutes call time (highest priority)
         let goldRowBorder = '';
         if (lead && lead.reachOut && lead.reachOut.callLogs && Array.isArray(lead.reachOut.callLogs)) {
@@ -8070,6 +8125,8 @@ function generateSimpleLeadRows(leads) {
             dataAttributes = 'data-highlight="green" data-highlight-applied="true" data-highlight-source="builtin"';
         } else if (rowClass.includes('green-highlighted')) {
             dataAttributes = 'data-highlight="green" data-highlight-applied="true" data-highlight-source="green-highlight"';
+        } else if (rowClass.includes('csr-done-pending')) {
+            dataAttributes = 'data-highlight="blue" data-highlight-applied="true" data-highlight-source="builtin"';
         }
 
         // Also add lead identification for robust matching
@@ -8154,6 +8211,7 @@ function generateSimpleLeadRows(leads) {
                         return `<div style="font-weight: bold; color: ${color};">${result}</div>`;
                     })()}
                 </td>
+                <td style="text-align:center;">${lead.state ? lead.state.toUpperCase() : ''}</td>
                 <td>${lead.renewalDate || 'N/A'}</td>
                 <td>${lead.assignedTo || 'Unassigned'}</td>
                 <td>${generateCarrierBadge(lead)}</td>
@@ -8225,7 +8283,7 @@ function isHighValueLead(lead) {
 // Enhanced version with dividers for different agents and closed leads
 function generateSimpleLeadRowsWithDividers(leads) {
     if (!leads || leads.length === 0) {
-        return '<tr><td colspan="12" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
+        return '<tr><td colspan="13" style="text-align: center; padding: 2rem;">No leads found</td></tr>';
     }
 
     // Group leads by assigned agent and status
@@ -8369,7 +8427,7 @@ function generateSimpleLeadRowsWithDividers(leads) {
 
         return `
             <tr class="lead-divider" style="background: #374151 !important; border: none;">
-                <td colspan="12" style="position:relative;padding: 12px 20px; font-weight: bold; color: #9ca3af; font-size: 16px; text-align: center; text-transform: uppercase; letter-spacing: 1px; text-shadow: none;">
+                <td colspan="13" style="position:relative;padding: 12px 20px; font-weight: bold; color: #9ca3af; font-size: 16px; text-align: center; text-transform: uppercase; letter-spacing: 1px; text-shadow: none;">
                     ${checkboxHTML}${title}${greenBlueDisplay} (${count} ${count === 1 ? 'lead' : 'leads'})
                 </td>
             </tr>
@@ -8496,6 +8554,8 @@ window.toggleCsrTodoDone = async function(leadId, done) {
         // Clear the csrTodo text so the table To Do column becomes empty -> green row
         lead.csrTodoOriginal = lead.csrTodo || '';
         lead.csrTodo = '';
+        lead.csrTodoAcknowledged = false; // Producer must review again
+        lead.csrTodoDenied = false;       // Clear any previous denial
     } else {
         // Restore original text if unchecking
         if (lead.csrTodoOriginal) {
@@ -8579,6 +8639,67 @@ window.toggleCsrTodoDone = async function(leadId, done) {
     }
 
     // Also refresh the table for a full re-render
+    if (typeof refreshLeadsTable === 'function') {
+        setTimeout(refreshLeadsTable, 300);
+    }
+};
+
+// Producer/admin acknowledges a CSR-completed task (approve or deny)
+window.acknowledgeCsrTodo = async function(leadId, approved) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) return;
+
+    lead.csrTodoAcknowledged = true; // Removes blue row highlight
+
+    if (approved) {
+        // Task accepted: clear everything, textarea comes back blank
+        lead.csrTodo = '';
+        lead.csrTodoOriginal = '';
+        lead.csrTodoDone = false;
+        lead.csrTodoDenied = false;
+    } else {
+        // Task denied: restore text, flag CSR to redo
+        lead.csrTodo = lead.csrTodoOriginal || lead.csrTodo || '';
+        lead.csrTodoOriginal = '';
+        lead.csrTodoDone = false;
+        lead.csrTodoDenied = true;
+    }
+
+    lead.updatedAt = new Date().toISOString();
+    lead.lastModified = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+    [window.allLeads, window.filteredLeads].forEach(arr => {
+        if (!arr) return;
+        const m = arr.find(l => String(l.id) === String(leadId));
+        if (m) {
+            m.csrTodo = lead.csrTodo;
+            m.csrTodoDone = lead.csrTodoDone;
+            m.csrTodoOriginal = lead.csrTodoOriginal;
+            m.csrTodoAcknowledged = lead.csrTodoAcknowledged;
+            m.csrTodoDenied = lead.csrTodoDenied;
+        }
+    });
+
+    // Refresh profile so checkboxes disappear and textarea returns
+    if (typeof window.viewLead === 'function') {
+        setTimeout(() => window.viewLead(leadId), 100);
+    }
+
+    // Sync to server
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'https://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save CSR todo acknowledgment to server:', e); }
+
+    // Re-render table to remove blue highlight
     if (typeof refreshLeadsTable === 'function') {
         setTimeout(refreshLeadsTable, 300);
     }
@@ -9636,6 +9757,12 @@ async function loadLeadsView() {
                                 </span>
                             </th>
                             <th>To Do</th>
+                            <th class="sortable" onclick="sortLeads('state')" data-sort="state">
+                                State
+                                <span class="sort-arrow" id="sort-state">
+                                    <i class="fas fa-sort"></i>
+                                </span>
+                            </th>
                             <th class="sortable" onclick="sortLeads('renewalDate')" data-sort="renewalDate">
                                 Renewal Date
                                 <span class="sort-arrow" id="sort-renewalDate">
@@ -9788,9 +9915,9 @@ function showNewLead() {
 
                             <div class="form-group">
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Insurance Type</label>
-                                <select class="form-control" id="leadInsuranceType" style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: white;">
+                                <select class="form-control" id="leadInsuranceType" onchange="document.getElementById('leadDotGroup').style.display = this.value === 'Commercial Auto' ? '' : 'none'" style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: white;">
                                     <option value="Auto">Auto</option>
-                                    <option value="Commercial Auto">Commercial Auto</option>
+                                    <option value="Commercial Auto" selected>Commercial Auto</option>
                                     <option value="Home">Home</option>
                                     <option value="Life">Life</option>
                                     <option value="Health">Health</option>
@@ -9799,7 +9926,12 @@ function showNewLead() {
                                     <option value="Other">Other</option>
                                 </select>
                             </div>
-                            
+
+                            <div class="form-group" id="leadDotGroup">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">US DOT #</label>
+                                <input type="text" class="form-control" id="leadDotNumber" placeholder="e.g. 1234567" style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px;">
+                            </div>
+
                             <div class="form-group">
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Assigned To <span style="color: #ef4444;">*</span></label>
                                 <select class="form-control" id="leadAssignedTo" required style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: white;">
@@ -9883,6 +10015,7 @@ async function saveNewLead(event) {
     // Lead Source field removed - set default value
     const source = 'Manual Entry';
     const insuranceType = document.getElementById('leadInsuranceType').value;
+    const dotNumber = (document.getElementById('leadDotNumber')?.value || '').trim();
     const assignedTo = document.getElementById('leadAssignedTo').value;
     const premium = parseFloat(document.getElementById('leadPremium').value) || 0;
     const stage = document.getElementById('leadStage').value;
@@ -9905,6 +10038,7 @@ async function saveNewLead(event) {
         source,
         insuranceType,
         product: insuranceType, // Add product field for compatibility
+        dotNumber,
         assignedTo,
         premium,
         priority: 'Mid', // Set default priority to Mid (blue text)
@@ -9926,11 +10060,7 @@ async function saveNewLead(event) {
 
     // Save to server first
     try {
-        const apiUrl = window.location.hostname === 'localhost'
-            ? 'https://localhost:3001'
-            : `https://${window.location.hostname}:3001`;
-
-        const response = await fetch(`${apiUrl}/api/leads`, {
+        const response = await fetch('/api/leads', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -18746,7 +18876,8 @@ function selectQuoteToAttach(type, leadName, quoteIndex) {
 
 // Function to calculate real carrier statistics from policies
 function calculateCarrierStats(carrierName, agentNames) {
-    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const policiesRaw = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const policies = Array.isArray(policiesRaw) ? policiesRaw : [];
     const agentSet = agentNames ? new Set(agentNames.map(a => a.toLowerCase())) : null;
     const carrierPolicies = policies.filter(policy => {
         const policyCarrier = (policy.carrier || policy.insurance_company || '').toLowerCase();
@@ -18766,8 +18897,9 @@ function calculateCarrierStats(carrierName, agentNames) {
     });
 
     // Format premium as currency
-    const formattedPremium = totalPremium > 0 ?
-        `$${(totalPremium / 1000).toFixed(0)}K` : '$0';
+    const formattedPremium = totalPremium >= 1000000 ?
+        `$${(totalPremium / 1000000).toFixed(1)}M` :
+        totalPremium > 0 ? `$${(totalPremium / 1000).toFixed(0)}K` : '$0';
 
     return {
         policies: carrierPolicies.length,
@@ -20363,6 +20495,29 @@ async function _jnSilentImport(parsedPolicies) {
             if (!ep.term) ep.term = _ivansCalcTerm(ep.effectiveDate, ep.expirationDate);
             const _siNR = _ivansNewRenewal(p.transactionCode);
             if (_siNR && !ep.newRenewal) ep.newRenewal = _siNR;
+            // Update policy status based on download purpose and expiration
+            const _siDlP = (p.downloadPurpose || '').toLowerCase();
+            if (_siDlP.includes('cancel')) {
+                ep.policyStatus = _siDlP.includes('confirm') ? 'Cancelled' : 'Pending Cancel';
+            } else if (_siDlP.includes('reinstat')) {
+                ep.policyStatus = 'Active';
+            } else if (_siDlP.includes('non-renew') || _siDlP.includes('nonrenew')) {
+                ep.policyStatus = 'Expired';
+            } else {
+                const _siExpStr = ep.expirationDate || '';
+                if (_siExpStr) {
+                    const _siExpP = _siExpStr.split('/');
+                    let _siExpD;
+                    if (_siExpP.length === 3) _siExpD = new Date(_siExpP[2], _siExpP[0]-1, _siExpP[1]);
+                    else if (/^\d{4}-/.test(_siExpStr)) _siExpD = new Date(_siExpStr);
+                    if (_siExpD && !isNaN(_siExpD) && _siExpD < new Date()) {
+                        const _siCurSt = (ep.policyStatus || '').toLowerCase();
+                        if (_siCurSt === 'active' || _siCurSt === '' || _siCurSt === 'pending renewal') {
+                            ep.policyStatus = 'Expired';
+                        }
+                    }
+                }
+            }
             ep.ivansUpdated = new Date().toISOString();
             ep.source = ep.source || 'jenesis';
             updated++;
@@ -20396,7 +20551,21 @@ async function _jnSilentImport(parsedPolicies) {
                 premium:        n ? `$${n.toLocaleString()}/yr` : '',
                 financial:      { 'Annual Premium': n || 0 },
                 lob:            p.lob || '',
-                policyStatus:   'active',
+                policyStatus:   (() => {
+                    const _dp = (p.downloadPurpose || '').toLowerCase();
+                    if (_dp.includes('cancel') && _dp.includes('confirm')) return 'Cancelled';
+                    if (_dp.includes('cancel')) return 'Pending Cancel';
+                    if (_dp.includes('non-renew') || _dp.includes('nonrenew')) return 'Expired';
+                    const _ex = p.expirationDate || '';
+                    if (_ex) {
+                        const _ep = _ex.split('/');
+                        let _ed;
+                        if (_ep.length === 3) _ed = new Date(_ep[2], _ep[0]-1, _ep[1]);
+                        else if (/^\d{4}-/.test(_ex)) _ed = new Date(_ex);
+                        if (_ed && !isNaN(_ed) && _ed < new Date()) return 'Expired';
+                    }
+                    return 'Active';
+                })(),
                 source:         'jenesis',
                 createdAt:      Date.now(),
                 ivansUpdated:   new Date().toISOString(),
@@ -21063,10 +21232,19 @@ async function savePolicyForClient(clientId) {
     policyData.id = Date.now();
     policyData.policyNumber = policyData.policyNumber || `POL-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     policyData.createdAt = new Date().toISOString();
-    
+
     // Get clients and update the specific client
     const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
     const clientIndex = clients.findIndex(c => c.id == clientId);
+
+    // Inherit agent from client if not already set on the policy
+    if (clientIndex !== -1 && !policyData.agent && !policyData.assignedTo) {
+        const clientAgent = clients[clientIndex].assignedTo || clients[clientIndex].agent || '';
+        if (clientAgent) {
+            policyData.agent = clientAgent;
+            policyData.assignedTo = clientAgent;
+        }
+    }
     
     if (clientIndex === -1) {
         showNotification('Client not found', 'error');
@@ -22171,16 +22349,27 @@ function deleteClient(id) {
     if (confirm(`Are you sure you want to delete client "${client.name}"? This action cannot be undone.`)) {
         // Remove client from array
         const updatedClients = clients.filter(c => c.id !== id);
-        
+
         // Save updated clients list
         localStorage.setItem('insurance_clients', JSON.stringify(updatedClients));
-        
+
+        // Delete from server so it doesn't reappear on refresh
+        fetch(`/api/clients/${id}`, { method: 'DELETE' }).then(resp => {
+            if (resp.ok) {
+                console.log(`✅ Client "${client.name}" deleted from server`);
+            } else {
+                console.error(`❌ Failed to delete client from server: ${resp.status}`);
+            }
+        }).catch(err => {
+            console.error('❌ Error deleting client from server:', err);
+        });
+
         // Show success notification
         showNotification(`Client "${client.name}" has been deleted successfully`, 'success');
-        
+
         // Reload the clients view
         loadClientsView();
-        
+
         // Update dashboard stats if needed
         if (window.DashboardStats) {
             const dashboardStats = new DashboardStats();
@@ -22893,7 +23082,8 @@ function showIvansReview(parsedPolicies) {
                         const badge = isUpd
                             ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;">UPDATE</span>`
                             : `<span style="background:#dcfce7;color:#15803d;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;">NEW</span>`;
-                        const prem = p.premium ? '$' + parseFloat(p.premium||0).toLocaleString() + '/yr' : '—';
+                        const _rp = _ivansResolvePremium(p);
+                        const prem = _rp > 0 ? '$' + _rp.toLocaleString() + '/yr' : '—';
                         const rowBg = isUpd ? '' : 'background:#f0fdf4;';
                         // Pre-fill producer from existing policy if available
                         const existAgent = p._match ? (p._match.agent || p._match.assignedTo || p._match.producer || '') : '';
@@ -22943,6 +23133,54 @@ function ivansApplyDefaultProducer(producer) {
     });
 }
 
+// Convert IVANS coverages array [{coverageCode, limit1, limit2, deductible, premium, description}]
+// into the CoveragesArray format {CODE: {Code, Description, Amount, Premium, Deductible}} the UI expects
+function _ivansCoveragesToCoveragesArray(coverages) {
+    if (!Array.isArray(coverages) || !coverages.length) return null;
+    // Strip leading zeros from padded AL3 numeric values like "0001000000"
+    const cleanNum = (v) => {
+        if (!v) return '';
+        const s = String(v).trim();
+        if (/^0+\d+$/.test(s)) return String(parseInt(s, 10));
+        return s;
+    };
+    const arr = {};
+    for (const cov of coverages) {
+        const code = cov.coverageCode || cov.code || '';
+        if (!code) continue;
+        const limit = cleanNum(cov.limit1 || cov.limit || '');
+        const limit2 = cleanNum(cov.limit2 || '');
+        const amount = limit2 ? `${limit}/${limit2}` : limit;
+        arr[code] = {
+            Code: code,
+            Description: cov.description || cov.covDesc || '',
+            Amount: amount,
+            Premium: cov.premium || '',
+            Deductible: cleanNum(cov.deductible || ''),
+        };
+    }
+    return Object.keys(arr).length ? arr : null;
+}
+
+// Resolve premium from multiple IVANS fields — FPREM, totalPremium, annualPremium, grandTotal, or coverage sum
+function _ivansResolvePremium(p) {
+    const tryFields = [p.premium, p.totalPremium, p.annualPremium, p.periodPremium, p.grandTotal];
+    for (const v of tryFields) {
+        const n = parseFloat(v);
+        if (!isNaN(n) && n > 0) return n;
+    }
+    // Last resort: sum individual coverage premiums
+    if (Array.isArray(p.coverages) && p.coverages.length) {
+        let sum = 0;
+        for (const c of p.coverages) {
+            const cp = parseFloat(c.premium);
+            if (!isNaN(cp)) sum += cp;
+        }
+        if (sum > 0) return sum;
+    }
+    return 0;
+}
+
 async function confirmIvansImport() {
     const data = window._ivansReviewData;
     if (!data) return;
@@ -22982,9 +23220,9 @@ async function confirmIvansImport() {
                     policies[idx].assignedTo = p._producer;
                     policies[idx].producer   = p._producer;
                 }
-                if (p.premium) {
-                    const n = parseFloat(p.premium);
-                    if (!isNaN(n)) {
+                {
+                    const n = _ivansResolvePremium(p);
+                    if (n > 0) {
                         policies[idx].premium = `$${n.toLocaleString()}/yr`;
                         if (!policies[idx].financial) policies[idx].financial = {};
                         policies[idx].financial['Annual Premium'] = n;
@@ -23024,8 +23262,18 @@ async function confirmIvansImport() {
                 if (p.phone)   conObj['Phone']    = p.phone;
                 policies[idx].contact = conObj;
                 // Coverage, vehicles, drivers
-                if (p.coverages && Object.keys(p.coverages).length)
-                    policies[idx].coverage = Object.assign({}, policies[idx].coverage || {}, p.coverages);
+                // Fix existing coverage if stored as raw array from old imports
+                if (Array.isArray(policies[idx].coverage)) {
+                    const converted = _ivansCoveragesToCoveragesArray(policies[idx].coverage);
+                    policies[idx].coverage = converted ? { CoveragesArray: converted } : {};
+                }
+                if (Array.isArray(p.coverages) && p.coverages.length) {
+                    const updCovArr = _ivansCoveragesToCoveragesArray(p.coverages);
+                    if (updCovArr) {
+                        if (!policies[idx].coverage || typeof policies[idx].coverage !== 'object') policies[idx].coverage = {};
+                        policies[idx].coverage.CoveragesArray = Object.assign({}, policies[idx].coverage.CoveragesArray || {}, updCovArr);
+                    }
+                }
                 if (p.vehicles && p.vehicles.length) policies[idx].vehicles = p.vehicles;
                 if (p.drivers  && p.drivers.length)  policies[idx].drivers  = p.drivers;
                 if (p.state && !policies[idx].policyState) policies[idx].policyState = p.state;
@@ -23034,6 +23282,30 @@ async function confirmIvansImport() {
                 if (!policies[idx].term) policies[idx].term = _ivansCalcTerm(policies[idx].effectiveDate, policies[idx].expirationDate);
                 const _ciNR = _ivansNewRenewal(p.transactionCode);
                 if (_ciNR && !policies[idx].newRenewal) policies[idx].newRenewal = _ciNR;
+                // Update policy status based on download purpose and expiration date
+                const _dlPurpose = (p.downloadPurpose || '').toLowerCase();
+                if (_dlPurpose.includes('cancel')) {
+                    policies[idx].policyStatus = _dlPurpose.includes('confirm') ? 'Cancelled' : 'Pending Cancel';
+                } else if (_dlPurpose.includes('reinstat')) {
+                    policies[idx].policyStatus = 'Active';
+                } else if (_dlPurpose.includes('non-renew') || _dlPurpose.includes('nonrenew')) {
+                    policies[idx].policyStatus = 'Expired';
+                } else {
+                    // Check if policy is expired based on expiration date
+                    const _expStr = policies[idx].expirationDate || '';
+                    if (_expStr) {
+                        const _expParts = _expStr.split('/');
+                        let _expDate;
+                        if (_expParts.length === 3) _expDate = new Date(_expParts[2], _expParts[0]-1, _expParts[1]);
+                        else if (/^\d{4}-/.test(_expStr)) _expDate = new Date(_expStr);
+                        if (_expDate && !isNaN(_expDate) && _expDate < new Date()) {
+                            const curStatus = (policies[idx].policyStatus || '').toLowerCase();
+                            if (curStatus === 'active' || curStatus === '' || curStatus === 'pending renewal') {
+                                policies[idx].policyStatus = 'Expired';
+                            }
+                        }
+                    }
+                }
                 policies[idx].ivansUpdated = new Date().toISOString();
                 updated++;
                 // Upsert client record FIRST so clientId is set before server sync
@@ -23085,6 +23357,8 @@ async function confirmIvansImport() {
             if (p.state)   conObj['State']    = p.state;
             if (p.zip)     conObj['Zip Code'] = p.zip;
             if (p.phone)   conObj['Phone']    = p.phone;
+            const resolvedPrem = _ivansResolvePremium(p);
+            const covArray = _ivansCoveragesToCoveragesArray(p.coverages);
             const newPol = {
                 id:             newId,
                 policyNumber:   (p.policyNumber||'').replace(/\s+/g,''),
@@ -23099,16 +23373,31 @@ async function confirmIvansImport() {
                 expirationDate: p.expirationDate||'',
                 term:           _ivansCalcTerm(p.effectiveDate||'', p.expirationDate||''),
                 newRenewal:     _ivansNewRenewal(p.transactionCode),
-                premium:        n ? `$${n.toLocaleString()}/yr` : '',
-                financial:      { 'Annual Premium': n||0 },
+                premium:        resolvedPrem ? `$${resolvedPrem.toLocaleString()}/yr` : '',
+                financial:      { 'Annual Premium': resolvedPrem||0 },
                 lob:            p.lob||'',
-                policyStatus:   'active',
+                policyStatus:   (() => {
+                    const _dp = (p.downloadPurpose || '').toLowerCase();
+                    if (_dp.includes('cancel') && _dp.includes('confirm')) return 'Cancelled';
+                    if (_dp.includes('cancel')) return 'Pending Cancel';
+                    if (_dp.includes('non-renew') || _dp.includes('nonrenew')) return 'Expired';
+                    // Check if expiration date is in the past
+                    const _ex = p.expirationDate || '';
+                    if (_ex) {
+                        const _ep = _ex.split('/');
+                        let _ed;
+                        if (_ep.length === 3) _ed = new Date(_ep[2], _ep[0]-1, _ep[1]);
+                        else if (/^\d{4}-/.test(_ex)) _ed = new Date(_ex);
+                        if (_ed && !isNaN(_ed) && _ed < new Date()) return 'Expired';
+                    }
+                    return 'Active';
+                })(),
                 source:         'ivans',
                 createdAt:      Date.now(),
                 ivansUpdated:   new Date().toISOString(),
                 insured:        insObj,
                 contact:        conObj,
-                coverage:       p.coverages || {},
+                coverage:       covArray ? { CoveragesArray: covArray } : {},
                 vehicles:       p.vehicles  || [],
                 drivers:        p.drivers   || [],
                 agent:          p._producer || '',
@@ -24001,7 +24290,7 @@ function generateViewTabContent(tabId, policy) {
                         ${_fOV('parentCompany','Parent Company / Broker', policy.parentCompany||'')}
                         ${_fOV('commissionPlan','Commission Plan', policy.commissionPlan||'')}
                         ${_fOV('policyState','Policy State', policy.policyState||'')}
-                        ${_fOV('agent','User / Agent', policy.agent||'')}
+                        ${_fOV('agent','User / Agent', policy.agent || (policy.overview && policy.overview.Agent) || '')}
                         ${_sOV('agency','Agency', policy.agency||'Vanguard', ['Vanguard','United'])}
                     </div>
                     <!-- Card 2: Term & Dates -->
@@ -24110,21 +24399,24 @@ function generateViewTabContent(tabId, policy) {
         }
             
         case 'vehicles': {
-            const vehicles = Array.isArray(policy.vehicles) ? policy.vehicles : [];
+            const _allUnitsV = Array.isArray(policy.vehicles) ? policy.vehicles : [];
             const _pIdV = policy.id || policy.policyNumber || '';
-            const _vehDataAttrV = vehicles.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(vehicles))}"` : '';
-            return `
-                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
-                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
-                        <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
-                        <span style="display:flex;gap:6px;">
-                            <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
-                            ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
-                        </span>
-                    </h3>
-                    ${vehicles.length === 0
-                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
-                        : `<div style="overflow-x:auto;">
+            const _vehDataAttrV = _allUnitsV.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(_allUnitsV))}"` : '';
+            const _TRL_MAKES_V = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
+            const _TRL_VIN_V = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+            const _isTrailerV = (v) => {
+                const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
+                if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                const make = (v.make || v.Make || '').toLowerCase().trim();
+                if (_TRL_MAKES_V.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
+                if (make === 'mac') return true;
+                const vin = (v.vin || v.VIN || v.id || '').toUpperCase().trim();
+                if (vin.length >= 3 && _TRL_VIN_V.some(p => vin.startsWith(p))) return true;
+                return false;
+            };
+            const vehiclesV = _allUnitsV.map((v, i) => ({...v, _origIdx: i})).filter(v => !_isTrailerV(v));
+            const trailersV = _allUnitsV.map((v, i) => ({...v, _origIdx: i})).filter(v => _isTrailerV(v));
+            const _unitTable = (units) => `<div style="overflow-x:auto;">
                             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                                 <thead>
                                     <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
@@ -24135,13 +24427,13 @@ function generateViewTabContent(tabId, policy) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${vehicles.map((v, i) => `
+                                    ${units.map((v, i) => `
                                         <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
                                             <td style="padding:4px 6px;text-align:center;">
-                                                <button onclick="showVehicleDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                                <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View details">
                                                     <i class="fas fa-eye" style="font-size:12px;"></i>
                                                 </button>
                                             </td>
@@ -24149,7 +24441,31 @@ function generateViewTabContent(tabId, policy) {
                                     `).join('')}
                                 </tbody>
                             </table>
-                        </div>`}
+                        </div>`;
+            return `
+                <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                        <span><i class="fas fa-truck" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehiclesV.length})</span>
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${vehiclesV.length > 0 ? `<button onclick="showVehicleDetailModal(${vehiclesV[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
+                    </h3>
+                    ${vehiclesV.length === 0
+                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
+                        : _unitTable(vehiclesV)}
+                </div>
+                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="trailersViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                        <span><i class="fas fa-trailer" style="margin-right:7px;color:#374151;"></i>Trailers (${trailersV.length})</span>
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewTrailer()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${trailersV.length > 0 ? `<button onclick="showVehicleDetailModal(${trailersV[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
+                    </h3>
+                    ${trailersV.length === 0
+                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No trailers on this policy</p>'
+                        : _unitTable(trailersV)}
                 </div>
             `;
         }
@@ -24231,6 +24547,11 @@ function generateViewTabContent(tabId, policy) {
                 const _pId = policy.id || policy.policyNumber || '';
                 // Check dedicated override key first (bypasses all 22+ localStorage interceptors)
                 let coveragesArray = coverageData.CoveragesArray;
+                // Fallback: if coverage was stored as raw array from IVANS, convert on the fly
+                if (!coveragesArray && Array.isArray(policy.coverage) && policy.coverage.length) {
+                    coveragesArray = _ivansCoveragesToCoveragesArray(policy.coverage);
+                    if (coveragesArray) console.log('📋 COVERAGE TAB: Converted raw array →', Object.keys(coveragesArray).length, 'entries for', _pId);
+                }
                 try {
                     const _covRaw = Storage.prototype.getItem.call(localStorage, '_covOverride_' + _pId);
                     if (_covRaw) {
@@ -24367,10 +24688,24 @@ function generateViewTabContent(tabId, policy) {
                     })()}
                 `;
 
-                // Vehicles (right column)
-                const vehicles = Array.isArray(policy.vehicles) ? policy.vehicles : [];
-                const _vehDataAttr = vehicles.length > 0
-                    ? `data-vehicles="${encodeURIComponent(JSON.stringify(vehicles))}"`
+                // Vehicles + Trailers (right column) — split by bodyType, make, or VIN
+                const _allUnits = Array.isArray(policy.vehicles) ? policy.vehicles : [];
+                const _TRAILER_MAKES = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
+                const _TRAILER_VIN_PFX = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+                const _isTrailerBT = (v) => {
+                    const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
+                    if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                    const make = (v.make || v.Make || '').toLowerCase().trim();
+                    if (_TRAILER_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
+                    if (make === 'mac') return true;
+                    const vin = (v.vin || v.VIN || v.id || '').toUpperCase().trim();
+                    if (vin.length >= 3 && _TRAILER_VIN_PFX.some(p => vin.startsWith(p))) return true;
+                    return false;
+                };
+                const vehicles = _allUnits.map((v, i) => ({...v, _origIdx: i})).filter(v => !_isTrailerBT(v));
+                const trailers = _allUnits.map((v, i) => ({...v, _origIdx: i})).filter(v => _isTrailerBT(v));
+                const _vehDataAttr = _allUnits.length > 0
+                    ? `data-vehicles="${encodeURIComponent(JSON.stringify(_allUnits))}"`
                     : '';
                 const vehiclesHTML = vehicles.length === 0
                     ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
@@ -24391,7 +24726,35 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
-                                            <button onclick="showVehicleDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                            <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                                <i class="fas fa-eye" style="font-size:12px;"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+                const trailersHTML = trailers.length === 0
+                    ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No trailers on this policy</p>'
+                    : `<div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;width:36px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${trailers.map((v, i) => `
+                                    <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                        <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:4px 6px;text-align:center;">
+                                            <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View trailer details">
                                                 <i class="fas fa-eye" style="font-size:12px;"></i>
                                             </button>
                                         </td>
@@ -24441,17 +24804,27 @@ function generateViewTabContent(tabId, policy) {
                             ${coverageTableHTML}
                         </div>
 
-                        <!-- Right: Vehicles + Drivers -->
+                        <!-- Right: Vehicles + Trailers + Drivers -->
                         <div>
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
-                                    <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
+                                    <span><i class="fas fa-truck" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
                                     <span style="display:flex;gap:6px;">
                                         <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new vehicle"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
-                                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(${vehicles[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
                                     </span>
                                 </h3>
                                 ${vehiclesHTML}
+                            </div>
+                            <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="trailersViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
+                                <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                                    <span><i class="fas fa-trailer" style="margin-right:7px;color:#374151;"></i>Trailers (${trailers.length})</span>
+                                    <span style="display:flex;gap:6px;">
+                                        <button onclick="window.addNewTrailer()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new trailer"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                                        ${trailers.length > 0 ? `<button onclick="showVehicleDetailModal(${trailers[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all trailer details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    </span>
+                                </h3>
+                                ${trailersHTML}
                             </div>
                             <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
@@ -24868,6 +25241,10 @@ window.overviewSave = async function(policyId) {
         return;
     }
     Object.assign(policies[idx], updates);
+    // Keep overview sub-object agent in sync with top-level agent
+    if (updates.agent && policies[idx].overview) {
+        policies[idx].overview.Agent = updates.agent;
+    }
     // Keep financial sub-object in sync so table row shows updated premium
     if (updates.premium) {
         if (!policies[idx].financial) policies[idx].financial = {};
@@ -24875,6 +25252,27 @@ window.overviewSave = async function(policyId) {
         policies[idx].financial['Premium'] = updates.premium;
     }
     localStorage.setItem('insurance_policies', JSON.stringify(policies));
+
+    // Sync agent to client record so client list stays consistent
+    if (updates.agent && policies[idx].clientId) {
+        try {
+            const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const cr = await fetch(`${API}/api/clients/${policies[idx].clientId}`, {
+                headers: { 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' }
+            });
+            if (cr.ok) {
+                const clientData = await cr.json();
+                clientData.assignedTo = updates.agent;
+                clientData.agent = updates.agent;
+                await fetch(`${API}/api/clients/${policies[idx].clientId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                    body: JSON.stringify(clientData)
+                });
+            }
+        } catch(e) { console.warn('Could not sync agent to client:', e); }
+    }
 
     // Update the policy list table row premium without full reload
     const policyRow = document.querySelector(`tr[data-policy-id="${policyId}"]`);
@@ -25023,19 +25421,26 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
         }
 
         // Drivers — use detail data from JenesisNow modal (DOB, license, etc.)
+        // Skip placeholder entries like "No data." to avoid overwriting real driver data
         if (jn.drivers && jn.drivers.length) {
-            const oldDrivers = pol.drivers || [];
-            pol.drivers = jn.drivers.map(d => {
-                const name = (d.name || '').trim();
-                const existing = oldDrivers.find(od => (od.name || '').trim().toLowerCase() === name.toLowerCase());
-                return {
-                    name: d.firstName && d.lastName ? `${d.firstName} ${d.middleName || ''} ${d.lastName}`.replace(/\s+/g, ' ').trim() : name,
-                    licenseNumber: d.licenseNumber || existing?.licenseNumber || existing?.license || '',
-                    licenseState: d.licenseState || existing?.licenseState || '',
-                    dateOfBirth: d.dateOfBirth ? _jnDateToISO(d.dateOfBirth) : (existing?.dateOfBirth || ''),
-                    gender: d.gender || existing?.gender || '',
-                };
+            const realDrivers = jn.drivers.filter(d => {
+                const n = (d.name || '').trim().toLowerCase();
+                return n && n !== 'no data.' && n !== 'no data' && n !== 'n/a' && n !== 'none' && n.length > 2;
             });
+            if (realDrivers.length > 0) {
+                const oldDrivers = pol.drivers || [];
+                pol.drivers = realDrivers.map(d => {
+                    const name = (d.name || '').trim();
+                    const existing = oldDrivers.find(od => (od.name || '').trim().toLowerCase() === name.toLowerCase());
+                    return {
+                        name: d.firstName && d.lastName ? `${d.firstName} ${d.middleName || ''} ${d.lastName}`.replace(/\s+/g, ' ').trim() : name,
+                        licenseNumber: d.licenseNumber || existing?.licenseNumber || existing?.license || '',
+                        licenseState: d.licenseState || existing?.licenseState || '',
+                        dateOfBirth: d.dateOfBirth ? _jnDateToISO(d.dateOfBirth) : (existing?.dateOfBirth || ''),
+                        gender: d.gender || existing?.gender || '',
+                    };
+                });
+            }
         }
 
         // Coverages — write in CoveragesArray format so the coverage tab renders them
@@ -25310,6 +25715,26 @@ window.addNewVehicle = function() {
     const blank = { year:'', make:'', model:'', vin:'', bodyType:'', gvw:'', garageState:'', garageZip:'', garageAddress:'', garageCity:'', use:'', radius:'', costNew:'', cargoLimit:'' };
     vehicles.push(blank);
     section.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+    // Also update trailersViewSection data-vehicles to stay in sync
+    const trlSec = document.getElementById('trailersViewSection');
+    if (trlSec) trlSec.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+    showVehicleDetailModal(vehicles.length - 1);
+};
+
+window.addNewTrailer = function() {
+    const section = document.getElementById('vehiclesViewSection') || document.getElementById('trailersViewSection');
+    if (!section) return;
+    const raw = section.getAttribute('data-vehicles');
+    let vehicles = [];
+    try { if (raw) vehicles = JSON.parse(decodeURIComponent(raw)); } catch(e) {}
+    const blank = { year:'', make:'', model:'', vin:'', bodyType:'Trailer', gvw:'', garageState:'', garageZip:'', garageAddress:'', garageCity:'', use:'', radius:'', costNew:'', cargoLimit:'' };
+    vehicles.push(blank);
+    const encoded = encodeURIComponent(JSON.stringify(vehicles));
+    // Update both sections' data-vehicles to stay in sync
+    const vehSec = document.getElementById('vehiclesViewSection');
+    const trlSec = document.getElementById('trailersViewSection');
+    if (vehSec) vehSec.setAttribute('data-vehicles', encoded);
+    if (trlSec) trlSec.setAttribute('data-vehicles', encoded);
     showVehicleDetailModal(vehicles.length - 1);
 };
 
@@ -25339,7 +25764,7 @@ window.showVehicleDetailModal = function(startIndex) {
 
     const _eH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
-    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
+    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Hopper-Bottom Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
     const STATES = ['','AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','INTL'];
 
     const IS = 'width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;';
@@ -25607,7 +26032,10 @@ window.showVehicleDetailModal = function(startIndex) {
 
         vehicles[currentIdx] = updated;
         const sec = document.getElementById('vehiclesViewSection');
-        if (sec) sec.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+        const encoded_v = encodeURIComponent(JSON.stringify(vehicles));
+        if (sec) sec.setAttribute('data-vehicles', encoded_v);
+        const trlSec = document.getElementById('trailersViewSection');
+        if (trlSec) trlSec.setAttribute('data-vehicles', encoded_v);
 
         const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
         const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
@@ -28419,10 +28847,18 @@ function runAgentPerformanceReport() {
             const m = getAgent(agent);
             m.totalLeads++;
 
-            // Lead in date range (by created_at or lead.created)
-            const createdStr = lead.created_at || lead.created || lead.lastActivity || '';
+            // Lead in date range (by created_at, lead.created, or first stageTimestamp)
+            const createdStr = lead.created_at || lead.createdAt || lead.created || lead.lastActivity || '';
             const createdDate = createdStr ? new Date(createdStr) : null;
-            const leadInRange = createdDate && createdDate >= startTs && createdDate <= endTs;
+            let leadInRange = createdDate && createdDate >= startTs && createdDate <= endTs;
+            // Also check first stageTimestamp — captures when agent first actively worked a ViciDial lead
+            if (!leadInRange && lead.stageTimestamps && typeof lead.stageTimestamps === 'object') {
+                const firstWork = Object.values(lead.stageTimestamps).reduce((earliest, ts) => {
+                    const t = new Date(ts);
+                    return (!earliest || t < earliest) ? t : earliest;
+                }, null);
+                if (firstWork && firstWork >= startTs && firstWork <= endTs) leadInRange = true;
+            }
             if (leadInRange) {
                 m.leadsInRange++;
                 // Stage breakdown only for in-range leads
@@ -28430,10 +28866,15 @@ function runAgentPerformanceReport() {
                 m.stages[stage] = (m.stages[stage] || 0) + 1;
             }
 
-            // Apps to market — green checkmark leads (doc emailed) within date range
-            const docEmailed = lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0));
-            if (leadInRange && docEmailed) {
-                m.appsToMarket++;
+            // Apps to market — use app action timestamp, not lead creation date
+            const docEmailed = lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))
+                || lead.appStage?.app || lead.appStage?.lossRuns || lead.appStage?.iftas || lead.appStage?.saa;
+            if (docEmailed) {
+                const appDateStr = lead.appSentAt || lead.stageUpdatedAt || lead.updated_at || lead.lastModified || createdStr || '';
+                const appDate = appDateStr ? new Date(appDateStr) : null;
+                if (appDate && appDate >= startTs && appDate <= endTs) {
+                    m.appsToMarket++;
+                }
             }
 
             // All-time counters from lead profile trackers (Attempts / Connected / Voicemail)
@@ -39196,11 +39637,24 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                       policy.insuredName ||
                       'Unknown Client';
 
-    // Extract vehicle data from policy
+    // Extract vehicle data from policy — separate trucks from trailers by bodyType
     const vehicleData = [];
+    const trailerData = [];
+    const _QA_TRL_MAKES = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
+    const _QA_TRL_VIN = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+    const _isTrailerQA = (v) => {
+        const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
+        if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+        const make = (v.make || v.Make || '').toLowerCase().trim();
+        if (_QA_TRL_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
+        if (make === 'mac') return true;
+        const vin = (v.vin || v.VIN || v.id || '').toUpperCase().trim();
+        if (vin.length >= 3 && _QA_TRL_VIN.some(p => vin.startsWith(p))) return true;
+        return false;
+    };
     if (policy.vehicles && Array.isArray(policy.vehicles)) {
         policy.vehicles.forEach((vehicle, index) => {
-            vehicleData.push({
+            const unit = {
                 year: vehicle.Year || vehicle.year || '',
                 make: vehicle.Make || vehicle.make || '',
                 model: vehicle.Model || vehicle.model || '',
@@ -39208,7 +39662,12 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                 type: vehicle.Type || vehicle.type || '',
                 value: vehicle.Value || vehicle.value || '',
                 radius: vehicle.Radius || vehicle.radius || ''
-            });
+            };
+            if (_isTrailerQA(vehicle)) {
+                trailerData.push(unit);
+            } else {
+                vehicleData.push(unit);
+            }
         });
     }
 
@@ -39321,6 +39780,18 @@ window.createQuoteApplicationForPolicy = function(policyId) {
     });
 
     // Create a temporary lead-like object for the policy-based quote application
+    // Use expiration date as the renewal effective date
+    const _expRaw = policy.expirationDate || policy.expiration_date || '';
+    let _renewalEffDate = '';
+    if (_expRaw) {
+        // Convert MM/DD/YYYY or YYYY-MM-DD to YYYY-MM-DD for the date input
+        const _expParts = _expRaw.split('/');
+        if (_expParts.length === 3 && _expParts[2].length === 4) {
+            _renewalEffDate = `${_expParts[2]}-${_expParts[0].padStart(2,'0')}-${_expParts[1].padStart(2,'0')}`;
+        } else if (/^\d{4}-\d{2}-\d{2}/.test(_expRaw)) {
+            _renewalEffDate = _expRaw.substring(0, 10);
+        }
+    }
     const tempLeadData = {
         id: `policy_${policyId}`,
         name: clientName,
@@ -39333,7 +39804,9 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         policyId: policyId,
         isPolicyQuote: true,
         agent: policy.agent || '',
+        renewalDate: _renewalEffDate,
         policyVehicles: vehicleData,
+        policyTrailers: trailerData,
         policyDrivers: driverData
     };
 
@@ -43203,7 +43676,9 @@ function filterTodosBySchedule(todos, scheduleView) {
 .chat-empty { text-align:center; color:#9ca3af; font-size:13px; margin:auto; padding:20px; }
 #chat-bubble-btn { position:fixed; bottom:20px; right:20px; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,#dc2626,#991b1b); border:none; color:#fff; box-shadow:0 4px 14px rgba(220,38,38,0.45); cursor:pointer; display:none; align-items:center; justify-content:center; font-size:22px; z-index:9998; transition:transform 0.15s; }
 #chat-bubble-btn:hover { transform:scale(1.08); }
-.chat-notif-stack { position:fixed; bottom:20px; right:80px; display:flex; flex-direction:column-reverse; gap:8px; z-index:10001; pointer-events:none; }
+#suggestion-bubble-btn { position:fixed; bottom:20px; right:80px; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,#2563eb,#1e40af); border:none; color:#fff; box-shadow:0 4px 14px rgba(37,99,235,0.45); cursor:pointer; display:none; align-items:center; justify-content:center; font-size:22px; z-index:9998; transition:transform 0.15s; }
+#suggestion-bubble-btn:hover { transform:scale(1.08); }
+.chat-notif-stack { position:fixed; bottom:20px; right:140px; display:flex; flex-direction:column-reverse; gap:8px; z-index:10001; pointer-events:none; }
 .chat-notif-toast { background:#fff; border-left:4px solid #2563eb; border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,0.16); padding:10px 14px; min-width:240px; max-width:300px; pointer-events:all; animation:chatNotifIn 0.25s ease; position:relative; overflow:hidden; }
 .chat-notif-toast.removing { animation:chatNotifOut 0.2s ease forwards; }
 @keyframes chatNotifIn { from{opacity:0;transform:translateX(30px)} to{opacity:1;transform:translateX(0)} }
@@ -43475,6 +43950,16 @@ function filterTodosBySchedule(todos, scheduleView) {
         _chatBubble.innerHTML = `<i class="fas fa-bug"></i>`;
         _chatBubble.onclick = () => { if (window.openBugReport) window.openBugReport(); };
         document.body.appendChild(_chatBubble);
+
+        if (!document.getElementById('suggestion-bubble-btn')) {
+            const sugBtn = document.createElement('button');
+            sugBtn.id = 'suggestion-bubble-btn';
+            sugBtn.title = 'Make a Suggestion';
+            sugBtn.innerHTML = '<i class="fas fa-lightbulb"></i>';
+            sugBtn.onclick = () => { if (window.openSuggestion) window.openSuggestion(); };
+            document.body.appendChild(sugBtn);
+            sugBtn.style.display = 'flex';
+        }
     }
 
     window.openTeamChat = function() {
@@ -43925,9 +44410,20 @@ function filterTodosBySchedule(todos, scheduleView) {
     font-size: 22px; z-index: 9998; transition: transform 0.15s;
 }
 #chat-bubble-btn:hover { transform: scale(1.08); }
+#suggestion-bubble-btn {
+    position: fixed; bottom: 20px; right: 80px;
+    width: 52px; height: 52px; border-radius: 50%;
+    background: linear-gradient(135deg,#2563eb,#1e40af);
+    border: none; color: #fff;
+    box-shadow: 0 4px 14px rgba(37,99,235,0.45);
+    cursor: pointer; display: none;
+    align-items: center; justify-content: center;
+    font-size: 22px; z-index: 9998; transition: transform 0.15s;
+}
+#suggestion-bubble-btn:hover { transform: scale(1.08); }
 
 .chat-notif-stack {
-    position: fixed; bottom: 20px; right: 80px;
+    position: fixed; bottom: 20px; right: 140px;
     display: flex; flex-direction: column-reverse; gap: 8px;
     z-index: 10001; pointer-events: none;
 }
@@ -44239,6 +44735,17 @@ function filterTodosBySchedule(todos, scheduleView) {
         _chatBubble.innerHTML = '<i class="fas fa-bug"></i>';
         _chatBubble.onclick = () => { if (window.openBugReport) window.openBugReport(); };
         document.body.appendChild(_chatBubble);
+
+        // Add suggestion button next to bug button
+        if (!document.getElementById('suggestion-bubble-btn')) {
+            const sugBtn = document.createElement('button');
+            sugBtn.id = 'suggestion-bubble-btn';
+            sugBtn.title = 'Make a Suggestion';
+            sugBtn.innerHTML = '<i class="fas fa-lightbulb"></i>';
+            sugBtn.onclick = () => { if (window.openSuggestion) window.openSuggestion(); };
+            document.body.appendChild(sugBtn);
+            sugBtn.style.display = 'flex';
+        }
     }
 
     window.openTeamChat = function() {
@@ -44631,6 +45138,10 @@ function filterTodosBySchedule(todos, scheduleView) {
         if (me && CHAT_USERS.includes(me)) {
             _ensureBubble();
             _chatBubble.style.display = 'flex';
+        } else if (me) {
+            // Non-chat users (CSR, etc.) still get bug report & suggestion buttons
+            _ensureBubble();
+            if (_chatBubble) _chatBubble.style.display = 'flex';
         } else if (++_bubbleInitTries < 40) {
             setTimeout(_initBubble, 250);
         }
@@ -44772,6 +45283,117 @@ function filterTodosBySchedule(todos, scheduleView) {
             errEl.style.display = 'block';
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Bug Report';
+        }
+    };
+
+    // ── Suggestion Report ──────────────────────────────────────────────────────
+
+    window.openSuggestion = function() {
+        if (document.getElementById('suggestion-report-modal')) {
+            document.getElementById('suggestion-report-modal').remove();
+        }
+
+        let user = 'Unknown';
+        try {
+            const raw = sessionStorage.getItem('vanguard_user') || '';
+            const parsed = JSON.parse(raw);
+            user = parsed.username || parsed.name || raw || 'Unknown';
+        } catch { user = sessionStorage.getItem('vanguard_user') || 'Unknown'; }
+
+        const modal = document.createElement('div');
+        modal.id = 'suggestion-report-modal';
+        modal.dataset.reportUser = user;
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;';
+        modal.innerHTML = `
+            <div style="background:white;border-radius:12px;width:90%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <div style="background:#2563eb;color:white;padding:16px 20px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center;">
+                    <h2 style="margin:0;font-size:18px;"><i class="fas fa-lightbulb" style="margin-right:8px;"></i>Make a Suggestion</h2>
+                    <button onclick="document.getElementById('suggestion-report-modal').remove()" style="background:none;border:none;color:white;font-size:22px;cursor:pointer;padding:0 4px;">&times;</button>
+                </div>
+                <div style="padding:20px;">
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Area</label>
+                        <select id="suggestion-area" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">
+                            <option value="">Select area...</option>
+                            <option value="Dashboard">Dashboard</option>
+                            <option value="Lead Management">Lead Management</option>
+                            <option value="Active Clients">Active Clients</option>
+                            <option value="Policies">Policies</option>
+                            <option value="Generate Leads">Generate Leads</option>
+                            <option value="Calendar">Calendar</option>
+                            <option value="Phone System">Phone System</option>
+                            <option value="Email / Outlook">Email / Outlook</option>
+                            <option value="Agent Performance">Agent Performance</option>
+                            <option value="Client Portal">Client Portal</option>
+                            <option value="COI / Documents">COI / Documents</option>
+                            <option value="IVANS Sync">IVANS Sync</option>
+                            <option value="JenesisNow Sync">JenesisNow Sync</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Suggestion Title</label>
+                        <input id="suggestion-title" type="text" placeholder="Brief summary of your idea" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;">
+                    </div>
+                    <div style="margin-bottom:14px;">
+                        <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;text-transform:uppercase;">Description</label>
+                        <textarea id="suggestion-description" rows="5" placeholder="Describe your suggestion. What would you like to see? How would it help?" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+                    </div>
+                    <p id="suggestion-error" style="display:none;color:#dc2626;font-size:13px;margin-bottom:10px;"></p>
+                    <button id="suggestion-submit-btn" onclick="window._submitSuggestion()" style="width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;transition:0.2s;">
+                        <i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Suggestion
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+        document.getElementById('suggestion-title').focus();
+    };
+
+    window._submitSuggestion = async function() {
+        const title = document.getElementById('suggestion-title').value.trim();
+        const description = document.getElementById('suggestion-description').value.trim();
+        const area = document.getElementById('suggestion-area').value;
+        const reportedBy = document.getElementById('suggestion-report-modal').dataset.reportUser || 'Unknown';
+        const errEl = document.getElementById('suggestion-error');
+        const btn = document.getElementById('suggestion-submit-btn');
+
+        errEl.style.display = 'none';
+
+        if (!title) { errEl.textContent = 'Please enter a suggestion title.'; errEl.style.display = 'block'; return; }
+        if (!description) { errEl.textContent = 'Please describe your suggestion.'; errEl.style.display = 'block'; return; }
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Sending...';
+
+        try {
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const resp = await fetch('/api/suggestion', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+                body: JSON.stringify({
+                    title,
+                    area,
+                    description,
+                    reportedBy,
+                    url: window.location.href,
+                    timestamp: new Date().toLocaleString()
+                })
+            });
+
+            if (!resp.ok) throw new Error('Server error');
+
+            document.getElementById('suggestion-report-modal').remove();
+            if (typeof showNotification === 'function') {
+                showNotification('Suggestion sent! Thank you.', 'success');
+            }
+        } catch (e) {
+            errEl.textContent = 'Failed to send suggestion. Please try again.';
+            errEl.style.display = 'block';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-paper-plane" style="margin-right:6px;"></i>Submit Suggestion';
         }
     };
 })();

@@ -171,16 +171,39 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                     if (!hasTodo) {
                                         return '<div style="color: #9ca3af; font-size: 13px; padding: 8px;">No CSR task assigned</div>';
                                     }
+                                    const _isDenied = !!lead.csrTodoDenied;
+                                    const _borderColor = isDone ? '#86efac' : (_isDenied ? '#fca5a5' : '#7dd3fc');
+                                    const _bgColor = isDone ? '#f0fdf4' : (_isDenied ? '#fef2f2' : '#f0f9ff');
                                     return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
-                                        '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid ' + (isDone ? '#86efac' : '#7dd3fc') + '; border-radius: 6px; background: ' + (isDone ? '#f0fdf4' : '#f0f9ff') + ';">' +
+                                        (_isDenied && !isDone ? '<div style="margin-bottom: 8px; font-size: 12px; color: #ef4444; font-weight: 600; padding: 6px 10px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px;"><i class="fas fa-times-circle"></i> Task denied by producer \u2014 please redo and re-submit</div>' : '') +
+                                        '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid ' + _borderColor + '; border-radius: 6px; background: ' + _bgColor + ';">' +
                                             '<input type="checkbox" id="csr-done-cb-' + lead.id + '" ' + (isDone ? 'checked' : '') + ' onchange="toggleCsrTodoDone(\'' + lead.id + '\', this.checked)" style="margin-top: 3px; transform: scale(1.4); accent-color: #10b981; cursor: pointer;" title="Mark as done">' +
                                             '<span id="csr-todo-text-' + lead.id + '" style="font-size: 14px; line-height: 1.5; flex: 1; ' + (isDone ? 'text-decoration: line-through; color: #9ca3af;' : 'color: #1e3a5f;') + '">' + todoText + '</span>' +
                                         '</div>';
                                 } else {
-                                    // Non-CSR (agents/admins): editable textarea to assign tasks
+                                    // Producer/admin view
+                                    const _isAcknowledged = !!lead.csrTodoAcknowledged;
+                                    if (isDone && !_isAcknowledged) {
+                                        // CSR marked done — show Approve / Deny
+                                        return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
+                                            '<div style="background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 14px;">' +
+                                                '<div style="font-size: 13px; color: #374151; margin-bottom: 12px;"><i class="fas fa-check-circle" style="color:#10b981;margin-right:6px;"></i><strong>CSR completed:</strong> ' + todoText + '</div>' +
+                                                '<div style="font-size: 11px; font-weight: 700; color: #1d4ed8; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Review &amp; Respond:</div>' +
+                                                '<div style="display: flex; gap: 12px;">' +
+                                                    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;color:#10b981;padding:8px 14px;background:#f0fdf4;border:2px solid #86efac;border-radius:6px;">' +
+                                                        '<input type="checkbox" onchange="if(this.checked) acknowledgeCsrTodo(\'' + lead.id + '\', true)" style="transform:scale(1.3);accent-color:#10b981;cursor:pointer;">' +
+                                                        '<i class="fas fa-thumbs-up"></i> Approve' +
+                                                    '</label>' +
+                                                    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;color:#ef4444;padding:8px 14px;background:#fef2f2;border:2px solid #fca5a5;border-radius:6px;">' +
+                                                        '<input type="checkbox" onchange="if(this.checked) acknowledgeCsrTodo(\'' + lead.id + '\', false)" style="transform:scale(1.3);accent-color:#ef4444;cursor:pointer;">' +
+                                                        '<i class="fas fa-thumbs-down"></i> Deny' +
+                                                    '</label>' +
+                                                '</div>' +
+                                            '</div>';
+                                    }
+                                    // Default: editable textarea
                                     return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
-                                        (isDone ? '<div style="margin-bottom: 6px; font-size: 12px; color: #10b981; font-weight: 600;"><i class="fas fa-check-circle"></i> Marked done by CSR</div>' : '') +
-                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + todoText + '</textarea>';
+                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + (lead.csrTodo || '') + '</textarea>';
                                 }
                             })()}
                         </div>
