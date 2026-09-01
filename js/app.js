@@ -13298,6 +13298,9 @@ async function loadRenewalsView() {
                 <h1>Policy Renewals</h1>
                 <div class="header-actions">
                     <div class="view-toggle">
+                        <button class="view-btn ${currentRenewalView === '30-45' ? 'active' : ''}" onclick="switchRenewalView('30-45')" title="30–45 day renewals with no tasks started">
+                            <i class="fas fa-exclamation-circle"></i> 30-45 Days
+                        </button>
                         <button class="view-btn ${currentRenewalView === 'month' ? 'active' : ''}" onclick="switchRenewalView('month')">
                             <i class="fas fa-calendar-day"></i> Month View
                         </button>
@@ -13339,7 +13342,8 @@ async function loadRenewalsView() {
             
             <div class="renewal-content">
                 <div id="renewalListContainer" class="renewal-list-container">
-                    ${currentRenewalView === 'month' ? renderMonthView(renewalPolicies, isAdmin) :
+                    ${currentRenewalView === '30-45' ? render30to45View(renewalPolicies, isAdmin) :
+                      currentRenewalView === 'month' ? renderMonthView(renewalPolicies, isAdmin) :
                       currentRenewalView === '3month' ? renderThreeMonthView(renewalPolicies, isAdmin) :
                       renderYearView(renewalPolicies, isAdmin)}
                 </div>
@@ -13359,6 +13363,9 @@ async function loadRenewalsView() {
 
     // Apply name display preference (person vs business)
     applyRenewalNameDisplay();
+
+    // Load task counts and apply badges/filters async
+    loadRenewalTaskBadges();
 }
 
 function getRealRenewalPolicies(policies, clients) {
@@ -13544,8 +13551,11 @@ function renderMonthView(policies, isAdmin = false) {
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
                          onclick="showRenewalProfile('${policy.id}')"
                          id="renewal-card-${policy.id}"
+                         data-policy-id="${policy.id}"
                          data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
-                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}">
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
+                         style="position:relative;">
+                        <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
                         <div class="renewal-header">
                             <div class="renewal-info">
                                 <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
@@ -13570,6 +13580,103 @@ function renderMonthView(policies, isAdmin = false) {
     `;
 }
 
+function render30to45View(policies, isAdmin = false) {
+    const today = new Date();
+    const filtered = policies.filter(p => {
+        const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+        return days >= 30 && days <= 45;
+    });
+
+    if (filtered.length === 0) {
+        return `
+            <div class="thirty45-view">
+                <h3>Renewals Due in 30–45 Days — No Tasks Started</h3>
+                <p style="color:#6b7280;padding:20px 0;">No renewals fall in this window.</p>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="thirty45-view">
+            <h3>Renewals Due in 30–45 Days — No Tasks Started
+                <span id="thirty45StatusMsg" style="font-size:.8em;color:#6b7280;font-weight:normal;margin-left:8px;">checking...</span>
+            </h3>
+            <div class="renewal-list" id="thirty45List">
+                ${filtered.map(policy => `
+                    <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
+                         onclick="showRenewalProfile('${policy.id}')"
+                         id="renewal-card-${policy.id}"
+                         data-policy-id="${policy.id}"
+                         data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
+                         style="position:relative;">
+                        <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
+                        <div class="renewal-header">
+                            <div class="renewal-info">
+                                <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
+                                <p>${policy.type || 'Commercial Auto'} - ${policy.carrier || 'Unknown Carrier'}</p>
+                                <p class="policy-number">Policy #${policy.policyNumber || 'N/A'}</p>
+                            </div>
+                            <div class="renewal-date">
+                                <span class="date-label">Expires</span>
+                                <span class="date-value">${formatDate(policy.expirationDate)}</span>
+                                <span class="days-remaining">${getDaysRemaining(policy.expirationDate)}</span>
+                            </div>
+                        </div>
+                        <div class="renewal-footer">
+                            ${isAdmin ? `<span class="premium">$${(policy.premium || 0).toLocaleString()}/yr</span>` : ''}
+                            <span class="agent-badge" title="Assigned to ${policy.agent || policy.assignedTo || 'Unassigned'}">${policy.agent || policy.assignedTo || 'Unassigned'}</span>
+                            <span class="status-badge ${policy.status || ''}">${(policy.status || 'pending').replace('-', ' ')}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+async function loadRenewalTaskBadges() {
+    const cards = document.querySelectorAll('[data-policy-id]');
+    if (!cards.length) return;
+
+    const is30to45View = !!document.querySelector('.thirty45-view');
+
+    await Promise.all(Array.from(cards).map(async (card) => {
+        const policyId = card.getAttribute('data-policy-id');
+        if (!policyId) return;
+        try {
+            const response = await fetch(getRenewalTasksApiUrl(policyId));
+            if (!response.ok) return;
+            const data = await response.json();
+            const tasks = (data.tasks && data.tasks.length > 0) ? data.tasks : null;
+            const completedCount = tasks ? tasks.filter(t => t.completed).length : 0;
+
+            // Blue bubble: show completed task count on the card
+            const badge = document.getElementById(`task-badge-${policyId}`);
+            if (badge && completedCount > 0) {
+                badge.textContent = completedCount;
+                badge.style.display = 'inline-block';
+            }
+
+            // 30-45 view: hide cards that already have tasks (tasks have been started)
+            if (is30to45View && tasks) {
+                card.style.display = 'none';
+            }
+        } catch (e) { /* silently fail — card stays visible */ }
+    }));
+
+    // Update status message for 30-45 view
+    if (is30to45View) {
+        const statusMsg = document.getElementById('thirty45StatusMsg');
+        if (statusMsg) {
+            const allCards = document.querySelectorAll('.thirty45-view .renewal-card');
+            let visibleCount = 0;
+            allCards.forEach(c => { if (c.style.display !== 'none') visibleCount++; });
+            statusMsg.textContent = `— ${visibleCount} need attention`;
+        }
+    }
+}
+
 function renderThreeMonthView(policies, isAdmin = false) {
     const today = new Date();
     // Show policies expiring within 90 days (3 months)
@@ -13591,8 +13698,11 @@ function renderThreeMonthView(policies, isAdmin = false) {
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
                          onclick="showRenewalProfile('${policy.id}')"
                          id="renewal-card-${policy.id}"
+                         data-policy-id="${policy.id}"
                          data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
-                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}">
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
+                         style="position:relative;">
+                        <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
                         <div class="renewal-header">
                             <div class="renewal-info">
                                 <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
@@ -13652,8 +13762,11 @@ function renderYearView(policies, isAdmin = false) {
                                 <div class="mini-policy ${selectedRenewalPolicyId === p.id ? 'selected' : ''}"
                                      onclick="showRenewalProfile('${p.id}')"
                                      id="renewal-card-${p.id}"
+                                     data-policy-id="${p.id}"
                                      data-person-name="${(p.personName || '').replace(/"/g, '&quot;')}"
-                                     data-biz-name="${(p.businessName || '').replace(/"/g, '&quot;')}">
+                                     data-biz-name="${(p.businessName || '').replace(/"/g, '&quot;')}"
+                                     style="position:relative;">
+                                    <span class="renewal-task-badge" id="task-badge-${p.id}" style="display:none;position:absolute;top:-6px;right:-6px;background:#3b82f6;color:white;border-radius:50%;min-width:16px;height:16px;font-size:10px;font-weight:700;line-height:16px;text-align:center;padding:0 3px;z-index:10;pointer-events:none;"></span>
                                     <span class="renewal-display-name">${p.businessName || p.client}</span>
                                     <span class="mini-date">${p.expirationDate.getDate()}</span>
                                 </div>
