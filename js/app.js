@@ -10609,7 +10609,47 @@ function refreshLeadsTable() {
     }, 100);
 
     console.log('✅ Leads table refreshed successfully');
+    updateLeadsNavBadge();
 }
+
+// Update the blue todo-count badge on the Leads nav item
+function updateLeadsNavBadge() {
+    const badge = document.getElementById('leads-todo-badge');
+    if (!badge) return;
+    try {
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const userData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const isCsr = (userData.role || '') === 'csr';
+        const currentUser = userData.username ? userData.username.charAt(0).toUpperCase() + userData.username.slice(1).toLowerCase() : '';
+
+        const visibleLeads = leads.filter(l => !l.archived && l.stage !== 'closed' && l.stage !== 'Closed');
+
+        let count = 0;
+        if (isCsr) {
+            visibleLeads.forEach(l => { if (l.csrTodo && l.csrTodo.trim()) count++; });
+        } else {
+            const actionMap = {
+                'new': 'Assign Stage', 'contact_attempted': 'Reach out',
+                'info_requested': 'Reach out to lead', 'info_received': 'Prepare Quote',
+                'loss_runs_requested': 'Reach out to lead', 'loss_runs_received': 'Prepare app.',
+                'app_prepared': 'Email brokers', 'quoted': 'Email Quote, and make contact',
+                'quote_sent': 'Reach out to lead', 'quote-sent-unaware': 'Reach out to lead',
+                'quote-sent-aware': 'Reach out', 'sale': 'Process sale', 'not-interested': 'Archive lead'
+            };
+            visibleLeads.forEach(l => {
+                if (l.assignedTo === currentUser && actionMap[l.stage]) count++;
+            });
+        }
+
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (e) { badge.style.display = 'none'; }
+}
+window.updateLeadsNavBadge = updateLeadsNavBadge;
 
 // Function to update a specific lead row in the table without refreshing the entire table
 function updateLeadRowInTable(leadId, updatedLead) {
@@ -11794,9 +11834,10 @@ function sortLeads(field) {
             if (window.forceAllHighlighting) {
                 window.forceAllHighlighting();
             }
+            updateLeadsNavBadge();
         }, 100);
     }
-    
+
     // Update sort arrows
     updateSortArrows(field, currentSort.direction);
 }

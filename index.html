@@ -54,6 +54,62 @@
             window.location.href = (portal === 'united') ? '/login-united.html' : '/login.html';
         }
 
+        // Instant role-based CSS to prevent flash of unauthorized tabs
+        (function() {
+            try {
+                var u = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                var role = (u.role || '').toLowerCase();
+                var uname = (u.username || '').toLowerCase();
+                document.documentElement.setAttribute('data-role', role);
+                var adminUsers = ['grant','maureen'];
+                var isAdmin = adminUsers.includes(uname);
+                var s = document.createElement('style');
+                s.id = 'role-guard-css';
+                var rules = '';
+                if (!isAdmin) {
+                    // Non-admins: hide admin section by default
+                    rules += '#admin-menu-section { display:none !important; }';
+                    // Hide admin mobile nav items
+                    rules += '.mobile-nav-item a[href="#carriers"],' +
+                             '.mobile-nav-item a[href="#compliance"],' +
+                             '.mobile-nav-item a[href="#accounting"],' +
+                             '.mobile-nav-item a[href="#reports"],' +
+                             '.mobile-nav-item a[href="#settings"] { display:none !important; }';
+                }
+                if (role === 'csr') {
+                    // CSR: show admin section but only Downloads
+                    rules += '#admin-menu-section { display:block !important; }';
+                    rules += '#admin-menu-section a[href="#carriers"],' +
+                             '#admin-menu-section a[href="#compliance"],' +
+                             '#admin-menu-section a[href="#accounting"],' +
+                             '#admin-menu-section a[href="#reports"],' +
+                             '#admin-menu-section a[href="#settings"] { display:none !important; }';
+                    // Hide the parent li elements for admin items
+                    rules += '#admin-menu-section li:has(a[href="#carriers"]),' +
+                             '#admin-menu-section li:has(a[href="#compliance"]),' +
+                             '#admin-menu-section li:has(a[href="#accounting"]),' +
+                             '#admin-menu-section li:has(a[href="#reports"]),' +
+                             '#admin-menu-section li:has(a[href="#settings"]) { display:none !important; }';
+                    // Hide Lead Gen and Market
+                    rules += '#leadgen-nav-folder { display:none !important; }';
+                    rules += '.sidebar-menu a[href="#market"] { display:none !important; }';
+                    rules += 'li:has(> a[href="#market"]) { display:none !important; }';
+                    // Hide goals bar
+                    rules += '#dashboard-goals-bar { display:none !important; }';
+                    // Hide mobile Lead Gen
+                    rules += '.mobile-nav-item a[href="#lead-generation"] { display:none !important; }';
+                    // Hide Value Level (time meter) column in leads table
+                    rules += '#leadsTable th:nth-child(5), #leadsTable td:nth-child(5) { display:none !important; }';
+                }
+                if (role === 'agent' || role === 'producer') {
+                    // Agents/producers: hide admin section
+                    rules += '#admin-menu-section { display:none !important; }';
+                }
+                s.textContent = rules;
+                document.head.appendChild(s);
+            } catch(e) {}
+        })();
+
         // Set up PDF.js worker
         if (typeof pdfjsLib !== 'undefined') {
             pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
@@ -802,11 +858,18 @@
                                     if (heading.textContent.trim() === 'Administration') {
                                         administrationSectionFound = true;
                                         console.log('Found Administration section!');
+                                        const _userSession = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                                        const _isCsrRole = (_userSession.role || '') === 'csr';
 
                                         if (isAdmin(username)) {
                                             section.style.display = 'block';
                                             section.style.visibility = 'visible';
                                             console.log('✅ Admin user - Administration section visible');
+                                        } else if (_isCsrRole) {
+                                            // CSR sees the section but auth-manager controls individual items
+                                            section.style.display = 'block';
+                                            section.style.visibility = 'visible';
+                                            console.log('🎧 CSR user - Administration section visible (filtered by auth-manager)');
                                         } else {
                                             section.style.display = 'none';
                                             section.style.visibility = 'hidden';
@@ -1048,6 +1111,7 @@
                             <a href="javascript:void(0)" data-tooltip="Leads" onclick="toggleLeadsFolder()">
                                 <i class="fas fa-user-plus"></i>
                                 <span>Leads</span>
+                                <span id="leads-todo-badge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;margin-left:6px;"></span>
                                 <i class="fas fa-chevron-down nav-folder-arrow" style="margin-left:auto;font-size:10px;transition:transform .2s;"></i>
                             </a>
                             <ul class="nav-sub-menu" id="leads-sub-menu" style="display:none;">
@@ -1622,13 +1686,13 @@
     <!-- DISABLED: causes race conditions on refresh — loadPoliciesView + generatePolicyRows already handle server sync -->
     <!-- <script src="js/force-policies-refresh.js?v=1"></script> -->
     <script src="js/secure-fetch.js?v=1"></script>
-    <script src="js/app.js?v=20260428b"></script>
+    <script src="js/app.js?v=20260818a"></script>
 
     <!-- Vicidial Stage Sync - Bidirectional synchronization -->
     <script src="js/vicidial-stage-sync.js?v=1"></script>
 
     <!-- Callback Notifications - 30-minute callback alerts -->
-    <script src="js/callback-notifications.js?v=GRANT_TOGGLE_v1"></script>
+    <script src="js/callback-notifications.js?v=POPUP_USER_FILTER_v1"></script>
 
     <!-- Console-Based Stats Tracker - LIVE SITE FIX -->
     <script>
@@ -1827,7 +1891,7 @@
     <script src="js/database-connector.js?v=24_GLOBAL_FUNCTIONS"></script>
     <script src="vicidial-config.js"></script>
     <script src="js/vicidial-integration.js"></script>
-    <script src="js/vicidial-uploader.js?v=batch_fix_1771257765"></script>
+    <script src="js/vicidial-uploader.js?v=20260504_modal_reset"></script>
     <!-- DISABLED: Conflicts with selective sync - <script src="js/vicidial-sync-restored.js"></script> -->
     <!-- Telnyx WebRTC SDK for browser calling -->
     <script src="https://unpkg.com/@telnyx/webrtc@2.10.1/lib/bundle.js"></script>
@@ -2083,7 +2147,7 @@
     <script src="js/market-functions.js?v=AUTO_IMPORT_EMPTY_MARKET_v2"></script>
 
     <!-- FINAL PROFILE FIX PROTECTED - MUST BE ABSOLUTELY LAST - Cannot be overridden -->
-    <script src="js/final-profile-fix-protected-FIXED.js?v=PHONE_BTN_POPUP_v1"></script>
+    <script src="js/final-profile-fix-protected-FIXED.js?v=CALLBACK_CALENDAR_v2"></script>
 
     <!-- CONTINUOUS CALLBACK MONITOR - Maintains "Reach out: CALL" buttons independently -->
     <script src="js/continuous-callback-monitor.js?v=3"></script>
@@ -2207,7 +2271,7 @@
     <!-- Save to Profile functionality - MUST load before ACORD viewers -->
     <script src="js/save-to-profile.js?v=14"></script>
     <!-- Load ACORD Real Viewer for PDF with fillable fields overlay -->
-    <script src="js/acord-real-viewer-vigagency.js?v=20260427_GLFIX"></script>
+    <script src="js/acord-real-viewer-vigagency.js?v=20260504_CARGO2"></script>
     <!-- Load the ACORD 25 Display with download/print functions -->
     <!-- Disabled because it conflicts with real viewer -->
     <!-- <script src="js/acord-25-display.js?v=2"></script> -->
@@ -2631,8 +2695,8 @@
     <script src="js/live-debug-dulling.js?v=1"></script>
     <script src="js/force-freeze-timestamps.js"></script>
     <script src="js/force-quote-modal-front.js"></script>
-    <script src="js/enhanced-quote-form.js"></script>
-    <script src="js/enhanced-quote-modal.js?v=NOT_40K_1K_v36"></script>
+    <script src="js/enhanced-quote-form.js?v=VIN_DECODE_v1"></script>
+    <script src="js/enhanced-quote-modal.js?v=COVERAGE_DEFAULTS_v1"></script>
 
     <!-- Independent Agent Tracking System - Load Early -->
     <script src="js/independent-agent-tracking.js"></script>
@@ -3737,6 +3801,8 @@
     <!-- Plaid Link SDK -->
     <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 
+    <!-- CSR To Do Override - MUST load last to override all competing To Do scripts -->
+    <script src="js/csr-todo-override.js?v=1"></script>
 
 </body>
 </html>
