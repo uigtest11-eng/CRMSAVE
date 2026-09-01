@@ -13654,7 +13654,7 @@ async function loadRenewalTaskBadges() {
     // Use completions already fetched by restoreRenewalHighlighting (which runs first).
     // This avoids a duplicate API call and prevents count mismatch if the second fetch fails.
     let renewalCompletions = window._renewalCompletionsCache || {};
-    if (\!window._renewalCompletionsCache) {
+    if (!window._renewalCompletionsCache) {
         // Fallback: fetch if cache not populated (e.g. called standalone)
         try {
             const compUrl = window.location.hostname === 'localhost'
