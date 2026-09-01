@@ -10470,6 +10470,9 @@ function saveLeadEdits(leadId) {
             if (tableBody) {
                 const rows = tableBody.querySelectorAll('tr');
                 rows.forEach(row => {
+                    // Never touch builtin-highlighted rows (timestamps, CSR-pending blue, etc.)
+                    if (row.dataset.highlightSource === 'builtin' || row.classList.contains('csr-done-pending')) return;
+
                     const todoCell = row.querySelector('td:nth-child(6)'); // TO DO column
                     if (todoCell) {
                         const todoText = todoCell.textContent.trim();

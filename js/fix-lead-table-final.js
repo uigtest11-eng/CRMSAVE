@@ -682,6 +682,9 @@ function formatPremiumDisplay(premium) {
         let highlightCount = 0;
 
         rows.forEach(row => {
+            // Never override builtin highlights (yellow/orange/red timestamps, blue CSR-pending, etc.)
+            if (row.dataset.highlightSource === 'builtin' || row.classList.contains('csr-done-pending')) return;
+
             // Find the lead ID from the checkbox first
             const checkbox = row.querySelector('.lead-checkbox');
             if (!checkbox) return;
@@ -689,6 +692,10 @@ function formatPremiumDisplay(premium) {
             const leadId = checkbox.value;
             const lead = leads.find(l => String(l.id) === String(leadId));
             if (!lead) return;
+
+            // Also skip if lead has a CSR task pending producer review
+            const _sess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+            if ((_sess.role || '') !== 'csr' && lead.csrTodoDone && !lead.csrTodoAcknowledged) return;
 
             // Get TODO cell content
             const todoCell = row.querySelectorAll('td')[6];
