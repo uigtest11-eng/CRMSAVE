@@ -13650,6 +13650,23 @@ function render30to45View(policies, isAdmin = false) {
 async function loadRenewalTaskBadges() {
     const today = new Date();
 
+    // Fetch manual renewal-completions (the "mark complete" green toggle) — treat these as fully done
+    let renewalCompletions = {};
+    try {
+        const compUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:3001/api/renewal-completions'
+            : `https://${window.location.hostname}:3001/api/renewal-completions`;
+        const compResp = await fetch(compUrl);
+        if (compResp.ok) renewalCompletions = await compResp.json();
+    } catch (e) { /* ignore — no completions data */ }
+
+    // Helper: is a policy considered fully done (manual completion OR all tasks checked)?
+    const isPolicyDone = (policyId, tasks) => {
+        if (renewalCompletions[policyId]) return true; // manually marked complete
+        if (tasks && tasks.length > 0 && tasks.every(t => t.completed)) return true;
+        return false;
+    };
+
     // Always compute button badges regardless of current view
     const allRenewalPolicies = window._currentRenewalPolicies || [];
 
@@ -13674,12 +13691,8 @@ async function loadRenewalTaskBadges() {
         } catch (e) { fetchedTasks[p.id] = null; }
     }));
 
-    // 30-45 button badge = count of those policies with NO completed tasks
-    const noCompletedCount = policies30to45.filter(p => {
-        const tasks = fetchedTasks[p.id];
-        if (!tasks) return true;
-        return !tasks.some(t => t.completed);
-    }).length;
+    // 30-45 button badge = policies NOT done (no completed tasks, not manually marked)
+    const noCompletedCount = policies30to45.filter(p => !isPolicyDone(p.id, fetchedTasks[p.id])).length;
 
     const btnBadge = document.getElementById('thirty45BtnBadge');
     if (btnBadge) {
@@ -13691,12 +13704,8 @@ async function loadRenewalTaskBadges() {
         }
     }
 
-    // Month View button badge = count of month policies NOT fully completed
-    const monthNotDoneCount = policiesMonth.filter(p => {
-        const tasks = fetchedTasks[p.id];
-        if (!tasks) return true; // no tasks started = not done
-        return !tasks.every(t => t.completed); // not all checked = not done
-    }).length;
+    // Month View button badge = month policies NOT fully done
+    const monthNotDoneCount = policiesMonth.filter(p => !isPolicyDone(p.id, fetchedTasks[p.id])).length;
 
     const monthBtnBadge = document.getElementById('monthViewBtnBadge');
     if (monthBtnBadge) {
@@ -13738,22 +13747,22 @@ async function loadRenewalTaskBadges() {
             cardBadge.style.display = 'inline-block';
         }
 
-        // Month view: red badge for incomplete tasks, green card when fully done
+        // Month view: red badge for incomplete, green card when fully done
         if (isMonthView) {
-            const allDone = tasks && tasks.length > 0 && tasks.every(t => t.completed);
+            const allDone = isPolicyDone(policyId, tasks);
+            const redBadge = document.getElementById(`red-badge-${policyId}`);
             if (allDone) {
-                // All tasks completed — turn card green
-                card.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
-                card.style.setProperty('border-left', '4px solid #10b981', 'important');
-                card.style.setProperty('border-right', '2px solid #10b981', 'important');
-                const redBadge = document.getElementById(`red-badge-${policyId}`);
+                // Fully done — ensure green card, hide red badge
+                if (!card.style.borderLeft || !card.style.borderLeft.includes('10b981')) {
+                    card.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
+                    card.style.setProperty('border-left', '4px solid #10b981', 'important');
+                    card.style.setProperty('border-right', '2px solid #10b981', 'important');
+                }
                 if (redBadge) redBadge.style.display = 'none';
             } else {
-                // Not fully done — show red badge with incomplete count
-                const redBadge = document.getElementById(`red-badge-${policyId}`);
+                // Not fully done — red badge with remaining count (or ! if no tasks at all)
                 if (redBadge) {
-                    const incompleteCount = tasks ? tasks.filter(t => !t.completed).length : '!';
-                    redBadge.textContent = incompleteCount;
+                    redBadge.textContent = tasks ? tasks.filter(t => !t.completed).length : '!';
                     redBadge.style.display = 'inline-block';
                 }
             }
