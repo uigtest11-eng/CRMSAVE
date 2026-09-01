@@ -13659,7 +13659,7 @@ async function loadRenewalTaskBadges() {
         try {
             const compUrl = window.location.hostname === 'localhost'
                 ? 'http://localhost:3001/api/renewal-completions'
-                : `https://${window.location.hostname}:3001/api/renewal-completions`;
+                : '/api/renewal-completions';
             const compResp = await fetch(compUrl);
             if (compResp.ok) renewalCompletions = await compResp.json();
         } catch (e) { /* ignore */ }
@@ -14313,7 +14313,7 @@ function getDaysRemaining(date) {
 function getRenewalTasksApiUrl(policyId) {
     const base = window.location.hostname === 'localhost'
         ? 'https://localhost:3001'
-        : `https://${window.location.hostname}:3001`;
+        : '';
     return `${base}/api/renewal-tasks/${policyId}`;
 }
 
@@ -14538,7 +14538,7 @@ function highlightPolicyAsCompleted() {
     // Store completion status to server using policyId as key
     const completionApiUrl = window.location.hostname === 'localhost'
         ? 'http://localhost:3001/api/renewal-completions'
-        : `https://${window.location.hostname}:3001/api/renewal-completions`;
+        : '/api/renewal-completions';
     fetch(completionApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14585,7 +14585,7 @@ function removePolicyHighlight() {
     // Remove completion status from server using policyId as key
     const completionDeleteUrl = window.location.hostname === 'localhost'
         ? `http://localhost:3001/api/renewal-completions/${currentPolicyId}`
-        : `https://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
+        : `/api/renewal-completions/${currentPolicyId}`;
     fetch(completionDeleteUrl, { method: 'DELETE' })
         .then(r => { if (r.ok) console.log('✅ Removed renewal completion from server'); })
         .catch(e => console.error('Error removing completion:', e));
@@ -14599,7 +14599,7 @@ async function restoreRenewalHighlighting() {
     try {
         const apiUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3001/api/renewal-completions'
-            : `https://${window.location.hostname}:3001/api/renewal-completions`;
+            : '/api/renewal-completions';
         const response = await fetch(apiUrl);
         if (response.ok) {
             completions = await response.json();
@@ -14628,7 +14628,7 @@ async function restoreRenewalHighlighting() {
                 // Migrate to server so localStorage is no longer needed
                 const migrateUrl = window.location.hostname === 'localhost'
                     ? 'http://localhost:3001/api/renewal-completions'
-                    : `https://${window.location.hostname}:3001/api/renewal-completions`;
+                    : '/api/renewal-completions';
                 fetch(migrateUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
