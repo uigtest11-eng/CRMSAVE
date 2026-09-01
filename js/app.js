@@ -13791,6 +13791,28 @@ async function loadRenewalTaskBadges() {
             statusMsg.textContent = `— ${visibleCount} need attention`;
         }
     }
+
+    // Recount Month View button badge using actual DOM card states after all updates
+    // (API-based count ran before DOM checks, so recount here is more accurate)
+    if (isMonthView) {
+        const monthCards = document.querySelectorAll('.month-view .renewal-card[data-policy-id]');
+        let stillNotDone = 0;
+        monthCards.forEach(c => {
+            const bl = c.style.borderLeft || '';
+            const bg = c.style.background || c.style.backgroundColor || '';
+            const isGreen = bl.includes('16, 185, 129') || bg.includes('209, 250, 229') || bg.includes('167, 243, 208');
+            if (!isGreen) stillNotDone++;
+        });
+        const monthBtn = document.getElementById('monthViewBtnBadge');
+        if (monthBtn) {
+            if (stillNotDone > 0) {
+                monthBtn.textContent = stillNotDone;
+                monthBtn.style.display = 'inline-block';
+            } else {
+                monthBtn.style.display = 'none';
+            }
+        }
+    }
 }
 
 function renderThreeMonthView(policies, isAdmin = false) {
