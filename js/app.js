@@ -13369,8 +13369,9 @@ async function loadRenewalsView() {
     // Add necessary styles
     addRenewalStyles();
 
-    // Restore green highlights for completed renewals
-    restoreRenewalHighlighting();
+    // Restore green highlights for completed renewals — MUST await so green is
+    // applied before loadRenewalTaskBadges checks card DOM state
+    await restoreRenewalHighlighting();
 
     // Apply name display preference (person vs business)
     applyRenewalNameDisplay();
@@ -13749,11 +13750,17 @@ async function loadRenewalTaskBadges() {
 
         // Month view: red badge for incomplete, green card when fully done
         if (isMonthView) {
-            const allDone = isPolicyDone(policyId, tasks);
+            // Check DOM state as reliable fallback: restoreRenewalHighlighting already ran
+            // and applied border-left: 4px solid rgb(16, 185, 129) to manually-completed cards
+            const cardIsGreenInDom = !!(
+                (card.style.borderLeft && card.style.borderLeft.includes('16, 185, 129')) ||
+                (card.style.background && card.style.background.includes('209, 250, 229'))
+            );
+            const allDone = cardIsGreenInDom || isPolicyDone(policyId, tasks);
             const redBadge = document.getElementById(`red-badge-${policyId}`);
             if (allDone) {
                 // Fully done — ensure green card, hide red badge
-                if (!card.style.borderLeft || !card.style.borderLeft.includes('10b981')) {
+                if (!cardIsGreenInDom) {
                     card.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
                     card.style.setProperty('border-left', '4px solid #10b981', 'important');
                     card.style.setProperty('border-right', '2px solid #10b981', 'important');
