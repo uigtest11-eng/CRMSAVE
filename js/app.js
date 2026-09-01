@@ -13311,8 +13311,9 @@ async function loadRenewalsView() {
                             <i class="fas fa-exclamation-circle"></i> 30-45 Days
                             <span id="thirty45BtnBadge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 4px;margin-left:6px;vertical-align:middle;"></span>
                         </button>
-                        <button class="view-btn ${currentRenewalView === 'month' ? 'active' : ''}" onclick="switchRenewalView('month')">
+                        <button class="view-btn ${currentRenewalView === 'month' ? 'active' : ''}" onclick="switchRenewalView('month')" style="position:relative;">
                             <i class="fas fa-calendar-day"></i> Month View
+                            <span id="monthViewBtnBadge" style="display:none;background:#ef4444;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 4px;margin-left:6px;vertical-align:middle;"></span>
                         </button>
                         <button class="view-btn ${currentRenewalView === '3month' ? 'active' : ''}" onclick="switchRenewalView('3month')">
                             <i class="fas fa-calendar-week"></i> 3-Month View
@@ -13649,15 +13650,22 @@ function render30to45View(policies, isAdmin = false) {
 async function loadRenewalTaskBadges() {
     const today = new Date();
 
-    // Always compute the button badge for 30-45 day policies regardless of current view
-    const policies30to45 = (window._currentRenewalPolicies || []).filter(p => {
+    // Always compute button badges regardless of current view
+    const allRenewalPolicies = window._currentRenewalPolicies || [];
+
+    const policies30to45 = allRenewalPolicies.filter(p => {
         const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
         return days >= 30 && days <= 45;
     });
+    const policiesMonth = allRenewalPolicies.filter(p => {
+        const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+        return days >= 0 && days <= 30;
+    });
 
-    // Fetch tasks for all 30-45 policies
+    // Fetch tasks for all button-relevant policies (deduplicated)
     const fetchedTasks = {}; // policyId -> tasks[]|null
-    await Promise.all(policies30to45.map(async (p) => {
+    const policiesToFetch = [...new Map([...policies30to45, ...policiesMonth].map(p => [p.id, p])).values()];
+    await Promise.all(policiesToFetch.map(async (p) => {
         try {
             const resp = await fetch(getRenewalTasksApiUrl(p.id));
             if (!resp.ok) { fetchedTasks[p.id] = null; return; }
@@ -13666,11 +13674,11 @@ async function loadRenewalTaskBadges() {
         } catch (e) { fetchedTasks[p.id] = null; }
     }));
 
-    // Button badge = count of 30-45 policies with NO completed tasks
+    // 30-45 button badge = count of those policies with NO completed tasks
     const noCompletedCount = policies30to45.filter(p => {
         const tasks = fetchedTasks[p.id];
-        if (!tasks) return true; // no tasks yet = needs attention
-        return !tasks.some(t => t.completed); // none checked = needs attention
+        if (!tasks) return true;
+        return !tasks.some(t => t.completed);
     }).length;
 
     const btnBadge = document.getElementById('thirty45BtnBadge');
@@ -13680,6 +13688,23 @@ async function loadRenewalTaskBadges() {
             btnBadge.style.display = 'inline-block';
         } else {
             btnBadge.style.display = 'none';
+        }
+    }
+
+    // Month View button badge = count of month policies NOT fully completed
+    const monthNotDoneCount = policiesMonth.filter(p => {
+        const tasks = fetchedTasks[p.id];
+        if (!tasks) return true; // no tasks started = not done
+        return !tasks.every(t => t.completed); // not all checked = not done
+    }).length;
+
+    const monthBtnBadge = document.getElementById('monthViewBtnBadge');
+    if (monthBtnBadge) {
+        if (monthNotDoneCount > 0) {
+            monthBtnBadge.textContent = monthNotDoneCount;
+            monthBtnBadge.style.display = 'inline-block';
+        } else {
+            monthBtnBadge.style.display = 'none';
         }
     }
 
