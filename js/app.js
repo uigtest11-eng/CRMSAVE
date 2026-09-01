@@ -13651,15 +13651,19 @@ function render30to45View(policies, isAdmin = false) {
 async function loadRenewalTaskBadges() {
     const today = new Date();
 
-    // Fetch manual renewal-completions (the "mark complete" green toggle) — treat these as fully done
-    let renewalCompletions = {};
-    try {
-        const compUrl = window.location.hostname === 'localhost'
-            ? 'http://localhost:3001/api/renewal-completions'
-            : `https://${window.location.hostname}:3001/api/renewal-completions`;
-        const compResp = await fetch(compUrl);
-        if (compResp.ok) renewalCompletions = await compResp.json();
-    } catch (e) { /* ignore — no completions data */ }
+    // Use completions already fetched by restoreRenewalHighlighting (which runs first).
+    // This avoids a duplicate API call and prevents count mismatch if the second fetch fails.
+    let renewalCompletions = window._renewalCompletionsCache || {};
+    if (\!window._renewalCompletionsCache) {
+        // Fallback: fetch if cache not populated (e.g. called standalone)
+        try {
+            const compUrl = window.location.hostname === 'localhost'
+                ? 'http://localhost:3001/api/renewal-completions'
+                : `https://${window.location.hostname}:3001/api/renewal-completions`;
+            const compResp = await fetch(compUrl);
+            if (compResp.ok) renewalCompletions = await compResp.json();
+        } catch (e) { /* ignore */ }
+    }
 
     // Helper: is a policy considered fully done (manual completion OR all tasks checked)?
     const isPolicyDone = (policyId, tasks) => {
@@ -14599,7 +14603,7 @@ async function restoreRenewalHighlighting() {
         const response = await fetch(apiUrl);
         if (response.ok) {
             completions = await response.json();
-            console.log('✅ Loaded renewal completions from server');
+            window._renewalCompletionsCache = completions; // share with loadRenewalTaskBadges
         }
     } catch (error) {
         console.error('Error loading completions:', error);
