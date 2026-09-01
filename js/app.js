@@ -9357,48 +9357,56 @@ async function loadLeadsView() {
             </div>
             
             <!-- Lead Pipeline -->
-            <div class="lead-pipeline">
+            ${(() => {
+                const _pIsCsr = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr';
+                const _sv = (val) => _pIsCsr ? '' : `<div class="stage-value">$${val}</div>`;
+                const _lrrCount = leads.filter(l => l.stage === "loss_runs_requested").length;
+                const _asCount = leads.filter(l => l.stage === "app_sent").length;
+                const _saleCount = leads.filter(l => l.stage === "sale").length;
+                const _qsCount = quoteSentUnaware + quoteSentAware;
+                return `<div class="lead-pipeline">
                 <div class="pipeline-stage" data-stage="new">
                     <div class="stage-header">
                         <h3>New</h3>
                         <span class="stage-count">${newLeads}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "new").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
+                    ${_sv(leads.filter(l => l.stage === "new").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
                     <div class="stage-bar" style="width: ${totalLeads > 0 ? (newLeads/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="loss_runs_requested">
                     <div class="stage-header">
                         <h3>Loss Runs Requested</h3>
-                        <span class="stage-count">${leads.filter(l => l.stage === "loss_runs_requested").length}</span>
+                        <span class="stage-count">${_lrrCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "loss_runs_requested").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (leads.filter(l => l.stage === "loss_runs_requested").length/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "loss_runs_requested").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (_lrrCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="quote-sent">
                     <div class="stage-header">
                         <h3>Quote Sent</h3>
-                        <span class="stage-count">${quoteSentUnaware + quoteSentAware}</span>
+                        <span class="stage-count">${_qsCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "quote-sent-unaware" || l.stage === "quote-sent-aware").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar" style="width: ${totalLeads > 0 ? ((quoteSentUnaware + quoteSentAware)/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "quote-sent-unaware" || l.stage === "quote-sent-aware").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (_qsCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="app_sent">
                     <div class="stage-header">
                         <h3>Waiting on Markets</h3>
-                        <span class="stage-count">${leads.filter(l => l.stage === "app_sent").length}</span>
+                        <span class="stage-count">${_asCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "app_sent").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (leads.filter(l => l.stage === "app_sent").length/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "app_sent").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (_asCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="sale">
                     <div class="stage-header success">
                         <h3>Sale</h3>
-                        <span class="stage-count">${leads.filter(l => l.stage === "sale").length}</span>
+                        <span class="stage-count">${_saleCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "sale").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar success" style="width: ${totalLeads > 0 ? (leads.filter(l => l.stage === "sale").length/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "sale").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar success" style="width: ${totalLeads > 0 ? (_saleCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);"></div>
                 </div>
-            </div>
+            </div>`;
+            })()}
             
             <!-- Lead Stats -->
             <div class="lead-stats">
