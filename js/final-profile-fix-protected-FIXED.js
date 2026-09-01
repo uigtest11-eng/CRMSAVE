@@ -690,6 +690,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                 <button onclick="transcribeRecording('${lead.id}', '${lead.recordingPath}')" id="transcribe-btn-${lead.id}" style="background: #7c3aed; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     <i class="fas fa-file-alt"></i> Transcribe Recording
                                 </button>
+                                <button onclick="openRecordingPopout('${lead.id}')" title="Open recording &amp; transcript in new tab" style="background: #0ea5e9; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </button>
                             ` : ''}
                             ${!(lead.recordingPath && lead.hasRecording) ? `
                                 <button onclick="openCallRecordingUpload('${lead.id}')" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
@@ -739,80 +742,6 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         </div>
                     </div>
                 </div>
-
-                <!-- APP Stage -->
-                ${_isCsr ? '' : `<div class="profile-section" style="background: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3><i class="fas fa-clipboard-check"></i> APP Stage</h3>
-                        <button onclick="showMarketStats('${lead.id}')" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 6px;" onmouseover="this.style.background='#0056b3'" onmouseout="this.style.background='#007bff'">
-                            <i class="fas fa-chart-line"></i>
-                            Market Stats
-                        </button>
-                    </div>
-
-                    <!-- Checkboxes Section -->
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px; border: 1px solid #e0e0e0;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.app ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'app', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">APP</span>
-                        </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.lossRuns ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'lossRuns', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">LOSS RUNS</span>
-                        </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.iftas ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'iftas', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">IFTAS</span>
-                        </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.saa ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'saa', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">SAA</span>
-                        </label>
-                    </div>
-
-                    <!-- Requirements Information -->
-                    <div style="background: #f5f5f5; padding: 15px; border-radius: 6px; font-size: 18px; line-height: 1.8;">
-                        <div style="margin-bottom: 16px;">
-                            <strong>0-2 <i class="fas fa-truck" style="color: #374151;"></i></strong>
-                            <span id="northland-02-${lead.id}" style="background: ${lead.appStage?.app ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Northland</span>
-                            <span id="canal-02-${lead.id}" style="background: ${lead.appStage?.app ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Canal</span>
-                            <span id="req-app-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold; margin-left: 10px;">APP</span>
-                        </div>
-
-                        <div style="margin-bottom: 16px;">
-                            <strong>3+ <i class="fas fa-truck" style="color: #374151;"></i></strong>
-                            <span id="northland-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Northland</span>
-                            <span id="canal-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Canal</span>
-                            <span style="margin-left: 10px;">
-                                <span id="req-app2-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold;">APP</span> -
-                                <span id="req-lossruns-${lead.id}" style="color: ${lead.appStage?.lossRuns ? '#10b981' : 'black'}; font-weight: bold;">LOSS RUNS</span>
-                            </span>
-                        </div>
-
-                        <!-- Divider -->
-                        <div style="border-top: 2px solid #d1d5db; margin: 20px 0;">
-                            <div style="text-align: center; font-weight: bold; font-size: 20px; color: #374151; padding: 12px 0; border-bottom: 2px solid #d1d5db; background: white; margin: 0;">3+ Years</div>
-                        </div>
-
-                        <div style="margin-bottom: 16px;">
-                            <span id="berkley-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Berkley</span>
-                            <span id="occidental-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Occidental</span>
-                            <span style="margin-left: 10px;">
-                                <span id="req-app3-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold;">APP</span> -
-                                <span id="req-lossruns2-${lead.id}" style="color: ${lead.appStage?.lossRuns ? '#10b981' : 'black'}; font-weight: bold;">LOSS RUNS</span>
-                            </span>
-                        </div>
-                        <div>
-                            <span id="crum-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns && lead.appStage?.iftas && lead.appStage?.saa) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Crum</span>
-                            <span style="margin-left: 10px;">
-                                <span id="req-app4-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold;">APP</span> -
-                                <span id="req-lossruns3-${lead.id}" style="color: ${lead.appStage?.lossRuns ? '#10b981' : 'black'}; font-weight: bold;">LOSS RUNS</span> -
-                                <span id="req-iftas-${lead.id}" style="color: ${lead.appStage?.iftas ? '#10b981' : 'black'}; font-weight: bold;">IFTAS</span> -
-                                <span id="req-saa-${lead.id}" style="color: ${lead.appStage?.saa ? '#10b981' : 'black'}; font-weight: bold;">SAA</span>
-                            </span>
-                        </div>
-                    </div>
-                </div>`}
 
                 <!-- Application Submissions -->
                 <div class="profile-section" style="background: #f0f9f0; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -12994,6 +12923,52 @@ window.transcribeRecording = async function(leadId, recordingPath) {
         }
         alert('Transcription failed: ' + err.message);
     }
+};
+
+// Open Call Recording + Transcript in a new popup tab
+window.openRecordingPopout = function(leadId) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) { alert('Lead not found.'); return; }
+
+    const recordingPath = lead.recordingPath || '';
+    const transcriptHtml = (lead.transcriptWords && lead.transcriptWords.length)
+        ? lead.transcriptWords.map(w => `<span>${w.word || w} </span>`).join('')
+        : (lead.transcriptText
+            ? lead.transcriptText.replace(/\n/g, '<br>')
+            : '<span style="color:#9ca3af;">No transcript yet.</span>');
+
+    const leadName = (lead.firstName || '') + ' ' + (lead.lastName || '');
+    const html = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recording – ${leadName.trim() || leadId}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+  body{font-family:system-ui,sans-serif;background:#f3f4f6;margin:0;padding:24px;}
+  h2{margin:0 0 20px;color:#1f2937;}
+  .card{background:#fff;border-radius:10px;padding:20px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,.1);}
+  .card h3{margin:0 0 14px;color:#374151;font-size:16px;}
+  audio{width:100%;height:40px;}
+  .transcript{width:100%;min-height:200px;max-height:500px;overflow-y:auto;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-family:monospace;font-size:13px;line-height:1.9;background:#fafafa;}
+</style></head><body>
+<h2><i class="fas fa-play-circle" style="color:#10b981;margin-right:8px;"></i>${leadName.trim() || 'Lead'} – Call Recording &amp; Transcript</h2>
+<div class="card">
+  <h3><i class="fas fa-play-circle" style="color:#10b981;margin-right:6px;"></i> Call Recording</h3>
+  <audio controls preload="none">
+    <source src="${recordingPath}" type="audio/mpeg">
+    <source src="${recordingPath}" type="audio/wav">
+    Your browser does not support audio.
+  </audio>
+</div>
+<div class="card">
+  <h3><i class="fas fa-microphone" style="margin-right:6px;"></i> Call Transcript</h3>
+  <div class="transcript">${transcriptHtml}</div>
+</div>
+</body></html>`;
+
+    const win = window.open('', '_blank', 'width=800,height=700,resizable=yes,scrollbars=yes');
+    if (win) { win.document.open(); win.document.write(html); win.document.close(); }
+    else { alert('Popup blocked. Please allow popups for this site.'); }
 };
 
 // Function to toggle DOT lookup button visibility
