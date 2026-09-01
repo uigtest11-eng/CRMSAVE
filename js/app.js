@@ -13288,7 +13288,8 @@ async function loadRenewalsView() {
 
     // Process policies for renewals
     const renewalPolicies = getRealRenewalPolicies(allPolicies, clients);
-    
+    window._currentRenewalPolicies = renewalPolicies; // used by loadRenewalTaskBadges
+
     // Calculate renewal statistics
     const stats = calculateRenewalStats(renewalPolicies);
     
@@ -13298,8 +13299,9 @@ async function loadRenewalsView() {
                 <h1>Policy Renewals</h1>
                 <div class="header-actions">
                     <div class="view-toggle">
-                        <button class="view-btn ${currentRenewalView === '30-45' ? 'active' : ''}" onclick="switchRenewalView('30-45')" title="30–45 day renewals with no tasks started">
+                        <button class="view-btn ${currentRenewalView === '30-45' ? 'active' : ''}" onclick="switchRenewalView('30-45')" title="30–45 day renewals with no tasks started" style="position:relative;">
                             <i class="fas fa-exclamation-circle"></i> 30-45 Days
+                            <span id="thirty45BtnBadge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 4px;margin-left:6px;vertical-align:middle;"></span>
                         </button>
                         <button class="view-btn ${currentRenewalView === 'month' ? 'active' : ''}" onclick="switchRenewalView('month')">
                             <i class="fas fa-calendar-day"></i> Month View
@@ -13636,33 +13638,75 @@ function render30to45View(policies, isAdmin = false) {
 }
 
 async function loadRenewalTaskBadges() {
-    const cards = document.querySelectorAll('[data-policy-id]');
-    if (!cards.length) return;
+    const today = new Date();
 
+    // Always compute the button badge for 30-45 day policies regardless of current view
+    const policies30to45 = (window._currentRenewalPolicies || []).filter(p => {
+        const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+        return days >= 30 && days <= 45;
+    });
+
+    // Fetch tasks for all 30-45 policies
+    const fetchedTasks = {}; // policyId -> tasks[]|null
+    await Promise.all(policies30to45.map(async (p) => {
+        try {
+            const resp = await fetch(getRenewalTasksApiUrl(p.id));
+            if (!resp.ok) { fetchedTasks[p.id] = null; return; }
+            const data = await resp.json();
+            fetchedTasks[p.id] = (data.tasks && data.tasks.length > 0) ? data.tasks : null;
+        } catch (e) { fetchedTasks[p.id] = null; }
+    }));
+
+    // Button badge = count of 30-45 policies with NO completed tasks
+    const noCompletedCount = policies30to45.filter(p => {
+        const tasks = fetchedTasks[p.id];
+        if (!tasks) return true; // no tasks yet = needs attention
+        return !tasks.some(t => t.completed); // none checked = needs attention
+    }).length;
+
+    const btnBadge = document.getElementById('thirty45BtnBadge');
+    if (btnBadge) {
+        if (noCompletedCount > 0) {
+            btnBadge.textContent = noCompletedCount;
+            btnBadge.style.display = 'inline-block';
+        } else {
+            btnBadge.style.display = 'none';
+        }
+    }
+
+    // Update card badges and handle 30-45 view filtering
     const is30to45View = !!document.querySelector('.thirty45-view');
+    const cards = document.querySelectorAll('[data-policy-id]');
 
     await Promise.all(Array.from(cards).map(async (card) => {
         const policyId = card.getAttribute('data-policy-id');
         if (!policyId) return;
-        try {
-            const response = await fetch(getRenewalTasksApiUrl(policyId));
-            if (!response.ok) return;
-            const data = await response.json();
-            const tasks = (data.tasks && data.tasks.length > 0) ? data.tasks : null;
-            const completedCount = tasks ? tasks.filter(t => t.completed).length : 0;
 
-            // Blue bubble: show completed task count on the card
-            const badge = document.getElementById(`task-badge-${policyId}`);
-            if (badge && completedCount > 0) {
-                badge.textContent = completedCount;
-                badge.style.display = 'inline-block';
-            }
+        // Re-use already-fetched result or fetch now
+        let tasks;
+        if (Object.prototype.hasOwnProperty.call(fetchedTasks, policyId)) {
+            tasks = fetchedTasks[policyId];
+        } else {
+            try {
+                const resp = await fetch(getRenewalTasksApiUrl(policyId));
+                if (!resp.ok) return;
+                const data = await resp.json();
+                tasks = (data.tasks && data.tasks.length > 0) ? data.tasks : null;
+            } catch (e) { return; }
+        }
 
-            // 30-45 view: hide cards that already have tasks (tasks have been started)
-            if (is30to45View && tasks) {
-                card.style.display = 'none';
-            }
-        } catch (e) { /* silently fail — card stays visible */ }
+        // Blue card badge: completed task count
+        const completedCount = tasks ? tasks.filter(t => t.completed).length : 0;
+        const cardBadge = document.getElementById(`task-badge-${policyId}`);
+        if (cardBadge && completedCount > 0) {
+            cardBadge.textContent = completedCount;
+            cardBadge.style.display = 'inline-block';
+        }
+
+        // 30-45 view: hide cards that already have tasks started
+        if (is30to45View && tasks) {
+            card.style.display = 'none';
+        }
     }));
 
     // Update status message for 30-45 view
