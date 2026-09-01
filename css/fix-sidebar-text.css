@@ -83,3 +83,41 @@ main > span,
 main > a {
     display: none !important;
 }
+
+/* === Leads nav todo badge === */
+#leads-nav-folder {
+    overflow: visible !important;
+    position: relative;
+}
+#leads-nav-folder > a {
+    position: relative !important;
+    overflow: visible !important;
+}
+/* Minimized: absolute overlay on the icon */
+.sidebar:not(:hover) #leads-todo-badge {
+    position: absolute !important;
+    top: 4px !important;
+    right: 4px !important;
+    left: auto !important;
+    width: auto !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    font-size: 11px !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    margin-left: 0 !important;
+}
+/* Expanded: inline after Leads text */
+.sidebar:hover #leads-todo-badge {
+    position: static !important;
+    left: auto !important;
+    width: auto !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    font-size: 11px !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    margin-left: 6px !important;
+}

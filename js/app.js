@@ -10643,11 +10643,11 @@ function updateLeadsNavBadge() {
 
         if (count > 0) {
             badge.textContent = count;
-            badge.style.display = 'inline-block';
+            badge.style.setProperty('display', 'inline-block', 'important');
         } else {
-            badge.style.display = 'none';
+            badge.style.setProperty('display', 'none', 'important');
         }
-    } catch (e) { badge.style.display = 'none'; }
+    } catch (e) { badge.style.setProperty('display', 'none', 'important'); }
 }
 window.updateLeadsNavBadge = updateLeadsNavBadge;
 
