@@ -447,6 +447,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <button id="dot-lookup-btn-${lead.id}" onclick="triggerManualDOTLookup('${lead.id}', document.getElementById('dot-input-${lead.id}')?.value || '${lead.dotNumber || ''}')" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;" title="Rescan DOT data from FMCSA">
                                 <i class="fas fa-sync-alt"></i> Rescan DOT
                             </button>
+                            <button onclick="openCompanyInfoPopout('${lead.id}')" title="Open company info in new tab" style="background: #0ea5e9; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; display: flex; align-items: center;">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
                             <button onclick="acctGoToDOTLookup('${lead.id}')" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;" title="Open DOT in lead generation search">
                                 <i class="fas fa-search"></i> DOT Lookup
                             </button>
@@ -12923,6 +12926,114 @@ window.transcribeRecording = async function(leadId, recordingPath) {
         }
         alert('Transcription failed: ' + err.message);
     }
+};
+
+// Open Company Info (+ Operation Details, Vehicles, Trailers, Drivers) in a new popup tab
+window.openCompanyInfoPopout = function(leadId) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) { alert('Lead not found.'); return; }
+
+    const e = s => String(s || '—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    const row = (label, val) =>
+        `<div class="row"><span class="lbl">${label}</span><span class="val">${e(val)}</span></div>`;
+
+    let vehiclesHtml = '';
+    (lead.vehicles || []).forEach((v, i) => {
+        vehiclesHtml += `<div class="card"><div class="card-title">Vehicle ${i + 1}</div><div class="grid3">
+            ${row('Year', v.year)}${row('Make', v.make)}${row('Model', v.model)}
+            ${row('VIN', v.vin)}${row('Value ($)', v.value)}${row('Type', v.type)}
+        </div></div>`;
+    });
+    if (!vehiclesHtml) vehiclesHtml = '<p class="empty">No vehicles on file</p>';
+
+    let trailersHtml = '';
+    (lead.trailers || []).forEach((t, i) => {
+        trailersHtml += `<div class="card"><div class="card-title">Trailer ${i + 1}</div><div class="grid3">
+            ${row('Year', t.year)}${row('Make', t.make)}${row('Type', t.type)}
+            ${row('VIN', t.vin)}${row('Length', t.length)}${row('Value ($)', t.value)}
+        </div></div>`;
+    });
+    if (!trailersHtml) trailersHtml = '<p class="empty">No trailers on file</p>';
+
+    let driversHtml = '';
+    (lead.drivers || []).forEach((d, i) => {
+        driversHtml += `<div class="card"><div class="card-title">Driver ${i + 1}</div><div class="grid3">
+            ${row('Name', d.name)}${row('License #', d.license)}${row('Date of Birth', d.dob)}
+            ${row('Hire Date', d.hireDate)}${row('Years Experience', d.experience)}${row('Violations/Accidents', d.violations)}
+        </div></div>`;
+    });
+    if (!driversHtml) driversHtml = '<p class="empty">No drivers on file</p>';
+
+    const leadName = ((lead.firstName || lead.name || '') + (lead.lastName ? ' ' + lead.lastName : '')).trim();
+
+    const html = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Company Info \u2013 ${e(leadName || leadId)}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:system-ui,sans-serif;background:#f3f4f6;margin:0;padding:20px;color:#1f2937;}
+  h1{margin:0 0 20px;font-size:20px;color:#1f2937;}
+  h2{font-size:15px;margin:0 0 12px;color:#374151;display:flex;align-items:center;gap:8px;}
+  .section{background:#fff;border-radius:10px;padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .row{display:flex;flex-direction:column;}
+  .lbl{font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px;}
+  .val{font-size:13px;color:#111827;padding:6px 8px;background:#f9fafb;border-radius:5px;border:1px solid #e5e7eb;}
+  .card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:10px;background:#fafafa;}
+  .card-title{font-weight:600;font-size:13px;color:#374151;margin-bottom:10px;}
+  .empty{color:#9ca3af;font-style:italic;font-size:13px;padding:8px 0;}
+  .phone-link{color:#059669;text-decoration:none;font-weight:500;}
+  .email-link{color:#2563eb;text-decoration:none;font-weight:500;}
+</style></head><body>
+<h1><i class="fas fa-building" style="color:#0ea5e9;margin-right:8px;"></i>${e(leadName || 'Lead')} \u2013 Company Profile</h1>
+
+<div class="section">
+  <h2><i class="fas fa-info-circle" style="color:#0ea5e9;"></i> Company Information</h2>
+  <div class="grid">
+    ${row('Company Name', lead.name)}
+    ${row('Contact', lead.contact)}
+    <div class="row"><span class="lbl">Phone</span><span class="val">${lead.phone ? `<a class="phone-link" href="tel:${e(lead.phone)}">${e(lead.phone)}</a>` : '—'}</span></div>
+    <div class="row"><span class="lbl">Email</span><span class="val">${lead.email ? `<a class="email-link" href="mailto:${e(lead.email)}">${e(lead.email)}</a>` : '—'}</span></div>
+    ${row('DOT Number', lead.dotNumber)}
+    ${row('MC Number', lead.mcNumber)}
+    ${row('Years in Business', lead.yearsInBusiness)}
+    ${row('Renewal Date', lead.renewalDate)}
+    ${row('Insurance Company', lead.insuranceCompany)}
+    ${row('State', lead.state)}
+  </div>
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-route" style="color:#0ea5e9;"></i> Operation Details</h2>
+  <div class="grid">
+    ${row('Radius of Operation', lead.radiusOfOperation)}
+    ${row('Commodity Hauled', lead.commodityHauled)}
+  </div>
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-truck" style="color:#0ea5e9;"></i> Vehicles (${(lead.vehicles || []).length})</h2>
+  ${vehiclesHtml}
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-trailer" style="color:#0ea5e9;"></i> Trailers (${(lead.trailers || []).length})</h2>
+  ${trailersHtml}
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-id-card" style="color:#0ea5e9;"></i> Drivers (${(lead.drivers || []).length})</h2>
+  ${driversHtml}
+</div>
+</body></html>`;
+
+    const win = window.open('', '_blank', 'width=900,height=800,resizable=yes,scrollbars=yes');
+    if (win) { win.document.open(); win.document.write(html); win.document.close(); }
+    else { alert('Popup blocked. Please allow popups for this site.'); }
 };
 
 // Open Call Recording + Transcript in a new popup tab (with full word-highlight sync)
