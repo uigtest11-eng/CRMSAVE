@@ -6,6 +6,8 @@ let protectedFunctions = {};
 
 // Create the enhanced profile function with exact working UI
 protectedFunctions.createEnhancedProfile = function(lead) {
+    const _pfSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsr = (_pfSess.role || '') === 'csr';
     console.log('🔥 PROTECTED Enhanced Profile: Creating profile for:', lead.name);
     console.log('🔍 PROTECTED Lead ID being used:', lead.id);
     console.log('🔍 PROTECTED Lead object:', lead);
@@ -156,6 +158,32 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <textarea id="todo-text-${lead.id}" placeholder="Enter optional to-do notes..." style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; margin-top: 5px; resize: vertical; min-height: 60px;" onblur="saveTodoText('${lead.id}', this.value)" onkeypress="if(event.key==='Enter' && event.shiftKey) saveTodoText('${lead.id}', this.value)"></textarea>
                             <small style="color: #6b7280; font-size: 11px;">Press Shift+Enter to save, or click outside to save automatically</small>
                         </div>
+                        <!-- CSR To Do -->
+                        <div style="margin-top: 12px;">
+                            ${(() => {
+                                const _csrProf = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                                const _isCsrProf = (_csrProf.role || '') === 'csr';
+                                const isDone = !!lead.csrTodoDone;
+                                const todoText = isDone ? (lead.csrTodoOriginal || '') : (lead.csrTodo || '');
+                                const hasTodo = !!(todoText.trim());
+                                if (_isCsrProf) {
+                                    // CSR view: read-only text with checkbox to mark done
+                                    if (!hasTodo) {
+                                        return '<div style="color: #9ca3af; font-size: 13px; padding: 8px;">No CSR task assigned</div>';
+                                    }
+                                    return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
+                                        '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid ' + (isDone ? '#86efac' : '#7dd3fc') + '; border-radius: 6px; background: ' + (isDone ? '#f0fdf4' : '#f0f9ff') + ';">' +
+                                            '<input type="checkbox" id="csr-done-cb-' + lead.id + '" ' + (isDone ? 'checked' : '') + ' onchange="toggleCsrTodoDone(\'' + lead.id + '\', this.checked)" style="margin-top: 3px; transform: scale(1.4); accent-color: #10b981; cursor: pointer;" title="Mark as done">' +
+                                            '<span id="csr-todo-text-' + lead.id + '" style="font-size: 14px; line-height: 1.5; flex: 1; ' + (isDone ? 'text-decoration: line-through; color: #9ca3af;' : 'color: #1e3a5f;') + '">' + todoText + '</span>' +
+                                        '</div>';
+                                } else {
+                                    // Non-CSR (agents/admins): editable textarea to assign tasks
+                                    return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
+                                        (isDone ? '<div style="margin-bottom: 6px; font-size: 12px; color: #10b981; font-weight: 600;"><i class="fas fa-check-circle"></i> Marked done by CSR</div>' : '') +
+                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + todoText + '</textarea>';
+                                }
+                            })()}
+                        </div>
                     </div>
                     <!-- Stage Timestamp with Color Coding -->
                     <div style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 6px; text-align: center;">
@@ -212,10 +240,27 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             })()}
                         </div>
                     </div>
+                    <!-- Sent to Markets / COI / AOR checkboxes -->
+                    <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.7); border-radius: 6px;">
+                        <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; cursor: ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))) ? 'default' : 'pointer'}; opacity: ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))) ? '0.6' : '1'};">
+                                <input type="checkbox" ${(lead.stage === 'app_sent' || (lead.reachOut && (lead.reachOut.emailSent || lead.reachOut.emailCount > 0))) ? 'checked disabled' : ''} style="margin-right: 6px; transform: scale(1.2); accent-color: #10b981;">
+                                <span style="font-weight: 600; font-size: 13px;">Sent to Markets</span>
+                            </label>
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="coi-checkbox-${lead.id}" ${lead.coiReceived ? 'checked' : ''} onchange="toggleLeadIndicator('${lead.id}','coiReceived',this.checked)" style="margin-right: 6px; transform: scale(1.2); accent-color: #3b82f6;">
+                                <span style="font-weight: 600; font-size: 13px;">COI Received</span>
+                            </label>
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <input type="checkbox" id="aor-checkbox-${lead.id}" ${lead.aorCompleted ? 'checked' : ''} onchange="toggleLeadIndicator('${lead.id}','aorCompleted',this.checked)" style="margin-right: 6px; transform: scale(1.2); accent-color: #8b5cf6;">
+                                <span style="font-weight: 600; font-size: 13px;">AOR Completed</span>
+                            </label>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Callback Scheduler -->
-                ${lead.stage === 'closed' ? `
+                <!-- Callback Scheduler (hidden for CSR) -->
+                ${_isCsr ? '' : lead.stage === 'closed' ? `
                 <div class="profile-section" style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #d1d5db;">
                     <div style="display: flex; align-items: center; gap: 10px; color: #9ca3af;">
                         <i class="fas fa-ban" style="font-size: 18px;"></i>
@@ -235,25 +280,32 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
                     <!-- Callback Date/Time Input -->
                     <div style="display: flex; flex-direction: column; gap: 15px;">
-                        <div style="display: flex; gap: 15px; align-items: end;">
-                            <div style="flex: 1;">
-                                <label for="callback-date-${lead.id}" style="font-weight: 600; font-size: 12px; color: #374151;">Date:</label>
-                                <input type="date"
-                                       id="callback-date-${lead.id}"
-                                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;"
-                                       min="${new Date().toISOString().split('T')[0]}">
+                        <!-- Hidden inputs for scheduleCallback() compatibility -->
+                        <input type="hidden" id="callback-date-${lead.id}" />
+                        <input type="hidden" id="callback-time-${lead.id}" />
+
+                        <!-- Inline calendar + time picker -->
+                        <div style="border: 2px solid #bae6fd; border-radius: 10px; padding: 12px; background: #f0f9ff;">
+                            <div style="display: flex; gap: 10px;">
+                                <div id="inline-cb-calendar-${lead.id}" style="flex: 1; min-width: 0;"></div>
+                                <div style="width: 1px; background: #bae6fd;"></div>
+                                <div id="inline-cb-timeslots-${lead.id}" style="width: 135px; max-height: 240px; overflow-y: auto; padding-right: 4px;"></div>
                             </div>
-                            <div style="flex: 1;">
-                                <label for="callback-time-${lead.id}" style="font-weight: 600; font-size: 12px; color: #374151;">Time:</label>
-                                <input type="time"
-                                       id="callback-time-${lead.id}"
-                                       style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+                            <div id="inline-cb-selected-${lead.id}" style="margin-top: 8px; text-align: center; font-weight: 600; color: #0277bd; font-size: 13px;"></div>
+                            <div style="display:flex;align-items:center;gap:12px;margin-top:4px;justify-content:center;">
+                                <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;">
+                                    <div style="width:8px;height:8px;background:#fffbeb;border:2px solid #fbbf24;border-radius:3px;"></div> Has callbacks
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:#6b7280;">
+                                    <div style="width:8px;height:8px;background:#fef3c7;border:2px solid #f59e0b;border-radius:3px;"></div> Time booked
+                                </div>
                             </div>
-                            <button onclick="scheduleCallback('${lead.id}')"
-                                    style="background: #0277bd; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap;">
-                                <i class="fas fa-plus"></i> Schedule
-                            </button>
                         </div>
+
+                        <button onclick="scheduleCallback('${lead.id}')"
+                                style="background: #0277bd; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap; align-self: flex-end;">
+                            <i class="fas fa-plus"></i> Schedule Callback
+                        </button>
 
                         <!-- Notes for callback -->
                         <div>
@@ -270,8 +322,8 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     </div>
                 </div>`}
 
-                <!-- Reach Out Checklist -->
-                <div class="profile-section" style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <!-- Reach Out Checklist (hidden for CSR) -->
+                ${_isCsr ? '' : `<div class="profile-section" style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <!-- Header with TO DO message -->
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h3 style="margin: 0; font-weight: bold;" id="reach-out-header-title-${lead.id}"><i class="fas fa-tasks"></i> <span style="color: #dc2626;">Reach Out</span></h3>
@@ -342,10 +394,10 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
-                <!-- Other Lead Details -->
-                <div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <!-- Other Lead Details (hidden for CSR) -->
+                ${_isCsr ? '' : `<div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h3><i class="fas fa-info-circle"></i> Lead Details</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                         <div>
@@ -378,7 +430,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </select>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
 
                 <!-- Notes -->
@@ -689,7 +741,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 </div>
 
                 <!-- APP Stage -->
-                <div class="profile-section" style="background: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                ${_isCsr ? '' : `<div class="profile-section" style="background: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3><i class="fas fa-clipboard-check"></i> APP Stage</h3>
                         <button onclick="showMarketStats('${lead.id}')" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 6px;" onmouseover="this.style.background='#0056b3'" onmouseout="this.style.background='#007bff'">
@@ -760,7 +812,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </span>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
                 <!-- Application Submissions -->
                 <div class="profile-section" style="background: #f0f9f0; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -903,6 +955,13 @@ protectedFunctions.createEnhancedProfile = function(lead) {
     // Activate DOM protection to prevent hardcoded ID overwrites
     protectedFunctions.protectModalIDs(lead.id, modalContainer);
 
+    // Initialize inline callback calendar for this lead
+    setTimeout(() => {
+        if (typeof window.initInlineCallbackCal === 'function') {
+            window.initInlineCallbackCal(lead.id);
+        }
+    }, 150);
+
     // Initialize callback display for this lead
     setTimeout(async () => {
         await displayScheduledCallbacks(lead.id);
@@ -1044,6 +1103,12 @@ protectedFunctions.updateAppStageField = function(leadId, field, value) {
 
         // Update the specific field
         leads[leadIndex].appStage[field] = value;
+        // Track when the app stage was last updated for goals tracking
+        if (value) {
+            const now = new Date().toISOString();
+            leads[leadIndex].stageUpdatedAt = now;
+            leads[leadIndex].lastModified = now;
+        }
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
         console.log('APP Stage field updated:', field, value);
 
@@ -1052,7 +1117,9 @@ protectedFunctions.updateAppStageField = function(leadId, field, value) {
 
         // Save to server database
         const updateData = {
-            appStage: leads[leadIndex].appStage
+            appStage: leads[leadIndex].appStage,
+            stageUpdatedAt: leads[leadIndex].stageUpdatedAt,
+            lastModified: leads[leadIndex].lastModified
         };
 
         fetch(`/api/leads/${leadId}`, {
@@ -1225,7 +1292,7 @@ const AGENT_EMAILS = {
     'grant':   'Grant@vigagency.com',
     'carson':  'Carson@vigagency.com',
     'hunter':  'Hunter@vigagency.com',
-    'maureen': 'Maureen@vigagency.com'
+    'maureen': 'Maureen.corp@Uigagency.com'
 };
 function getAgentEmail(assignedTo) {
     if (!assignedTo) return '';
@@ -2889,6 +2956,7 @@ window.handleCallDuration = function(leadId, duration) {
         if (leads[leadIndex].reachOut.callLogs && Array.isArray(leads[leadIndex].reachOut.callLogs)) {
             leads[leadIndex].reachOut.callLogs.forEach(log => {
                 if (log.duration) {
+                    if (typeof log.duration !== 'string') log.duration = String(log.duration);
                     if (log.duration === '< 1 min') {
                         totalMinutesBefore += 0.5;
                     } else if (log.duration.includes('min')) {
@@ -5598,6 +5666,202 @@ function completeAllCallbacksForLead(leadId) {
     }, 500);
 }
 
+// Inline calendar+time picker for the lead profile Schedule Callback section
+window.initInlineCallbackCal = function(leadId) {
+    const calContainer = document.getElementById('inline-cb-calendar-' + leadId);
+    const tsContainer  = document.getElementById('inline-cb-timeslots-' + leadId);
+    if (!calContainer || !tsContainer) return;
+
+    const _sessD = JSON.parse(localStorage.getItem('session') || '{}');
+    const _usr = (_sessD.username || '').toLowerCase();
+
+    const today = new Date();
+    const tmrw = new Date(today);
+    tmrw.setDate(tmrw.getDate() + 1);
+    tmrw.setHours(10, 0, 0, 0);
+
+    let cM = tmrw.getMonth(), cY = tmrw.getFullYear();
+    let sDate = new Date(tmrw), sH = 10, sM = 0;
+    let uCBs = {};
+    const mN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const dN = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+    function _setInputs() {
+        const dateInp = document.getElementById('callback-date-' + leadId);
+        const timeInp = document.getElementById('callback-time-' + leadId);
+        if (dateInp) dateInp.value = sDate.getFullYear() + '-' + String(sDate.getMonth()+1).padStart(2,'0') + '-' + String(sDate.getDate()).padStart(2,'0');
+        if (timeInp) timeInp.value = String(sH).padStart(2,'0') + ':' + String(sM).padStart(2,'0');
+        _showSel();
+    }
+
+    function _showSel() {
+        const el = document.getElementById('inline-cb-selected-' + leadId);
+        if (!el) return;
+        const opts = { weekday:'short', month:'short', day:'numeric', year:'numeric' };
+        const ds = sDate.toLocaleDateString('en-US', opts);
+        const h12 = sH % 12 || 12, ap = sH < 12 ? 'AM' : 'PM';
+        el.textContent = ds + ' at ' + h12 + ':' + String(sM).padStart(2,'0') + ' ' + ap;
+    }
+
+    function _ft(h, m) {
+        return (h % 12 || 12) + ':' + String(m).padStart(2,'0') + ' ' + (h < 12 ? 'AM' : 'PM');
+    }
+
+    function _rCal() {
+        const first = new Date(cY, cM, 1);
+        const last = new Date(cY, cM + 1, 0);
+        const sd = first.getDay();
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<button type="button" class="icb-prev" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#0277bd;"><i class="fas fa-chevron-left"></i></button>' +
+            '<span style="font-weight:600;font-size:13px;color:#0277bd;">' + mN[cM] + ' ' + cY + '</span>' +
+            '<button type="button" class="icb-next" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#0277bd;"><i class="fas fa-chevron-right"></i></button>' +
+            '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;">';
+
+        dN.forEach(function(dn) {
+            html += '<div style="font-size:10px;font-weight:600;color:#9ca3af;padding:3px 0;">'+dn+'</div>';
+        });
+        for (let i = 0; i < sd; i++) html += '<div></div>';
+
+        for (let dd = 1; dd <= last.getDate(); dd++) {
+            const dk = cY+'-'+String(cM+1).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+            const hasCB = uCBs[dk] && uCBs[dk].length > 0;
+            const cnt = hasCB ? uCBs[dk].length : 0;
+            const isSel = sDate.getDate()===dd && sDate.getMonth()===cM && sDate.getFullYear()===cY;
+            const isTd = today.getDate()===dd && today.getMonth()===cM && today.getFullYear()===cY;
+            const isPast = new Date(cY, cM, dd, 23, 59) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+            let bg='transparent',clr='#374151',brd='2px solid transparent',fw='400',op='1';
+            if (isPast) { clr='#d1d5db'; op='0.5'; }
+            if (isTd && !isSel) { bg='#e0f2fe'; fw='700'; brd='2px solid #7dd3fc'; }
+            if (hasCB && !isSel) { bg='#fffbeb'; brd='2px solid #fbbf24'; }
+            if (isSel) { bg='#0277bd'; clr='white'; brd='2px solid #0277bd'; fw='600'; }
+
+            let dot = '';
+            if (hasCB) {
+                const dc = isSel ? 'white' : '#f59e0b';
+                dot = '<div style="position:absolute;bottom:0;left:50%;transform:translateX(-50%);display:flex;gap:1px;">';
+                for (let i = 0; i < Math.min(cnt, 3); i++) dot += '<div style="width:4px;height:4px;background:'+dc+';border-radius:50%;"></div>';
+                if (cnt > 3) dot += '<span style="font-size:7px;color:'+dc+';line-height:4px;">+</span>';
+                dot += '</div>';
+            }
+
+            html += '<div class="icb-day" data-date="'+dk+'" style="padding:4px 2px;cursor:'+(isPast?'default':'pointer')+';border-radius:6px;position:relative;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+fw+';font-size:12px;opacity:'+op+';min-height:28px;display:flex;align-items:center;justify-content:center;transition:background 0.15s;'+(isPast?'pointer-events:none;':'')+'"'+(hasCB?' title="'+cnt+' callback'+(cnt>1?'s':'')+'"':'')+'>'+dd+dot+'</div>';
+        }
+        html += '</div>';
+        calContainer.innerHTML = html;
+
+        calContainer.querySelectorAll('.icb-day').forEach(function(el) {
+            el.addEventListener('click', function() {
+                const p = el.dataset.date.split('-');
+                sDate = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]), sH, sM);
+                _setInputs();
+                _rCal();
+                _rTime();
+            });
+        });
+        var prevB = calContainer.querySelector('.icb-prev');
+        var nextB = calContainer.querySelector('.icb-next');
+        if (prevB) prevB.addEventListener('click', function(e) { e.preventDefault(); cM--; if(cM<0){cM=11;cY--;} _rCal(); });
+        if (nextB) nextB.addEventListener('click', function(e) { e.preventDefault(); cM++; if(cM>11){cM=0;cY++;} _rCal(); });
+    }
+
+    function _rTime() {
+        const dk = sDate.getFullYear()+'-'+String(sDate.getMonth()+1).padStart(2,'0')+'-'+String(sDate.getDate()).padStart(2,'0');
+        const dCBs = uCBs[dk] || [];
+
+        let html = '';
+        for (let h = 7; h <= 19; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                if (h === 19 && m > 0) break;
+                const isSel = sH===h && sM===m;
+                const match = dCBs.find(function(cb) {
+                    const ct = new Date(cb.dateTime);
+                    const ss = h*60+m, cm = ct.getHours()*60+ct.getMinutes();
+                    return cm >= ss && cm < ss+30;
+                });
+
+                let bg='#ffffff',clr='#374151',brd='1px solid #d1d5db';
+                if (isSel) { bg='#0277bd'; clr='white'; brd='1px solid #0277bd'; }
+                else if (match) { bg='#fef3c7'; brd='2px solid #f59e0b'; clr='#92400e'; }
+
+                let badge = '';
+                if (match && !isSel) {
+                    const nm = match.leadName || 'Booked';
+                    const sh = nm.length > 12 ? nm.substring(0,12)+'…' : nm;
+                    badge = '<div style="font-size:9px;color:#b45309;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;" title="'+nm.replace(/"/g,'&quot;')+'"><i class="fas fa-exclamation-triangle" style="font-size:8px;margin-right:2px;"></i>'+sh+'</div>';
+                }
+
+                html += '<div class="icts" data-h="'+h+'" data-m="'+m+'" style="padding:4px 8px;cursor:pointer;border-radius:5px;font-size:11px;margin-bottom:2px;background:'+bg+';color:'+clr+';border:'+brd+';transition:background 0.15s;"><div style="font-weight:'+(isSel||match?'600':'400')+';">'+_ft(h,m)+'</div>'+badge+'</div>';
+            }
+        }
+        tsContainer.innerHTML = html;
+
+        var selEl = tsContainer.querySelector('.icts[data-h="'+sH+'"][data-m="'+sM+'"]');
+        if (selEl) selEl.scrollIntoView({ block:'center', behavior:'smooth' });
+
+        tsContainer.querySelectorAll('.icts').forEach(function(el) {
+            el.addEventListener('click', function() {
+                sH = parseInt(el.dataset.h);
+                sM = parseInt(el.dataset.m);
+                sDate.setHours(sH, sM, 0, 0);
+                _setInputs();
+                _rTime();
+            });
+        });
+    }
+
+    // Fetch current user's callbacks
+    (async function() {
+        try {
+            const resp = await fetch('/api/callbacks');
+            const data = await resp.json();
+            const cbs = Array.isArray(data) ? data : (data.callbacks || []);
+            cbs.forEach(function(cb) {
+                const agent = (cb.assigned_agent || '').toLowerCase();
+                if (_usr && agent && agent !== _usr) return;
+                const dt = new Date(cb.date_time || cb.dateTime);
+                if (isNaN(dt.getTime())) return;
+                const dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                if (!uCBs[dk]) uCBs[dk] = [];
+                uCBs[dk].push({ dateTime: dt.toISOString(), leadName: cb.lead_name || 'Unknown', leadId: cb.lead_id });
+            });
+        } catch(e) { console.error('Error fetching callbacks for inline picker:', e); }
+
+        try {
+            var localCBs = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
+            var allLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            Object.entries(localCBs).forEach(function(entry) {
+                var lid = entry[0], cbs = entry[1];
+                var ld = allLeads.find(function(l) { return String(l.id) === String(lid); });
+                var agent = ld ? (ld.assignedTo || '').toLowerCase() : '';
+                if (_usr && agent && agent !== _usr) return;
+                (Array.isArray(cbs) ? cbs : []).forEach(function(cb) {
+                    if (cb.completed) return;
+                    var dt = new Date(cb.dateTime);
+                    if (isNaN(dt.getTime())) return;
+                    var dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                    if (!uCBs[dk]) uCBs[dk] = [];
+                    var exists = uCBs[dk].some(function(x) {
+                        return x.leadId === lid && Math.abs(new Date(x.dateTime) - dt) < 60000;
+                    });
+                    if (!exists) {
+                        uCBs[dk].push({ dateTime: dt.toISOString(), leadName: ld ? ld.name : 'Unknown', leadId: lid });
+                    }
+                });
+            });
+        } catch(e) { console.error('Error reading local callbacks for inline picker:', e); }
+
+        _rCal();
+        _rTime();
+    })();
+
+    // Initial render
+    _rCal();
+    _rTime();
+    _setInputs();
+};
+
 // Function to show callback scheduler
 function showCallbackScheduler(leadId) {
     console.log('📅 CALLBACK SCHEDULER: Opening scheduler for lead', leadId);
@@ -5633,54 +5897,210 @@ function showCallbackScheduler(leadId) {
         border-radius: 12px;
         padding: 30px;
         box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-        max-width: 450px;
+        max-width: 620px;
         margin: 0 20px;
     `;
 
-    // Get current date/time for default
+    // Calendar state
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0); // Default to 10 AM tomorrow
+    tomorrow.setHours(10, 0, 0, 0);
+    let calMonth = tomorrow.getMonth();
+    let calYear = tomorrow.getFullYear();
+    let selDate = new Date(tomorrow);
+    let selHour = 10;
+    let selMin = 0;
+    let userCBs = {};
+    const _monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const _dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
 
-    const dateStr = tomorrow.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM format
+    // Get current user for filtering callbacks
+    const _sessData = JSON.parse(localStorage.getItem('session') || '{}');
+    const _curUser = (_sessData.username || '').toLowerCase();
+
+    function _updateHidden() {
+        const y = selDate.getFullYear(), mo = String(selDate.getMonth()+1).padStart(2,'0'),
+              d = String(selDate.getDate()).padStart(2,'0'), h = String(selHour).padStart(2,'0'),
+              mi = String(selMin).padStart(2,'0');
+        const inp = modal.querySelector('#callback-datetime');
+        if (inp) inp.value = y+'-'+mo+'-'+d+'T'+h+':'+mi;
+        _updateDisplay();
+    }
+
+    function _updateDisplay() {
+        const el = modal.querySelector('#cb-selected-display');
+        if (!el) return;
+        const opts = { weekday:'short', month:'short', day:'numeric', year:'numeric' };
+        const ds = selDate.toLocaleDateString('en-US', opts);
+        const h12 = selHour % 12 || 12, ampm = selHour < 12 ? 'AM' : 'PM';
+        el.textContent = ds + ' at ' + h12 + ':' + String(selMin).padStart(2,'0') + ' ' + ampm;
+    }
+
+    function _fmtTime(h, m) {
+        return (h % 12 || 12) + ':' + String(m).padStart(2,'0') + ' ' + (h < 12 ? 'AM' : 'PM');
+    }
+
+    function _renderCal() {
+        const cal = modal.querySelector('#cb-calendar');
+        if (!cal) return;
+        const first = new Date(calYear, calMonth, 1);
+        const last = new Date(calYear, calMonth + 1, 0);
+        const startDay = first.getDay();
+        const today = new Date();
+
+        let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+            '<button type="button" class="cal-prev-btn" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#6b7280;"><i class="fas fa-chevron-left"></i></button>' +
+            '<span style="font-weight:600;font-size:14px;color:#1f2937;">' + _monthNames[calMonth] + ' ' + calYear + '</span>' +
+            '<button type="button" class="cal-next-btn" style="background:none;border:none;cursor:pointer;padding:4px 8px;font-size:14px;color:#6b7280;"><i class="fas fa-chevron-right"></i></button>' +
+            '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;">';
+
+        _dayNames.forEach(function(dn) {
+            html += '<div style="font-size:11px;font-weight:600;color:#9ca3af;padding:4px 0;">'+dn+'</div>';
+        });
+        for (let i = 0; i < startDay; i++) html += '<div></div>';
+
+        for (let dd = 1; dd <= last.getDate(); dd++) {
+            const dk = calYear+'-'+String(calMonth+1).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+            const hasCB = userCBs[dk] && userCBs[dk].length > 0;
+            const cbCount = hasCB ? userCBs[dk].length : 0;
+            const isSel = selDate.getDate()===dd && selDate.getMonth()===calMonth && selDate.getFullYear()===calYear;
+            const isToday = today.getDate()===dd && today.getMonth()===calMonth && today.getFullYear()===calYear;
+            const isPast = new Date(calYear, calMonth, dd, 23, 59) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+            let bg='transparent',clr='#374151',brd='2px solid transparent',fw='400',op='1';
+            if (isPast) { clr='#d1d5db'; op='0.5'; }
+            if (isToday && !isSel) { bg='#f0f9ff'; fw='700'; brd='2px solid #93c5fd'; }
+            if (hasCB && !isSel) { bg='#fffbeb'; brd='2px solid #fbbf24'; }
+            if (isSel) { bg='#3b82f6'; clr='white'; brd='2px solid #3b82f6'; fw='600'; }
+
+            let dot = '';
+            if (hasCB) {
+                const dotClr = isSel ? 'white' : '#f59e0b';
+                dot = '<div style="position:absolute;bottom:0px;left:50%;transform:translateX(-50%);display:flex;gap:1px;">';
+                for (let i = 0; i < Math.min(cbCount, 3); i++) dot += '<div style="width:4px;height:4px;background:'+dotClr+';border-radius:50%;"></div>';
+                if (cbCount > 3) dot += '<span style="font-size:7px;color:'+dotClr+';line-height:4px;">+</span>';
+                dot += '</div>';
+            }
+
+            html += '<div class="cal-day" data-date="'+dk+'" style="padding:4px 2px;cursor:'+(isPast?'default':'pointer')+';border-radius:6px;position:relative;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+fw+';font-size:13px;opacity:'+op+';min-height:30px;display:flex;align-items:center;justify-content:center;transition:background 0.15s;'+(isPast?'pointer-events:none;':'')+'"'+(hasCB?' title="'+cbCount+' callback'+(cbCount>1?'s':'')+' scheduled"':'')+'>'+dd+dot+'</div>';
+        }
+        html += '</div>';
+        cal.innerHTML = html;
+
+        cal.querySelectorAll('.cal-day').forEach(function(el) {
+            el.addEventListener('click', function() {
+                const p = el.dataset.date.split('-');
+                selDate = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]), selHour, selMin);
+                _updateHidden();
+                _renderCal();
+                _renderTime();
+            });
+        });
+        cal.querySelector('.cal-prev-btn').addEventListener('click', function(e) {
+            e.preventDefault(); calMonth--; if(calMonth<0){calMonth=11;calYear--;} _renderCal();
+        });
+        cal.querySelector('.cal-next-btn').addEventListener('click', function(e) {
+            e.preventDefault(); calMonth++; if(calMonth>11){calMonth=0;calYear++;} _renderCal();
+        });
+    }
+
+    function _renderTime() {
+        const container = modal.querySelector('#cb-timeslots');
+        if (!container) return;
+        const dk = selDate.getFullYear()+'-'+String(selDate.getMonth()+1).padStart(2,'0')+'-'+String(selDate.getDate()).padStart(2,'0');
+        const dayCBs = userCBs[dk] || [];
+
+        let html = '';
+        for (let h = 7; h <= 19; h++) {
+            for (let m = 0; m < 60; m += 30) {
+                if (h === 19 && m > 0) break;
+                const isSel = selHour===h && selMin===m;
+
+                // Check for callback in this 30-min window
+                const match = dayCBs.find(function(cb) {
+                    const ct = new Date(cb.dateTime);
+                    const slotStart = h*60+m, cbMin = ct.getHours()*60+ct.getMinutes();
+                    return cbMin >= slotStart && cbMin < slotStart+30;
+                });
+
+                let bg='#f9fafb',clr='#374151',brd='1px solid #e5e7eb';
+                if (isSel) { bg='#3b82f6'; clr='white'; brd='1px solid #3b82f6'; }
+                else if (match) { bg='#fef3c7'; brd='2px solid #f59e0b'; clr='#92400e'; }
+
+                let badge = '';
+                if (match && !isSel) {
+                    const nm = match.leadName || 'Booked';
+                    const short = nm.length > 14 ? nm.substring(0,14)+'…' : nm;
+                    badge = '<div style="font-size:9px;color:#b45309;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;" title="'+nm.replace(/"/g,'&quot;')+'"><i class="fas fa-exclamation-triangle" style="font-size:8px;margin-right:2px;"></i>'+short+'</div>';
+                }
+
+                html += '<div class="ts" data-h="'+h+'" data-m="'+m+'" style="padding:5px 8px;cursor:pointer;border-radius:5px;font-size:12px;margin-bottom:3px;background:'+bg+';color:'+clr+';border:'+brd+';transition:background 0.15s;"><div style="font-weight:'+(isSel||match?'600':'400')+';">'+_fmtTime(h,m)+'</div>'+badge+'</div>';
+            }
+        }
+        container.innerHTML = html;
+
+        // Scroll to selected time
+        const selEl = container.querySelector('.ts[data-h="'+selHour+'"][data-m="'+selMin+'"]');
+        if (selEl) selEl.scrollIntoView({ block:'center', behavior:'smooth' });
+
+        container.querySelectorAll('.ts').forEach(function(el) {
+            el.addEventListener('click', function() {
+                selHour = parseInt(el.dataset.h);
+                selMin = parseInt(el.dataset.m);
+                selDate.setHours(selHour, selMin, 0, 0);
+                _updateHidden();
+                _renderTime();
+            });
+        });
+    }
+
+    const dateStr = tomorrow.toISOString().slice(0, 16);
 
     modal.innerHTML = `
-        <div style="margin-bottom: 25px; text-align: center;">
-            <div style="width: 60px; height: 60px; background: #dbeafe; border-radius: 50%; margin: 0 auto 15px; display: flex; align-items: center; justify-content: center;">
-                <i class="fas fa-calendar-alt" style="font-size: 24px; color: #3b82f6;"></i>
+        <div style="margin-bottom: 16px; text-align: center;">
+            <div style="width: 50px; height: 50px; background: #dbeafe; border-radius: 50%; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center;">
+                <i class="fas fa-calendar-alt" style="font-size: 20px; color: #3b82f6;"></i>
             </div>
-            <h3 style="margin: 0 0 10px 0; color: #1f2937; font-size: 20px; font-weight: 600;">Schedule Next Call</h3>
-            <p style="margin: 0 0 10px 0; color: #6b7280; font-size: 14px;">
+            <h3 style="margin: 0 0 6px 0; color: #1f2937; font-size: 18px; font-weight: 600;">Schedule Next Call</h3>
+            <p style="margin: 0; color: #6b7280; font-size: 13px;">
                 Lead: <strong>${lead.name}</strong>
             </p>
         </div>
 
-        <div style="margin-bottom: 15px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                Quick Schedule:
-            </label>
-            <div style="display: flex; gap: 8px;">
-                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+1);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+1 Day</button>
-                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+2);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+2 Days</button>
-                <button type="button" onclick="(function(){var d=new Date();d.setDate(d.getDate()+3);d.setHours(10,0,0,0);document.getElementById('callback-datetime').value=d.toISOString().slice(0,16);this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='#f3f4f6');this.style.background='#dbeafe';}).call(this)" style="flex:1;padding:8px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:13px;background:#f3f4f6;color:#374151;">+3 Days</button>
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 13px;">Quick Schedule:</label>
+            <div style="display: flex; gap: 6px;">
+                <button type="button" class="qs-btn" data-days="1" style="flex:1;padding:7px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;background:#f3f4f6;color:#374151;transition:background 0.15s;">+1 Day</button>
+                <button type="button" class="qs-btn" data-days="2" style="flex:1;padding:7px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;background:#f3f4f6;color:#374151;transition:background 0.15s;">+2 Days</button>
+                <button type="button" class="qs-btn" data-days="3" style="flex:1;padding:7px;border:2px solid #e5e7eb;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;background:#f3f4f6;color:#374151;transition:background 0.15s;">+3 Days</button>
             </div>
         </div>
 
-        <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                Callback Date & Time:
-            </label>
-            <input type="datetime-local" id="callback-datetime" value="${dateStr}"
-                   style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />
+        <input type="hidden" id="callback-datetime" value="${dateStr}" />
+
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 13px;">Callback Date & Time:</label>
+            <div style="display: flex; gap: 10px; border: 2px solid #e5e7eb; border-radius: 10px; padding: 10px; background: #fafafa;">
+                <div id="cb-calendar" style="flex: 1; min-width: 0;"></div>
+                <div style="width: 1px; background: #e5e7eb;"></div>
+                <div id="cb-timeslots" style="width: 140px; max-height: 250px; overflow-y: auto; padding-right: 4px;"></div>
+            </div>
+            <div id="cb-selected-display" style="margin-top: 8px; text-align: center; font-weight: 600; color: #3b82f6; font-size: 14px;"></div>
+            <div id="cb-legend" style="display:flex;align-items:center;gap:14px;margin-top:5px;justify-content:center;">
+                <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;">
+                    <div style="width:10px;height:10px;background:#fffbeb;border:2px solid #fbbf24;border-radius:3px;"></div> Has callbacks
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;">
+                    <div style="width:10px;height:10px;background:#fef3c7;border:2px solid #f59e0b;border-radius:3px;"></div> Time booked
+                </div>
+            </div>
         </div>
 
-        <div style="margin-bottom: 25px;">
-            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
-                Notes (optional):
-            </label>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 13px;">Notes (optional):</label>
             <textarea id="callback-notes" placeholder="Add any notes for the callback..."
-                      style="width: 100%; height: 60px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+                      style="width: 100%; height: 50px; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 13px; resize: vertical; box-sizing: border-box;"></textarea>
         </div>
 
         <div style="display: flex; gap: 12px; justify-content: center;">
@@ -5701,8 +6121,82 @@ function showCallbackScheduler(leadId) {
     modalOverlay.appendChild(modal);
     document.body.appendChild(modalOverlay);
 
+    // Quick schedule buttons
+    modal.querySelectorAll('.qs-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const days = parseInt(this.dataset.days);
+            const d = new Date();
+            d.setDate(d.getDate() + days);
+            d.setHours(10, 0, 0, 0);
+            selDate = d;
+            selHour = 10;
+            selMin = 0;
+            calMonth = d.getMonth();
+            calYear = d.getFullYear();
+            _updateHidden();
+            _renderCal();
+            _renderTime();
+            modal.querySelectorAll('.qs-btn').forEach(function(b) { b.style.background='#f3f4f6'; });
+            this.style.background = '#dbeafe';
+        });
+    });
+
+    // Fetch current user's callbacks then render calendar
+    (async function() {
+        try {
+            const resp = await fetch('/api/callbacks');
+            const data = await resp.json();
+            const cbs = Array.isArray(data) ? data : (data.callbacks || []);
+            cbs.forEach(function(cb) {
+                const agent = (cb.assigned_agent || '').toLowerCase();
+                // Only show callbacks for the current signed-in user
+                if (_curUser && agent && agent !== _curUser) return;
+                const dt = new Date(cb.date_time || cb.dateTime);
+                if (isNaN(dt.getTime())) return;
+                const dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                if (!userCBs[dk]) userCBs[dk] = [];
+                userCBs[dk].push({ dateTime: dt.toISOString(), leadName: cb.lead_name || 'Unknown', leadId: cb.lead_id });
+            });
+        } catch(e) { console.error('Error fetching callbacks for picker:', e); }
+
+        // Also check localStorage for any unsynced callbacks
+        try {
+            const localCBs = JSON.parse(localStorage.getItem('scheduled_callbacks') || '{}');
+            const allLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            Object.entries(localCBs).forEach(function(entry) {
+                const lid = entry[0], cbs = entry[1];
+                const ld = allLeads.find(function(l) { return String(l.id) === String(lid); });
+                const agent = ld ? (ld.assignedTo || '').toLowerCase() : '';
+                // Only include if assigned to current user (or unassigned)
+                if (_curUser && agent && agent !== _curUser) return;
+                (Array.isArray(cbs) ? cbs : []).forEach(function(cb) {
+                    if (cb.completed) return;
+                    const dt = new Date(cb.dateTime);
+                    if (isNaN(dt.getTime())) return;
+                    const dk = dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+                    if (!userCBs[dk]) userCBs[dk] = [];
+                    const exists = userCBs[dk].some(function(x) {
+                        return x.leadId === lid && Math.abs(new Date(x.dateTime) - dt) < 60000;
+                    });
+                    if (!exists) {
+                        userCBs[dk].push({ dateTime: dt.toISOString(), leadName: ld ? ld.name : 'Unknown', leadId: lid });
+                    }
+                });
+            });
+        } catch(e) { console.error('Error reading local callbacks:', e); }
+
+        // Re-render with callback data
+        _renderCal();
+        _renderTime();
+    })();
+
+    // Initial render (before callback data loads)
+    _renderCal();
+    _renderTime();
+    _updateDisplay();
+
     // Handle save callback
-    modal.querySelector('#save-callback').addEventListener('click', () => {
+    modal.querySelector('#save-callback').addEventListener('click', function() {
         const dateTime = modal.querySelector('#callback-datetime').value;
         const notes = modal.querySelector('#callback-notes').value;
 
@@ -5711,11 +6205,23 @@ function showCallbackScheduler(leadId) {
             return;
         }
 
-        // Save the callback
         saveCallbackToLocalStorageAndServer(leadId, dateTime, notes);
         document.body.removeChild(modalOverlay);
     });
 
+    // Escape key to close
+    const _handleEsc = function(e) {
+        if (e.key === 'Escape') {
+            if (document.body.contains(modalOverlay)) document.body.removeChild(modalOverlay);
+            document.removeEventListener('keydown', _handleEsc);
+        }
+    };
+    document.addEventListener('keydown', _handleEsc);
+
+    // Click outside to close
+    modalOverlay.addEventListener('click', function(e) {
+        if (e.target === modalOverlay) document.body.removeChild(modalOverlay);
+    });
 }
 
 // Function to save callback
@@ -10046,7 +10552,31 @@ window.displayScheduledCallbacks = async function(leadId) {
     // Load from localStorage first (legacy storage)
     const callbacksKey = 'scheduled_callbacks';
     const localCallbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
-    const localLeadCallbacks = localCallbacks[leadId] || [];
+    let localLeadCallbacks = localCallbacks[leadId] || [];
+
+    // Also check the lead's own scheduledCallbacks array (set by ViciDial sync)
+    try {
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const lead = leads.find(l => String(l.id) === String(leadId));
+        if (lead && Array.isArray(lead.scheduledCallbacks) && lead.scheduledCallbacks.length > 0) {
+            lead.scheduledCallbacks.forEach(sc => {
+                // Convert ViciDial format to display format
+                const converted = {
+                    id: sc.id,
+                    dateTime: sc.datetime,
+                    notes: sc.notes || '',
+                    completed: false,
+                    importedFromVicidial: true,
+                    createdAt: sc.datetime
+                };
+                // Don't add duplicates
+                if (!localLeadCallbacks.find(lc => String(lc.id) === String(sc.id))) {
+                    localLeadCallbacks.push(converted);
+                    console.log(`📅 VICIDIAL CALLBACK: Found ViciDial-synced callback for lead ${leadId}: ${sc.date} ${sc.time}`);
+                }
+            });
+        }
+    } catch (e) { /* ignore parse errors */ }
 
     // Load from server/database
     let serverCallbacks = [];
@@ -10795,6 +11325,8 @@ async function sendCallbackWarningEmail(lead, callback) {
 
 // Function to update table cell when callback is due
 function updateTableForDueCallback(leadId, lead) {
+    // CSR users: skip callback table updates
+    try { if ((JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr') return; } catch(e) {}
     console.log('🔍 CALLBACK DEBUG: Attempting to update table for lead:', leadId, lead.name);
 
     const tableBody = document.getElementById('leadsTableBody');
@@ -10955,6 +11487,8 @@ function startCallbackMonitoring() {
 
 // Function to quickly check and restore callback messages
 function checkAndRestoreCallbackMessages() {
+    // CSR users: skip callback message restoration
+    try { if ((JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr') return; } catch(e) {}
     const callbacksKey = 'scheduled_callbacks';
     const callbacks = JSON.parse(localStorage.getItem(callbacksKey) || '{}');
     const now = new Date();
@@ -11727,6 +12261,8 @@ protectedFunctions.calculateAndUpdateResponseRate = function(leadId) {
     console.log(`📈 Calculated ratio: ${ratio} (${attempts}:${connected})`);
 
     // Determine new response rate based on ratio
+    // When connected > 0: use attempts-per-connection ratio
+    // When connected === 0: use raw attempt count
     if (connected > 0 && ratio <= 2) {
         // 2 or fewer attempts per connection = High response rate
         newPriority = 'High';
@@ -11748,12 +12284,21 @@ protectedFunctions.calculateAndUpdateResponseRate = function(leadId) {
         newPriority = 'Low';
         shouldClose = true;
         console.log('🚨 VERY LOW response rate: ≥6:1 ratio - suggesting closure');
-    } else if (attempts >= 6 && connected === 0) {
+    } else if (connected === 0 && attempts >= 6) {
         // 6+ attempts with no connections = Very low pickup rate
         newPriority = 'Low';
         shouldClose = true;
         console.log('🚨 VERY LOW pickup rate: 6+ attempts with no connections');
+    } else if (connected === 0 && attempts >= 4) {
+        // 4-5 attempts with no connections = Low pickup rate
+        newPriority = 'Low';
+        console.log('🔴 Low pickup rate: 4-5 attempts with no connections');
+    } else if (connected === 0 && attempts >= 3) {
+        // 3 attempts with no connections = Lower pickup rate
+        newPriority = 'Lower';
+        console.log('⚠️ Lower pickup rate: 3 attempts with no connections');
     }
+    // 1-2 attempts with 0 connected = Mid (default, no change needed)
 
     // Update priority if it changed
     if (newPriority !== lead.priority) {
@@ -11785,6 +12330,74 @@ protectedFunctions.calculateAndUpdateResponseRate = function(leadId) {
         protectedFunctions.showLowPickupRatePopup(leadId, attempts);
     }
 };
+
+// Retroactive response rate migration — fix all leads whose priority doesn't match their ratio
+(function migrateResponseRates() {
+    const MIGRATION_KEY = 'response_rate_migration_v2';
+    if (sessionStorage.getItem(MIGRATION_KEY)) return; // Only run once per session
+    sessionStorage.setItem(MIGRATION_KEY, '1');
+
+    setTimeout(function() {
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        if (!leads.length) return;
+
+        let updated = 0;
+        leads.forEach(function(lead) {
+            const reachOut = lead.reachOut || {};
+            const attempts = parseInt(reachOut.callAttempts) || 0;
+            const connected = parseInt(reachOut.callsConnected) || 0;
+            if (attempts === 0) return;
+
+            const ratio = connected > 0 ? attempts / connected : attempts;
+            let correctPriority = lead.priority || 'Mid';
+
+            if (connected > 0 && ratio <= 2) {
+                correctPriority = 'High';
+            } else if (connected > 0 && ratio <= 3) {
+                correctPriority = 'Mid';
+            } else if (connected > 0 && ratio <= 4) {
+                correctPriority = 'Lower';
+            } else if (connected > 0 && ratio <= 5) {
+                correctPriority = 'Low';
+            } else if (connected > 0 && ratio >= 6) {
+                correctPriority = 'Low';
+            } else if (connected === 0 && attempts >= 6) {
+                correctPriority = 'Low';
+            } else if (connected === 0 && attempts >= 4) {
+                correctPriority = 'Low';
+            } else if (connected === 0 && attempts >= 3) {
+                correctPriority = 'Lower';
+            }
+            // 1-2 attempts with 0 connected stays Mid (default)
+
+            if (correctPriority !== lead.priority) {
+                console.log(`📊 MIGRATION: Lead ${lead.id} (${lead.name || 'unknown'}) — ${attempts}:${connected} ratio → priority "${lead.priority}" ➜ "${correctPriority}"`);
+                lead.priority = correctPriority;
+                updated++;
+            }
+        });
+
+        if (updated > 0) {
+            localStorage.setItem('insurance_leads', JSON.stringify(leads));
+            console.log(`✅ MIGRATION: Updated response rate for ${updated} lead(s)`);
+            // Sync updated leads to server
+            leads.forEach(function(lead) {
+                const reachOut = lead.reachOut || {};
+                const attempts = parseInt(reachOut.callAttempts) || 0;
+                if (attempts === 0) return;
+                fetch('/api/leads/' + lead.id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ priority: lead.priority })
+                }).catch(function() {});
+            });
+            // Refresh table if visible
+            if (window.displayLeads) window.displayLeads();
+        } else {
+            console.log('✅ MIGRATION: All lead response rates already correct');
+        }
+    }, 3000); // Delay to let page finish loading
+})();
 
 // Popup for very low pickup rate (6+ attempts with no connections)
 protectedFunctions.showLowPickupRatePopup = function(leadId, attempts) {
