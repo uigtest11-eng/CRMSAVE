@@ -10661,6 +10661,63 @@ setTimeout(updateLeadsNavBadge, 3000);
 setTimeout(updateLeadsNavBadge, 6000);
 setInterval(updateLeadsNavBadge, 30000); // Keep synced every 30s
 
+// ── Clients nav badge: combined count of renewals needing attention ──────────
+async function updateClientsNavBadge() {
+    const badge = document.getElementById('clients-renewal-badge');
+    if (!badge) return;
+    try {
+        const userData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const currentUser = userData.username ? userData.username.charAt(0).toUpperCase() + userData.username.slice(1).toLowerCase() : '';
+        const isAdmin = userData.isAdmin === true || userData.role === 'admin';
+        const isCsr = (userData.role || '') === 'csr';
+
+        let allPolicies;
+        try { allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { allPolicies = []; }
+        if (!Array.isArray(allPolicies)) allPolicies = [];
+
+        // Apply same agent filter as renewals view
+        if (!isAdmin && !isCsr && currentUser) {
+            allPolicies = allPolicies.filter(p => {
+                const a = (p.assignedTo || p.agent || p.assignedAgent || p.producer || '').toLowerCase();
+                return a === currentUser.toLowerCase();
+            });
+        }
+
+        // Use cached completions or fetch once
+        let completions = window._renewalCompletionsCache || null;
+        if (!completions) {
+            try {
+                const resp = await fetch('/api/renewal-completions');
+                if (resp.ok) { completions = await resp.json(); window._renewalCompletionsCache = completions; }
+            } catch(e) {}
+        }
+        completions = completions || {};
+
+        const today = new Date();
+        let count30to45 = 0, countMonth = 0;
+        allPolicies.forEach(p => {
+            if (!p.expirationDate) return;
+            const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+            if (!completions[p.id]) {
+                if (days >= 30 && days <= 45) count30to45++;
+                if (days >= 0 && days < 30) countMonth++;
+            }
+        });
+
+        const total = count30to45 + countMonth;
+        if (total > 0) {
+            badge.textContent = total;
+            badge.style.setProperty('display', 'inline-block', 'important');
+        } else {
+            badge.style.setProperty('display', 'none', 'important');
+        }
+    } catch(e) { /* ignore */ }
+}
+window.updateClientsNavBadge = updateClientsNavBadge;
+setTimeout(updateClientsNavBadge, 800);
+setTimeout(updateClientsNavBadge, 2500);
+setInterval(updateClientsNavBadge, 60000); // Refresh every minute
+
 // Function to update a specific lead row in the table without refreshing the entire table
 function updateLeadRowInTable(leadId, updatedLead) {
     const tableBody = document.getElementById('leadsTableBody');
