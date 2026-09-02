@@ -10705,11 +10705,14 @@ async function updateClientsNavBadge() {
         });
 
         const total = count30to45 + countMonth;
+        const subBadge = document.getElementById('renewals-sub-badge');
         if (total > 0) {
             badge.textContent = total;
             badge.style.setProperty('display', 'inline-block', 'important');
+            if (subBadge) { subBadge.textContent = total; subBadge.style.setProperty('display', 'inline-block', 'important'); }
         } else {
             badge.style.setProperty('display', 'none', 'important');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
         }
     } catch(e) { /* ignore */ }
 }
@@ -13786,15 +13789,17 @@ async function loadRenewalTaskBadges() {
 
     // Clients nav badge = combined total (30-45 unstarted + month view not-done)
     const clientsNavBadge = document.getElementById('clients-renewal-badge');
-    if (clientsNavBadge) {
-        const combinedTotal = noCompletedCount + monthNotDoneCount;
+    const renewalsSubBadge = document.getElementById('renewals-sub-badge');
+    const combinedTotal = noCompletedCount + monthNotDoneCount;
+    [clientsNavBadge, renewalsSubBadge].forEach(b => {
+        if (!b) return;
         if (combinedTotal > 0) {
-            clientsNavBadge.textContent = combinedTotal;
-            clientsNavBadge.style.setProperty('display', 'inline-block', 'important');
+            b.textContent = combinedTotal;
+            b.style.setProperty('display', 'inline-block', 'important');
         } else {
-            clientsNavBadge.style.setProperty('display', 'none', 'important');
+            b.style.setProperty('display', 'none', 'important');
         }
-    }
+    });
 
     // Update card badges and handle view-specific logic
     const is30to45View = !!document.querySelector('.thirty45-view');
