@@ -10644,13 +10644,20 @@ function updateLeadsNavBadge() {
             });
         }
 
+        const subBadge = document.getElementById('active-leads-sub-badge');
         if (count > 0) {
             badge.textContent = count;
             badge.style.setProperty('display', 'inline-block', 'important');
+            if (subBadge) { subBadge.textContent = count; subBadge.style.setProperty('display', 'inline-block', 'important'); }
         } else {
             badge.style.setProperty('display', 'none', 'important');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
         }
-    } catch (e) { badge.style.setProperty('display', 'none', 'important'); }
+    } catch (e) {
+        badge.style.setProperty('display', 'none', 'important');
+        const subBadge = document.getElementById('active-leads-sub-badge');
+        if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+    }
 }
 window.updateLeadsNavBadge = updateLeadsNavBadge;
 
