@@ -10636,7 +10636,7 @@ function updateLeadsNavBadge() {
 
         let count = 0;
         if (isCsr) {
-            visibleLeads.forEach(l => { if (l.csrTodo && l.csrTodo.trim()) count++; });
+            visibleLeads.forEach(l => { if (l.csrTodo && l.csrTodo.trim() && !l.csrTodoDone) count++; });
         } else {
             const actionMap = {
                 'new': 'Assign Stage', 'contact_attempted': 'Reach out',
