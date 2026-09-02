@@ -829,13 +829,16 @@ protectedFunctions.createEnhancedProfile = function(lead) {
             // Regular stage update
             updateLeadStage(leadId, value);
 
-            // Auto-populate CSR To Do when Loss Runs Received is selected
-            if (value === 'loss_runs_received') {
+            // Auto-populate CSR To Do based on stage
+            const csrAutoFill = {
+                'loss_runs_received': 'Prepare App',
+                'info_received': 'Prepare Quote'
+            };
+            if (csrAutoFill[value]) {
                 const csrTodoEl = document.getElementById('csr-todo-' + leadId);
                 if (csrTodoEl && !csrTodoEl.value.trim()) {
-                    csrTodoEl.value = 'Prepare App';
-                    // Save it immediately
-                    if (window.saveCsrTodo) saveCsrTodo(leadId, 'Prepare App');
+                    csrTodoEl.value = csrAutoFill[value];
+                    if (window.saveCsrTodo) saveCsrTodo(leadId, csrAutoFill[value]);
                 }
             }
         }
