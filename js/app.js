@@ -13648,6 +13648,8 @@ function render30to45View(policies, isAdmin = false) {
 
 async function loadRenewalTaskBadges() {
     const today = new Date();
+    const _badgeSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsrBadge = (_badgeSess.role || '') === 'csr';
 
     // Use completions already fetched by restoreRenewalHighlighting (which runs first).
     // This avoids a duplicate API call and prevents count mismatch if the second fetch fails.
@@ -13725,6 +13727,18 @@ async function loadRenewalTaskBadges() {
         }
     }
 
+    // Clients nav badge = combined total (30-45 unstarted + month view not-done)
+    const clientsNavBadge = document.getElementById('clients-renewal-badge');
+    if (clientsNavBadge) {
+        const combinedTotal = noCompletedCount + monthNotDoneCount;
+        if (combinedTotal > 0) {
+            clientsNavBadge.textContent = combinedTotal;
+            clientsNavBadge.style.setProperty('display', 'inline-block', 'important');
+        } else {
+            clientsNavBadge.style.setProperty('display', 'none', 'important');
+        }
+    }
+
     // Update card badges and handle view-specific logic
     const is30to45View = !!document.querySelector('.thirty45-view');
     const isMonthView = !!document.querySelector('.month-view');
@@ -13747,16 +13761,27 @@ async function loadRenewalTaskBadges() {
             } catch (e) { return; }
         }
 
-        // Blue card badge: show ! when NO tasks started yet, hide once any task is checked
+        // Blue card badge:
+        //   CSR view  → show ! when NO tasks started (attention indicator), hide once any task checked
+        //   Agent view → show completed task count (progress indicator)
         const completedCount = tasks ? tasks.filter(t => t.completed).length : 0;
         const cardBadge = document.getElementById(`task-badge-${policyId}`);
         if (cardBadge) {
-            const noneStarted = completedCount === 0 && !renewalCompletions[policyId];
-            if (noneStarted) {
-                cardBadge.textContent = '!';
-                cardBadge.style.display = 'inline-block';
+            if (_isCsrBadge) {
+                const noneStarted = completedCount === 0 && !renewalCompletions[policyId];
+                if (noneStarted) {
+                    cardBadge.textContent = '!';
+                    cardBadge.style.display = 'inline-block';
+                } else {
+                    cardBadge.style.display = 'none';
+                }
             } else {
-                cardBadge.style.display = 'none';
+                if (completedCount > 0) {
+                    cardBadge.textContent = completedCount;
+                    cardBadge.style.display = 'inline-block';
+                } else {
+                    cardBadge.style.display = 'none';
+                }
             }
         }
 
