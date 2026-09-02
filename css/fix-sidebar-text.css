@@ -84,6 +84,44 @@ main > a {
     display: none !important;
 }
 
+/* === Clients nav renewal badge === */
+#clients-nav-folder {
+    overflow: visible !important;
+    position: relative;
+}
+#clients-nav-folder > a {
+    position: relative !important;
+    overflow: visible !important;
+}
+/* Minimized: absolute overlay on the icon */
+.sidebar:not(:hover) #clients-renewal-badge {
+    position: absolute !important;
+    top: 4px !important;
+    right: 4px !important;
+    left: auto !important;
+    width: auto !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    font-size: 11px !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    margin-left: 0 !important;
+}
+/* Expanded: inline after Clients text */
+.sidebar:hover #clients-renewal-badge {
+    position: static !important;
+    left: auto !important;
+    width: auto !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    font-size: 11px !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    margin-left: 6px !important;
+}
+
 /* === Leads nav todo badge === */
 #leads-nav-folder {
     overflow: visible !important;
