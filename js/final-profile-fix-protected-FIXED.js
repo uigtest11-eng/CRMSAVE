@@ -828,6 +828,16 @@ protectedFunctions.createEnhancedProfile = function(lead) {
         } else {
             // Regular stage update
             updateLeadStage(leadId, value);
+
+            // Auto-populate CSR To Do when Loss Runs Received is selected
+            if (value === 'loss_runs_received') {
+                const csrTodoEl = document.getElementById('csr-todo-' + leadId);
+                if (csrTodoEl && !csrTodoEl.value.trim()) {
+                    csrTodoEl.value = 'Prepare App';
+                    // Save it immediately
+                    if (window.saveCsrTodo) saveCsrTodo(leadId, 'Prepare App');
+                }
+            }
         }
     };
 
@@ -7956,9 +7966,16 @@ window.refreshQuotesDisplay = async function(leadId) {
     const geicoQuote = leadQuotes.find(quote =>
         (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('geico')
     );
+    const corgiQuote = leadQuotes.find(quote =>
+        (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('corgi')
+    );
+    const starMutualQuote = leadQuotes.find(quote =>
+        (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('star mutual')
+    );
     const otherQuotes = leadQuotes.filter(quote => {
         const carrier = (quote.insuranceCarrier || quote.carrier || '').toLowerCase();
-        return !carrier.includes('progressive') && !carrier.includes('geico');
+        return !carrier.includes('progressive') && !carrier.includes('geico') &&
+               !carrier.includes('corgi') && !carrier.includes('star mutual');
     });
 
     // Function to create quote HTML
@@ -8058,7 +8075,7 @@ window.refreshQuotesDisplay = async function(leadId) {
                 borderColor = '#ef4444';
                 opacity = '1';
                 statusDisplay = 'block';
-                statusText = 'Ineligible';
+                statusText = effectiveStatus.reason || 'Ineligible';
                 statusColor = '#dc2626';
             } else if (effectiveStatus.status === 'aor_required') {
                 bgColor = '#fef2f2';
@@ -8123,6 +8140,30 @@ window.refreshQuotesDisplay = async function(leadId) {
     } else {
         const geicoStatus = placeholderStates.geico || null;
         quotesHTML += createPlaceholderHTML('Geico', geicoStatus);
+    }
+
+    // Corgi (either real quote or placeholder)
+    if (corgiQuote) {
+        quotesHTML += createQuoteHTML(corgiQuote, ++quoteCounter);
+    } else {
+        const corgiStatus = placeholderStates.corgi || null;
+        quotesHTML += createPlaceholderHTML('Corgi', corgiStatus);
+    }
+
+    // Star Mutual — ineligible if lead state is not Ohio
+    if (starMutualQuote) {
+        quotesHTML += createQuoteHTML(starMutualQuote, ++quoteCounter);
+    } else {
+        let starMutualStatus = placeholderStates['star mutual'] || null;
+        // Auto-mark ineligible if state is not Ohio
+        const allLeadsForState = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const thisLeadForState = allLeadsForState.find(l => String(l.id) === String(leadId));
+        const leadStateRaw = ((thisLeadForState && thisLeadForState.state) || '').trim().toUpperCase();
+        const isOhio = leadStateRaw === 'OH' || leadStateRaw === 'OHIO';
+        if (!isOhio && (!starMutualStatus || starMutualStatus.status !== 'eligible')) {
+            starMutualStatus = { status: 'ineligible', reason: 'Market Ineligible — Ohio only' };
+        }
+        quotesHTML += createPlaceholderHTML('Star Mutual', starMutualStatus);
     }
 
     // Other quotes
