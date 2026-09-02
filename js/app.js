@@ -10620,9 +10620,16 @@ function updateLeadsNavBadge() {
     const badge = document.getElementById('leads-todo-badge');
     if (!badge) return;
     try {
-        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
         const userData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
         const isCsr = (userData.role || '') === 'csr';
+        // Badges are CSR-only — hide immediately for admins/producers
+        if (!isCsr) {
+            badge.style.setProperty('display', 'none', 'important');
+            const subBadge = document.getElementById('active-leads-sub-badge');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+            return;
+        }
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
         const currentUser = userData.username ? userData.username.charAt(0).toUpperCase() + userData.username.slice(1).toLowerCase() : '';
 
         const visibleLeads = leads.filter(l => !l.archived && l.stage !== 'closed' && l.stage !== 'Closed');
@@ -10674,9 +10681,16 @@ async function updateClientsNavBadge() {
     if (!badge) return;
     try {
         const userData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const isCsr = (userData.role || '') === 'csr';
+        // Badges are CSR-only — hide immediately for admins/producers
+        if (!isCsr) {
+            badge.style.setProperty('display', 'none', 'important');
+            const subBadge = document.getElementById('renewals-sub-badge');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+            return;
+        }
         const currentUser = userData.username ? userData.username.charAt(0).toUpperCase() + userData.username.slice(1).toLowerCase() : '';
         const isAdmin = userData.isAdmin === true || userData.role === 'admin';
-        const isCsr = (userData.role || '') === 'csr';
 
         let allPolicies;
         try { allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { allPolicies = []; }
@@ -13717,6 +13731,14 @@ async function loadRenewalTaskBadges() {
     const today = new Date();
     const _badgeSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
     const _isCsrBadge = (_badgeSess.role || '') === 'csr';
+
+    // Nav badges are CSR-only — hide them for admins/producers
+    if (!_isCsrBadge) {
+        ['clients-renewal-badge', 'renewals-sub-badge', 'active-leads-sub-badge'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.setProperty('display', 'none', 'important');
+        });
+    }
 
     // Use completions already fetched by restoreRenewalHighlighting (which runs first).
     // This avoids a duplicate API call and prevents count mismatch if the second fetch fails.
