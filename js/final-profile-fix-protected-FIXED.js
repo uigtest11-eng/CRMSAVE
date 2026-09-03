@@ -6,6 +6,8 @@ let protectedFunctions = {};
 
 // Create the enhanced profile function with exact working UI
 protectedFunctions.createEnhancedProfile = function(lead) {
+    const _pfSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsr = (_pfSess.role || '') === 'csr';
     console.log('🔥 PROTECTED Enhanced Profile: Creating profile for:', lead.name);
     console.log('🔍 PROTECTED Lead ID being used:', lead.id);
     console.log('🔍 PROTECTED Lead object:', lead);
@@ -127,10 +129,13 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         <select id="lead-stage-${lead.id}" onchange="handleStageChange('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
                             <option value="new" ${lead.stage === 'new' ? 'selected' : ''}>New</option>
                             <option value="contact_attempted" ${lead.stage === 'contact_attempted' ? 'selected' : ''}>Contact Attempted</option>
-                            <option value="info_requested" ${lead.stage === 'info_requested' ? 'selected' : ''}>Info Requested</option>
-                            <option value="info_received" ${lead.stage === 'info_received' ? 'selected' : ''}>Info Received</option>
+                            <option value="info_requested" ${lead.stage === 'info_requested' ? 'selected' : ''}>Basic Info Requested</option>
+                            <option value="info_received" ${lead.stage === 'info_received' ? 'selected' : ''}>Basic Info Received</option>
+                            <option value="full_info_requested" ${lead.stage === 'full_info_requested' ? 'selected' : ''}>Full Info Requested</option>
+                            <option value="full_info_received" ${lead.stage === 'full_info_received' ? 'selected' : ''}>Full Info Received</option>
                             <option value="loss_runs_requested" ${lead.stage === 'loss_runs_requested' ? 'selected' : ''}>Loss Runs Requested</option>
                             <option value="loss_runs_received" ${lead.stage === 'loss_runs_received' ? 'selected' : ''}>Loss Runs Received</option>
+                            <option value="quote_prepared" ${lead.stage === 'quote_prepared' ? 'selected' : ''}>Quote Prepared</option>
                             <option value="app_prepared" ${lead.stage === 'app_prepared' ? 'selected' : ''}>App Prepared</option>
                             <option value="app_sent" ${lead.stage === 'app_sent' ? 'selected' : ''}>Waiting on Markets</option>
                             <option value="quote_sent" ${lead.stage === 'quote_sent' ? 'selected' : ''}>Quote Sent</option>
@@ -138,7 +143,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <option value="closed" ${lead.stage === 'closed' ? 'selected' : ''}>Closed</option>
                             ${(function() {
                                 // Check if current stage is a custom stage (not in predefined list)
-                                const predefinedStages = ['new', 'contact_attempted', 'info_requested', 'info_received', 'loss_runs_requested', 'loss_runs_received', 'app_prepared', 'app_sent', 'quote_sent', 'sale', 'closed'];
+                                const predefinedStages = ['new', 'contact_attempted', 'info_requested', 'info_received', 'full_info_requested', 'full_info_received', 'loss_runs_requested', 'loss_runs_received', 'quote_prepared', 'app_prepared', 'app_sent', 'quote_sent', 'sale', 'closed'];
                                 const isCustomStage = lead.stage && !predefinedStages.includes(lead.stage);
                                 if (isCustomStage) {
                                     return `<option value="${lead.stage}" selected>${lead.stage}</option>`;
@@ -169,16 +174,39 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                     if (!hasTodo) {
                                         return '<div style="color: #9ca3af; font-size: 13px; padding: 8px;">No CSR task assigned</div>';
                                     }
+                                    const _isDenied = !!lead.csrTodoDenied;
+                                    const _borderColor = isDone ? '#86efac' : (_isDenied ? '#fca5a5' : '#7dd3fc');
+                                    const _bgColor = isDone ? '#f0fdf4' : (_isDenied ? '#fef2f2' : '#f0f9ff');
                                     return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
-                                        '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid ' + (isDone ? '#86efac' : '#7dd3fc') + '; border-radius: 6px; background: ' + (isDone ? '#f0fdf4' : '#f0f9ff') + ';">' +
+                                        (_isDenied && !isDone ? '<div style="margin-bottom: 8px; font-size: 12px; color: #ef4444; font-weight: 600; padding: 6px 10px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 6px;"><i class="fas fa-times-circle"></i> Task denied by producer \u2014 please redo and re-submit</div>' : '') +
+                                        '<div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid ' + _borderColor + '; border-radius: 6px; background: ' + _bgColor + ';">' +
                                             '<input type="checkbox" id="csr-done-cb-' + lead.id + '" ' + (isDone ? 'checked' : '') + ' onchange="toggleCsrTodoDone(\'' + lead.id + '\', this.checked)" style="margin-top: 3px; transform: scale(1.4); accent-color: #10b981; cursor: pointer;" title="Mark as done">' +
                                             '<span id="csr-todo-text-' + lead.id + '" style="font-size: 14px; line-height: 1.5; flex: 1; ' + (isDone ? 'text-decoration: line-through; color: #9ca3af;' : 'color: #1e3a5f;') + '">' + todoText + '</span>' +
                                         '</div>';
                                 } else {
-                                    // Non-CSR (agents/admins): editable textarea to assign tasks
+                                    // Producer/admin view
+                                    const _isAcknowledged = !!lead.csrTodoAcknowledged;
+                                    if (isDone && !_isAcknowledged) {
+                                        // CSR marked done — show Approve / Deny
+                                        return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 8px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
+                                            '<div style="background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 14px;">' +
+                                                '<div style="font-size: 13px; color: #374151; margin-bottom: 12px;"><i class="fas fa-check-circle" style="color:#10b981;margin-right:6px;"></i><strong>CSR completed:</strong> ' + todoText + '</div>' +
+                                                '<div style="font-size: 11px; font-weight: 700; color: #1d4ed8; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Review &amp; Respond:</div>' +
+                                                '<div style="display: flex; gap: 12px;">' +
+                                                    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;color:#10b981;padding:8px 14px;background:#f0fdf4;border:2px solid #86efac;border-radius:6px;">' +
+                                                        '<input type="checkbox" onchange="if(this.checked) acknowledgeCsrTodo(\'' + lead.id + '\', true)" style="transform:scale(1.3);accent-color:#10b981;cursor:pointer;">' +
+                                                        '<i class="fas fa-thumbs-up"></i> Approve' +
+                                                    '</label>' +
+                                                    '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:700;color:#ef4444;padding:8px 14px;background:#fef2f2;border:2px solid #fca5a5;border-radius:6px;">' +
+                                                        '<input type="checkbox" onchange="if(this.checked) acknowledgeCsrTodo(\'' + lead.id + '\', false)" style="transform:scale(1.3);accent-color:#ef4444;cursor:pointer;">' +
+                                                        '<i class="fas fa-thumbs-down"></i> Deny' +
+                                                    '</label>' +
+                                                '</div>' +
+                                            '</div>';
+                                    }
+                                    // Default: editable textarea
                                     return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
-                                        (isDone ? '<div style="margin-bottom: 6px; font-size: 12px; color: #10b981; font-weight: 600;"><i class="fas fa-check-circle"></i> Marked done by CSR</div>' : '') +
-                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + todoText + '</textarea>';
+                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + (lead.csrTodo || '') + '</textarea>';
                                 }
                             })()}
                         </div>
@@ -257,8 +285,8 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     </div>
                 </div>
 
-                <!-- Callback Scheduler -->
-                ${lead.stage === 'closed' ? `
+                <!-- Callback Scheduler (hidden for CSR) -->
+                ${_isCsr ? '' : lead.stage === 'closed' ? `
                 <div class="profile-section" style="background: #f3f4f6; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #d1d5db;">
                     <div style="display: flex; align-items: center; gap: 10px; color: #9ca3af;">
                         <i class="fas fa-ban" style="font-size: 18px;"></i>
@@ -320,8 +348,8 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     </div>
                 </div>`}
 
-                <!-- Reach Out Checklist -->
-                <div class="profile-section" style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <!-- Reach Out Checklist (hidden for CSR) -->
+                ${_isCsr ? '' : `<div class="profile-section" style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <!-- Header with TO DO message -->
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h3 style="margin: 0; font-weight: bold;" id="reach-out-header-title-${lead.id}"><i class="fas fa-tasks"></i> <span style="color: #dc2626;">Reach Out</span></h3>
@@ -392,10 +420,10 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
-                <!-- Other Lead Details -->
-                <div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <!-- Other Lead Details (hidden for CSR) -->
+                ${_isCsr ? '' : `<div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h3><i class="fas fa-info-circle"></i> Lead Details</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                         <div>
@@ -428,12 +456,17 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </select>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
 
-                <!-- Notes -->
+                <!-- Notes & Instructions -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3><i class="fas fa-sticky-note"></i> Notes</h3>
+                    <h3><i class="fas fa-sticky-note"></i> Notes &amp; Instructions</h3>
+                    <div id="lead-instructions-${lead.id}"
+                         contenteditable="true"
+                         onblur="updateLeadField('${lead.id}', 'instructions', this.innerText.trim())"
+                         style="min-height: 36px; padding: 10px 12px; margin-bottom: 10px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; color: #1d4ed8; font-weight: 700; font-size: 13px; line-height: 1.5; outline: none; white-space: pre-wrap; cursor: text;"
+                         placeholder="Instructions will load based on stage...">${lead.instructions || ''}</div>
                     <textarea onchange="updateLeadField('${lead.id}', 'notes', this.value)" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px;">${lead.notes || ''}</textarea>
                 </div>
 
@@ -444,6 +477,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         <div style="display:flex;gap:8px;">
                             <button id="dot-lookup-btn-${lead.id}" onclick="triggerManualDOTLookup('${lead.id}', document.getElementById('dot-input-${lead.id}')?.value || '${lead.dotNumber || ''}')" style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;" title="Rescan DOT data from FMCSA">
                                 <i class="fas fa-sync-alt"></i> Rescan DOT
+                            </button>
+                            <button onclick="openCompanyInfoPopout('${lead.id}')" title="Open company info in new tab" style="background: #0ea5e9; color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 14px; display: flex; align-items: center;">
+                                <i class="fas fa-external-link-alt"></i>
                             </button>
                             <button onclick="acctGoToDOTLookup('${lead.id}')" style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;" title="Open DOT in lead generation search">
                                 <i class="fas fa-search"></i> DOT Lookup
@@ -688,6 +724,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                 <button onclick="transcribeRecording('${lead.id}', '${lead.recordingPath}')" id="transcribe-btn-${lead.id}" style="background: #7c3aed; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                     <i class="fas fa-file-alt"></i> Transcribe Recording
                                 </button>
+                                <button onclick="openRecordingPopout('${lead.id}')" title="Open recording &amp; transcript in new tab" style="background: #0ea5e9; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </button>
                             ` : ''}
                             ${!(lead.recordingPath && lead.hasRecording) ? `
                                 <button onclick="openCallRecordingUpload('${lead.id}')" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px;">
@@ -734,80 +773,6 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     <div id="quote-submissions-container">
                         <div id="quotes-container-${lead.id}" style="padding: 20px; text-align: center;">
                             <p style="color: #9ca3af; text-align: center; padding: 20px;">Loading quotes...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- APP Stage -->
-                <div class="profile-section" style="background: #fff8e1; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3><i class="fas fa-clipboard-check"></i> APP Stage</h3>
-                        <button onclick="showMarketStats('${lead.id}')" style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 500; display: flex; align-items: center; gap: 6px;" onmouseover="this.style.background='#0056b3'" onmouseout="this.style.background='#007bff'">
-                            <i class="fas fa-chart-line"></i>
-                            Market Stats
-                        </button>
-                    </div>
-
-                    <!-- Checkboxes Section -->
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; padding: 15px; background: white; border-radius: 6px; border: 1px solid #e0e0e0;">
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.app ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'app', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">APP</span>
-                        </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.lossRuns ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'lossRuns', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">LOSS RUNS</span>
-                        </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.iftas ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'iftas', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">IFTAS</span>
-                        </label>
-                        <label style="display: flex; align-items: center; cursor: pointer;">
-                            <input type="checkbox" ${lead.appStage?.saa ? 'checked' : ''} onchange="updateAppStageField('${lead.id}', 'saa', this.checked)" style="margin-right: 8px; transform: scale(1.2);">
-                            <span style="font-weight: 500;">SAA</span>
-                        </label>
-                    </div>
-
-                    <!-- Requirements Information -->
-                    <div style="background: #f5f5f5; padding: 15px; border-radius: 6px; font-size: 18px; line-height: 1.8;">
-                        <div style="margin-bottom: 16px;">
-                            <strong>0-2 <i class="fas fa-truck" style="color: #374151;"></i></strong>
-                            <span id="northland-02-${lead.id}" style="background: ${lead.appStage?.app ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Northland</span>
-                            <span id="canal-02-${lead.id}" style="background: ${lead.appStage?.app ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Canal</span>
-                            <span id="req-app-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold; margin-left: 10px;">APP</span>
-                        </div>
-
-                        <div style="margin-bottom: 16px;">
-                            <strong>3+ <i class="fas fa-truck" style="color: #374151;"></i></strong>
-                            <span id="northland-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Northland</span>
-                            <span id="canal-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Canal</span>
-                            <span style="margin-left: 10px;">
-                                <span id="req-app2-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold;">APP</span> -
-                                <span id="req-lossruns-${lead.id}" style="color: ${lead.appStage?.lossRuns ? '#10b981' : 'black'}; font-weight: bold;">LOSS RUNS</span>
-                            </span>
-                        </div>
-
-                        <!-- Divider -->
-                        <div style="border-top: 2px solid #d1d5db; margin: 20px 0;">
-                            <div style="text-align: center; font-weight: bold; font-size: 20px; color: #374151; padding: 12px 0; border-bottom: 2px solid #d1d5db; background: white; margin: 0;">3+ Years</div>
-                        </div>
-
-                        <div style="margin-bottom: 16px;">
-                            <span id="berkley-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Berkley</span>
-                            <span id="occidental-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Occidental</span>
-                            <span style="margin-left: 10px;">
-                                <span id="req-app3-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold;">APP</span> -
-                                <span id="req-lossruns2-${lead.id}" style="color: ${lead.appStage?.lossRuns ? '#10b981' : 'black'}; font-weight: bold;">LOSS RUNS</span>
-                            </span>
-                        </div>
-                        <div>
-                            <span id="crum-3plus-${lead.id}" style="background: ${(lead.appStage?.app && lead.appStage?.lossRuns && lead.appStage?.iftas && lead.appStage?.saa) ? '#10b981' : '#9ca3af'}; color: white; padding: 4px 12px; border-radius: 20px; font-size: 16px; margin: 0 6px;">Crum</span>
-                            <span style="margin-left: 10px;">
-                                <span id="req-app4-${lead.id}" style="color: ${lead.appStage?.app ? '#10b981' : 'black'}; font-weight: bold;">APP</span> -
-                                <span id="req-lossruns3-${lead.id}" style="color: ${lead.appStage?.lossRuns ? '#10b981' : 'black'}; font-weight: bold;">LOSS RUNS</span> -
-                                <span id="req-iftas-${lead.id}" style="color: ${lead.appStage?.iftas ? '#10b981' : 'black'}; font-weight: bold;">IFTAS</span> -
-                                <span id="req-saa-${lead.id}" style="color: ${lead.appStage?.saa ? '#10b981' : 'black'}; font-weight: bold;">SAA</span>
-                            </span>
                         </div>
                     </div>
                 </div>
@@ -871,6 +836,30 @@ protectedFunctions.createEnhancedProfile = function(lead) {
         } else {
             // Regular stage update
             updateLeadStage(leadId, value);
+
+            // Regenerate instructions for the new stage (clear saved so loadLeadInstructions regenerates)
+            const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const lIdx = leads.findIndex(l => String(l.id) === String(leadId));
+            if (lIdx !== -1) {
+                leads[lIdx].instructions = '';
+                localStorage.setItem('insurance_leads', JSON.stringify(leads));
+                fetch(`/api/leads/${leadId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({instructions: ''}) }).catch(()=>{});
+            }
+            loadLeadInstructions(leadId);
+
+            // Auto-populate CSR To Do based on stage
+            const csrAutoFill = {
+                'loss_runs_received': 'Send out loss runs',
+                'info_received': 'Prepare Basic Quote',
+                'full_info_received': 'Prepare App & Quotes'
+            };
+            if (csrAutoFill[value]) {
+                const csrTodoEl = document.getElementById('csr-todo-' + leadId);
+                if (csrTodoEl && !csrTodoEl.value.trim()) {
+                    csrTodoEl.value = csrAutoFill[value];
+                    if (window.saveCsrTodo) saveCsrTodo(leadId, csrAutoFill[value]);
+                }
+            }
         }
     };
 
@@ -1033,6 +1022,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
         // Load loss runs from server
         protectedFunctions.loadLossRuns(lead.id);
+
+        // Load stage-based instructions
+        loadLeadInstructions(lead.id);
     }, 100);
 
     // AUTO-CHECK REMOVED - Now only triggers from "Reach out: CALL" button click
@@ -7999,9 +7991,16 @@ window.refreshQuotesDisplay = async function(leadId) {
     const geicoQuote = leadQuotes.find(quote =>
         (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('geico')
     );
+    const corgiQuote = leadQuotes.find(quote =>
+        (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('corgi')
+    );
+    const starMutualQuote = leadQuotes.find(quote =>
+        (quote.insuranceCarrier || quote.carrier || '').toLowerCase().includes('star mutual')
+    );
     const otherQuotes = leadQuotes.filter(quote => {
         const carrier = (quote.insuranceCarrier || quote.carrier || '').toLowerCase();
-        return !carrier.includes('progressive') && !carrier.includes('geico');
+        return !carrier.includes('progressive') && !carrier.includes('geico') &&
+               !carrier.includes('corgi') && !carrier.includes('star mutual');
     });
 
     // Function to create quote HTML
@@ -8101,7 +8100,7 @@ window.refreshQuotesDisplay = async function(leadId) {
                 borderColor = '#ef4444';
                 opacity = '1';
                 statusDisplay = 'block';
-                statusText = 'Ineligible';
+                statusText = effectiveStatus.reason || 'Ineligible';
                 statusColor = '#dc2626';
             } else if (effectiveStatus.status === 'aor_required') {
                 bgColor = '#fef2f2';
@@ -8166,6 +8165,30 @@ window.refreshQuotesDisplay = async function(leadId) {
     } else {
         const geicoStatus = placeholderStates.geico || null;
         quotesHTML += createPlaceholderHTML('Geico', geicoStatus);
+    }
+
+    // Corgi (either real quote or placeholder)
+    if (corgiQuote) {
+        quotesHTML += createQuoteHTML(corgiQuote, ++quoteCounter);
+    } else {
+        const corgiStatus = placeholderStates.corgi || null;
+        quotesHTML += createPlaceholderHTML('Corgi', corgiStatus);
+    }
+
+    // Star Mutual — ineligible if lead state is not Ohio
+    if (starMutualQuote) {
+        quotesHTML += createQuoteHTML(starMutualQuote, ++quoteCounter);
+    } else {
+        let starMutualStatus = placeholderStates['star mutual'] || null;
+        // Auto-mark ineligible if state is not Ohio
+        const allLeadsForState = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const thisLeadForState = allLeadsForState.find(l => String(l.id) === String(leadId));
+        const leadStateRaw = ((thisLeadForState && thisLeadForState.state) || '').trim().toUpperCase();
+        const isOhio = leadStateRaw === 'OH' || leadStateRaw === 'OHIO';
+        if (!isOhio && (!starMutualStatus || starMutualStatus.status !== 'eligible')) {
+            starMutualStatus = { status: 'ineligible', reason: 'Market Ineligible — Ohio only' };
+        }
+        quotesHTML += createPlaceholderHTML('Star Mutual', starMutualStatus);
     }
 
     // Other quotes
@@ -9009,6 +9032,68 @@ function enforceGreenHighlightRule() {
     console.log(`🧹 CLEANUP COMPLETE: Checked ${totalChecked} rows, fixed ${cleanupCount} green highlight violations`);
 }
 
+// Generate and display stage-based instructions in the Notes & Instructions section
+async function loadLeadInstructions(leadId) {
+    const div = document.getElementById('lead-instructions-' + leadId);
+    if (!div) return;
+
+    // If the user has already saved custom instructions, show those and stop
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) return;
+    if (lead.instructions && lead.instructions.trim()) {
+        div.innerText = lead.instructions.trim();
+        return;
+    }
+
+    // Fetch carrier eligibility
+    let placeholderStates = {};
+    try {
+        const response = await fetch(`/api/placeholder-status/${leadId}`);
+        if (response.ok) {
+            const data = await response.json();
+            placeholderStates = data.statuses || {};
+        }
+    } catch (e) {}
+
+    // Determine eligible carriers
+    const carriers = ['Progressive', 'Geico', 'Corgi', 'Star Mutual'];
+    const eligible = carriers.filter(c => {
+        const key = c.toLowerCase(); // 'progressive', 'geico', 'corgi', 'star mutual'
+        const status = placeholderStates[key];
+        if (status && (status.status === 'ineligible' || status.status === 'aor_required')) return false;
+        if (c === 'Star Mutual') {
+            const state = (lead.state || '').trim().toUpperCase();
+            if (state !== 'OH' && state !== 'OHIO') return false;
+        }
+        return true;
+    });
+    const eligibleList = eligible.length ? eligible.join(', ') : 'no eligible markets';
+
+    const instructions = {
+        'info_requested':      'Reach out to lead to obtain basic information.',
+        'info_received':       `Prepare basic direct quotes with eligible markets: ${eligibleList}.`,
+        'full_info_requested': 'Reach out to lead to obtain full information.',
+        'full_info_received':  `Prepare App & Quotes with eligible markets: ${eligibleList}.`,
+        'loss_runs_requested': 'Reach out to lead to request loss runs.',
+        'loss_runs_received':  `Send out loss runs to eligible markets: ${eligibleList}.`,
+        'quote_prepared':      'Quote prepared — send to lead and follow up.',
+        'app_prepared':        'App prepared — email brokers with completed application package.',
+        'app_sent':            'Application submitted — follow up on market responses.',
+        'quote_sent':          'Quote sent — follow up with lead for any questions.',
+        'contact_attempted':   'Reach out to lead to make first contact.',
+        'sale':                'Update client information and process policy.',
+        'new':                 'Assign a stage to begin processing this lead.',
+    };
+
+    const text = instructions[lead.stage] || '';
+    if (text) {
+        div.innerText = text;
+        // Note: NOT auto-saving — user must edit + blur to save custom instructions.
+        // On next open, if lead.instructions is empty, instructions regenerate from stage.
+    }
+}
+
 // Function to load leads from server and refresh display
 async function loadLeadsFromServerAndRefresh() {
     try {
@@ -9017,8 +9102,29 @@ async function loadLeadsFromServerAndRefresh() {
         if (response.ok) {
             const serverLeads = await response.json();
 
-            // Update localStorage with fresh server data
-            localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
+            // SMART MERGE: preserve local changes (stage, notes, reachOut, etc.)
+            // instead of blindly overwriting localStorage with server data
+            const localLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const localMap = new Map(localLeads.map(l => [String(l.id), l]));
+            const now = Date.now();
+            const mergedLeads = serverLeads.map(serverLead => {
+                const localLead = localMap.get(String(serverLead.id));
+                if (!localLead) return serverLead;
+                // Preserve local if it has recent changes or a different stage/notes
+                const hasRecentChanges = localLead.lastModified &&
+                    (now - new Date(localLead.lastModified).getTime()) < 10 * 60 * 1000;
+                const hasStageChange = localLead.stage !== serverLead.stage;
+                const hasNotesChange = localLead.notes !== serverLead.notes;
+                if (hasRecentChanges || hasStageChange || hasNotesChange) {
+                    return { ...serverLead, ...localLead, lastModified: localLead.lastModified || new Date().toISOString() };
+                }
+                return { ...localLead, ...serverLead, lastModified: new Date().toISOString() };
+            });
+            // Add any local-only leads (not yet on server)
+            serverLeads.forEach(sl => localMap.delete(String(sl.id)));
+            localMap.forEach(localOnly => mergedLeads.push(localOnly));
+
+            localStorage.setItem('insurance_leads', JSON.stringify(mergedLeads));
 
             // Trigger display refresh
             if (window.displayLeads) {
@@ -9027,7 +9133,7 @@ async function loadLeadsFromServerAndRefresh() {
                 window.loadLeadsView();
             }
 
-            console.log('✅ Leads refreshed from server');
+            console.log('✅ Leads refreshed from server (smart merge applied)');
         }
     } catch (error) {
         console.error('❌ Error refreshing leads from server:', error);
@@ -12992,6 +13098,206 @@ window.transcribeRecording = async function(leadId, recordingPath) {
         }
         alert('Transcription failed: ' + err.message);
     }
+};
+
+// Open Company Info (+ Operation Details, Vehicles, Trailers, Drivers) in a new popup tab
+window.openCompanyInfoPopout = function(leadId) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) { alert('Lead not found.'); return; }
+
+    const e = s => String(s || '—').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    const row = (label, val) =>
+        `<div class="row"><span class="lbl">${label}</span><span class="val">${e(val)}</span></div>`;
+
+    let vehiclesHtml = '';
+    (lead.vehicles || []).forEach((v, i) => {
+        vehiclesHtml += `<div class="card"><div class="card-title">Vehicle ${i + 1}</div><div class="grid3">
+            ${row('Year', v.year)}${row('Make', v.make)}${row('Model', v.model)}
+            ${row('VIN', v.vin)}${row('Value ($)', v.value)}${row('Type', v.type)}
+        </div></div>`;
+    });
+    if (!vehiclesHtml) vehiclesHtml = '<p class="empty">No vehicles on file</p>';
+
+    let trailersHtml = '';
+    (lead.trailers || []).forEach((t, i) => {
+        trailersHtml += `<div class="card"><div class="card-title">Trailer ${i + 1}</div><div class="grid3">
+            ${row('Year', t.year)}${row('Make', t.make)}${row('Type', t.type)}
+            ${row('VIN', t.vin)}${row('Length', t.length)}${row('Value ($)', t.value)}
+        </div></div>`;
+    });
+    if (!trailersHtml) trailersHtml = '<p class="empty">No trailers on file</p>';
+
+    let driversHtml = '';
+    (lead.drivers || []).forEach((d, i) => {
+        driversHtml += `<div class="card"><div class="card-title">Driver ${i + 1}</div><div class="grid3">
+            ${row('Name', d.name)}${row('License #', d.license)}${row('Date of Birth', d.dob)}
+            ${row('Hire Date', d.hireDate)}${row('Years Experience', d.experience)}${row('Violations/Accidents', d.violations)}
+        </div></div>`;
+    });
+    if (!driversHtml) driversHtml = '<p class="empty">No drivers on file</p>';
+
+    const leadName = ((lead.firstName || lead.name || '') + (lead.lastName ? ' ' + lead.lastName : '')).trim();
+
+    const html = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Company Info \u2013 ${e(leadName || leadId)}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+  *{box-sizing:border-box;}
+  body{font-family:system-ui,sans-serif;background:#f3f4f6;margin:0;padding:20px;color:#1f2937;}
+  h1{margin:0 0 20px;font-size:20px;color:#1f2937;}
+  h2{font-size:15px;margin:0 0 12px;color:#374151;display:flex;align-items:center;gap:8px;}
+  .section{background:#fff;border-radius:10px;padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .row{display:flex;flex-direction:column;}
+  .lbl{font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px;}
+  .val{font-size:13px;color:#111827;padding:6px 8px;background:#f9fafb;border-radius:5px;border:1px solid #e5e7eb;}
+  .card{border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:10px;background:#fafafa;}
+  .card-title{font-weight:600;font-size:13px;color:#374151;margin-bottom:10px;}
+  .empty{color:#9ca3af;font-style:italic;font-size:13px;padding:8px 0;}
+  .phone-link{color:#059669;text-decoration:none;font-weight:500;}
+  .email-link{color:#2563eb;text-decoration:none;font-weight:500;}
+</style></head><body>
+<h1><i class="fas fa-building" style="color:#0ea5e9;margin-right:8px;"></i>${e(leadName || 'Lead')} \u2013 Company Profile</h1>
+
+<div class="section">
+  <h2><i class="fas fa-info-circle" style="color:#0ea5e9;"></i> Company Information</h2>
+  <div class="grid">
+    ${row('Company Name', lead.name)}
+    ${row('Contact', lead.contact)}
+    <div class="row"><span class="lbl">Phone</span><span class="val">${lead.phone ? `<a class="phone-link" href="tel:${e(lead.phone)}">${e(lead.phone)}</a>` : '—'}</span></div>
+    <div class="row"><span class="lbl">Email</span><span class="val">${lead.email ? `<a class="email-link" href="mailto:${e(lead.email)}">${e(lead.email)}</a>` : '—'}</span></div>
+    ${row('DOT Number', lead.dotNumber)}
+    ${row('MC Number', lead.mcNumber)}
+    ${row('Years in Business', lead.yearsInBusiness)}
+    ${row('Renewal Date', lead.renewalDate)}
+    ${row('Insurance Company', lead.insuranceCompany)}
+    ${row('State', lead.state)}
+  </div>
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-route" style="color:#0ea5e9;"></i> Operation Details</h2>
+  <div class="grid">
+    ${row('Radius of Operation', lead.radiusOfOperation)}
+    ${row('Commodity Hauled', lead.commodityHauled)}
+  </div>
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-truck" style="color:#0ea5e9;"></i> Vehicles (${(lead.vehicles || []).length})</h2>
+  ${vehiclesHtml}
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-trailer" style="color:#0ea5e9;"></i> Trailers (${(lead.trailers || []).length})</h2>
+  ${trailersHtml}
+</div>
+
+<div class="section">
+  <h2><i class="fas fa-id-card" style="color:#0ea5e9;"></i> Drivers (${(lead.drivers || []).length})</h2>
+  ${driversHtml}
+</div>
+</body></html>`;
+
+    const win = window.open('', '_blank', 'width=900,height=800,resizable=yes,scrollbars=yes');
+    if (win) { win.document.open(); win.document.write(html); win.document.close(); }
+    else { alert('Popup blocked. Please allow popups for this site.'); }
+};
+
+// Open Call Recording + Transcript in a new popup tab (with full word-highlight sync)
+window.openRecordingPopout = function(leadId) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) { alert('Lead not found.'); return; }
+
+    const recordingPath = lead.recordingPath || '';
+    const leadName = ((lead.firstName || '') + ' ' + (lead.lastName || '')).trim();
+
+    // Build word-span HTML identical to main profile (clickable + highlight-ready)
+    let transcriptHtml = '';
+    const words = lead.transcriptWords || [];
+    if (words.length) {
+        let currentSpeaker = null;
+        for (const w of words) {
+            if (w.speaker !== currentSpeaker) {
+                if (currentSpeaker !== null) transcriptHtml += '<br>';
+                currentSpeaker = w.speaker;
+                const label = w.speaker === 0 ? 'Agent' : 'Customer';
+                transcriptHtml += `<strong style="color:#374151;">${label}:</strong> `;
+            }
+            transcriptHtml += `<span class="tw" data-s="${w.start}" data-e="${w.end}" style="cursor:pointer;" title="Click to seek" onclick="seekAudio(+this.dataset.s)">${w.word} </span>`;
+        }
+    } else if (lead.transcriptText) {
+        transcriptHtml = `<span style="color:#9ca3af;">${lead.transcriptText.replace(/\n/g, '<br>')}</span>`;
+    } else {
+        transcriptHtml = '<span style="color:#9ca3af;">No transcript yet.</span>';
+    }
+
+    const html = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recording \u2013 ${leadName || leadId}</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+<style>
+  body{font-family:system-ui,sans-serif;background:#f3f4f6;margin:0;padding:24px;}
+  h2{margin:0 0 20px;color:#1f2937;}
+  .card{background:#fff;border-radius:10px;padding:20px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,.1);}
+  .card h3{margin:0 0 14px;color:#374151;font-size:16px;}
+  audio{width:100%;height:40px;}
+  #popout-transcript{width:100%;min-height:200px;max-height:500px;overflow-y:auto;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-family:monospace;font-size:13px;line-height:1.9;background:#fff;box-sizing:border-box;}
+</style></head><body>
+<h2><i class="fas fa-play-circle" style="color:#10b981;margin-right:8px;"></i>${leadName || 'Lead'} \u2013 Call Recording &amp; Transcript</h2>
+<div class="card">
+  <h3><i class="fas fa-play-circle" style="color:#10b981;margin-right:6px;"></i> Call Recording</h3>
+  <audio id="popout-audio" controls preload="none">
+    <source src="${recordingPath}" type="audio/mpeg">
+    <source src="${recordingPath}" type="audio/wav">
+    Your browser does not support audio.
+  </audio>
+</div>
+<div class="card">
+  <h3><i class="fas fa-microphone" style="margin-right:6px;"></i> Call Transcript</h3>
+  <div id="popout-transcript">${transcriptHtml}</div>
+</div>
+<script>
+function seekAudio(t) {
+    var a = document.getElementById('popout-audio');
+    if (a) { a.currentTime = t; a.play(); }
+}
+window.addEventListener('load', function() {
+    var audio = document.getElementById('popout-audio');
+    var display = document.getElementById('popout-transcript');
+    if (!audio || !display) return;
+    audio.addEventListener('timeupdate', function() {
+        var t = audio.currentTime;
+        var scrollTarget = null;
+        display.querySelectorAll('span.tw').forEach(function(span) {
+            var s = +span.dataset.s;
+            var e = +span.dataset.e;
+            if (t >= e) {
+                span.style.color = '#2563eb';
+                span.style.fontWeight = '';
+            } else if (t >= s) {
+                span.style.color = '#1d4ed8';
+                span.style.fontWeight = 'bold';
+                scrollTarget = span;
+            } else {
+                span.style.color = '';
+                span.style.fontWeight = '';
+            }
+        });
+        if (scrollTarget) scrollTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+});
+<\/script>
+</body></html>`;
+
+    const win = window.open('', '_blank', 'width=800,height=700,resizable=yes,scrollbars=yes');
+    if (win) { win.document.open(); win.document.write(html); win.document.close(); }
+    else { alert('Popup blocked. Please allow popups for this site.'); }
 };
 
 // Function to toggle DOT lookup button visibility

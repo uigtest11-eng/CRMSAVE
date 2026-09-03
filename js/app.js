@@ -12,7 +12,9 @@ async function loadPoliciesFromServer() {
             console.log(`Loaded ${serverPolicies.length} policies from server`);
 
             // Merge: preserve local clientId/clientName when server doesn't have them
-            const existingLocal = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            let existingLocal;
+            try { existingLocal = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { existingLocal = []; }
+            if (!Array.isArray(existingLocal)) existingLocal = [];
             const localById = {};
             existingLocal.forEach(p => { if (p.id) localById[p.id] = p; });
             const mergedPolicies = serverPolicies.map(sp => {
@@ -35,12 +37,13 @@ async function loadPoliciesFromServer() {
             return serverPolicies;
         } else {
             console.error('Failed to load policies:', response.status);
-            return JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            let fb; try { fb = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { fb = []; }
+            return Array.isArray(fb) ? fb : [];
         }
     } catch (error) {
         console.error('Error loading policies from server:', error);
-        // Fallback to localStorage
-        return JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        let fb; try { fb = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { fb = []; }
+        return Array.isArray(fb) ? fb : [];
     }
 }
 
@@ -543,9 +546,7 @@ function cleanupDuplicateLeads() {
     // Clean the main leads list
     const cleanedLeads = allLeads.map(lead => {
         // If this lead matches ANY archived identifier, mark it as archived
-        if (archivedIds.has(String(lead.id)) ||
-            (lead.phone && archivedPhones.has(lead.phone.replace(/\D/g, ''))) ||
-            (lead.email && archivedEmails.has(lead.email.toLowerCase()))) {
+        if (archivedIds.has(String(lead.id))) {
 
             if (!lead.archived) {
                 lead.archived = true;
@@ -7803,6 +7804,9 @@ function getStageHtml(stage, lead) {
         'info_received': 'stage-info-received',
         'loss_runs_requested': 'stage-loss-runs-requested',
         'loss_runs_received': 'stage-loss-runs-received',
+        'full_info_requested': 'stage-info-requested',
+        'full_info_received': 'stage-info-received',
+        'quote_prepared': 'stage-info-received',
         'qualified': 'stage-qualified',
         'quoted': 'stage-quoted',
         'quote_sent': 'stage-quote-sent',
@@ -7824,6 +7828,9 @@ function getStageHtml(stage, lead) {
         'info_received': 'Info Received',
         'loss_runs_requested': 'Loss Runs Requested',
         'loss_runs_received': 'Loss Runs Received',
+        'full_info_requested': 'Full Info Requested',
+        'full_info_received': 'Full Info Received',
+        'quote_prepared': 'Quote Prepared',
         'app_prepared': 'App Prepared',
         'app_sent': 'Waiting on Markets',
         'app_quote_received': 'App Quote Received',
@@ -8071,6 +8078,13 @@ function generateSimpleLeadRows(leads) {
             }
         }
 
+        // OVERRIDE: Blue highlight for producer/admin when CSR completed a task awaiting review
+        if (!_isCsrRow && lead.csrTodoDone && !lead.csrTodoAcknowledged) {
+            rowStyle = 'style="background-color: #93c5fd !important; border-left: 4px solid #1d4ed8 !important; border-right: 2px solid #1d4ed8 !important;"';
+            rowClass = 'csr-done-pending force-persistent-highlight';
+            console.log(`🔵 Built-in highlighting: ${lead.name} -> BLUE (CSR task done, awaiting producer review)`);
+        }
+
         // SPECIAL: Apply gold border for leads with 60+ minutes call time (highest priority)
         let goldRowBorder = '';
         if (lead && lead.reachOut && lead.reachOut.callLogs && Array.isArray(lead.reachOut.callLogs)) {
@@ -8120,6 +8134,8 @@ function generateSimpleLeadRows(leads) {
             dataAttributes = 'data-highlight="green" data-highlight-applied="true" data-highlight-source="builtin"';
         } else if (rowClass.includes('green-highlighted')) {
             dataAttributes = 'data-highlight="green" data-highlight-applied="true" data-highlight-source="green-highlight"';
+        } else if (rowClass.includes('csr-done-pending')) {
+            dataAttributes = 'data-highlight="blue" data-highlight-applied="true" data-highlight-source="builtin"';
         }
 
         // Also add lead identification for robust matching
@@ -8547,6 +8563,8 @@ window.toggleCsrTodoDone = async function(leadId, done) {
         // Clear the csrTodo text so the table To Do column becomes empty -> green row
         lead.csrTodoOriginal = lead.csrTodo || '';
         lead.csrTodo = '';
+        lead.csrTodoAcknowledged = false; // Producer must review again
+        lead.csrTodoDenied = false;       // Clear any previous denial
     } else {
         // Restore original text if unchecking
         if (lead.csrTodoOriginal) {
@@ -8569,6 +8587,12 @@ window.toggleCsrTodoDone = async function(leadId, done) {
             textEl.textContent = lead.csrTodo || '';
         }
     }
+    // Clear/restore the textarea immediately
+    const textareaEl = document.getElementById('csr-todo-' + leadId);
+    if (textareaEl) {
+        textareaEl.value = done ? '' : (lead.csrTodo || '');
+    }
+
     // Update the container border/bg
     const cb = document.getElementById('csr-done-cb-' + leadId);
     if (cb) {
@@ -8598,6 +8622,8 @@ window.toggleCsrTodoDone = async function(leadId, done) {
             memLead.csrTodo = lead.csrTodo;
             memLead.csrTodoDone = lead.csrTodoDone;
             memLead.csrTodoOriginal = lead.csrTodoOriginal;
+            memLead.csrTodoAcknowledged = lead.csrTodoAcknowledged;
+            memLead.csrTodoDenied = lead.csrTodoDenied;
         }
     }
     if (window.filteredLeads) {
@@ -8606,6 +8632,8 @@ window.toggleCsrTodoDone = async function(leadId, done) {
             memLead2.csrTodo = lead.csrTodo;
             memLead2.csrTodoDone = lead.csrTodoDone;
             memLead2.csrTodoOriginal = lead.csrTodoOriginal;
+            memLead2.csrTodoAcknowledged = lead.csrTodoAcknowledged;
+            memLead2.csrTodoDenied = lead.csrTodoDenied;
         }
     }
 
@@ -8630,6 +8658,76 @@ window.toggleCsrTodoDone = async function(leadId, done) {
     }
 
     // Also refresh the table for a full re-render
+    if (typeof refreshLeadsTable === 'function') {
+        setTimeout(refreshLeadsTable, 300);
+    }
+};
+
+// Producer/admin acknowledges a CSR-completed task (approve or deny)
+window.acknowledgeCsrTodo = async function(leadId, approved) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) return;
+
+    lead.csrTodoAcknowledged = true; // Removes blue row highlight
+
+    if (approved) {
+        // Auto-advance stage based on what task was completed
+        const completedTask = (lead.csrTodoOriginal || '').trim();
+        if (completedTask === 'Prepare Basic Quote') {
+            lead.stage = 'quote_prepared';
+            lead.stageUpdatedAt = new Date().toISOString();
+        } else if (completedTask === 'Prepare App & Quotes') {
+            lead.stage = 'app_prepared';
+            lead.stageUpdatedAt = new Date().toISOString();
+        }
+        // Task accepted: clear everything, textarea comes back blank
+        lead.csrTodo = '';
+        lead.csrTodoOriginal = '';
+        lead.csrTodoDone = false;
+        lead.csrTodoDenied = false;
+    } else {
+        // Task denied: restore text, flag CSR to redo
+        lead.csrTodo = lead.csrTodoOriginal || lead.csrTodo || '';
+        lead.csrTodoOriginal = '';
+        lead.csrTodoDone = false;
+        lead.csrTodoDenied = true;
+    }
+
+    lead.updatedAt = new Date().toISOString();
+    lead.lastModified = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+    [window.allLeads, window.filteredLeads].forEach(arr => {
+        if (!arr) return;
+        const m = arr.find(l => String(l.id) === String(leadId));
+        if (m) {
+            m.csrTodo = lead.csrTodo;
+            m.csrTodoDone = lead.csrTodoDone;
+            m.csrTodoOriginal = lead.csrTodoOriginal;
+            m.csrTodoAcknowledged = lead.csrTodoAcknowledged;
+            m.csrTodoDenied = lead.csrTodoDenied;
+        }
+    });
+
+    // Sync to server FIRST — viewLead fetches fresh server data, so save must complete before it runs
+    try {
+        const apiUrl = window.location.hostname === 'localhost'
+            ? 'https://localhost:3001'
+            : `${window.location.protocol}//${window.location.host}`;
+        await fetch(`${apiUrl}/api/leads`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(lead)
+        });
+    } catch (e) { console.warn('Failed to save CSR todo acknowledgment to server:', e); }
+
+    // Refresh profile so checkboxes disappear and textarea returns (server is now updated)
+    if (typeof window.viewLead === 'function') {
+        window.viewLead(leadId);
+    }
+
+    // Re-render table to remove blue highlight
     if (typeof refreshLeadsTable === 'function') {
         setTimeout(refreshLeadsTable, 300);
     }
@@ -8904,11 +9002,11 @@ async function loadLeadsView() {
         let allLeads = insuranceLeads.length > 0 ? insuranceLeads : regularLeads;
 
         // Filter out archived leads from server data
+        // NOTE: Only filter by archived ID — name/phone/email matching removed
+        // because it caused false positives (active leads sharing a phone/email/name
+        // with an archived lead were silently removed, e.g. Triple A Transport bug).
         const activeLeads = allLeads.filter(lead => {
             if (archivedIds.has(String(lead.id))) return false;
-            if (lead.phone && archivedPhones.has(lead.phone.replace(/\D/g, ''))) return false;
-            if (lead.email && archivedEmails.has(lead.email.toLowerCase())) return false;
-            if (lead.name && archivedNames.has(lead.name.toLowerCase())) return false;
             return true;
         });
 
@@ -9210,10 +9308,13 @@ async function loadLeadsView() {
                             <option value="">All Stages</option>
                             <option value="new">New</option>
                             <option value="contact_attempted">Contact Attempted</option>
-                            <option value="info_requested">Info Requested</option>
-                            <option value="info_received">Info Received</option>
+                            <option value="info_requested">Basic Info Requested</option>
+                            <option value="info_received">Basic Info Received</option>
+                            <option value="full_info_requested">Full Info Requested</option>
+                            <option value="full_info_received">Full Info Received</option>
                             <option value="loss_runs_requested">Loss Runs Requested</option>
                             <option value="loss_runs_received">Loss Runs Received</option>
+                            <option value="quote_prepared">Quote Prepared</option>
                             <option value="app_prepared">App Prepared</option>
                             <option value="app_sent">Waiting on Markets</option>
                             <option value="app_quote_received">App Quote Received</option>
@@ -9283,48 +9384,56 @@ async function loadLeadsView() {
             </div>
             
             <!-- Lead Pipeline -->
-            <div class="lead-pipeline">
+            ${(() => {
+                const _pIsCsr = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr';
+                const _sv = (val) => _pIsCsr ? '' : `<div class="stage-value">$${val}</div>`;
+                const _lrrCount = leads.filter(l => l.stage === "loss_runs_requested").length;
+                const _asCount = leads.filter(l => l.stage === "app_sent").length;
+                const _saleCount = leads.filter(l => l.stage === "sale").length;
+                const _qsCount = quoteSentUnaware + quoteSentAware;
+                return `<div class="lead-pipeline">
                 <div class="pipeline-stage" data-stage="new">
                     <div class="stage-header">
                         <h3>New</h3>
                         <span class="stage-count">${newLeads}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "new").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
+                    ${_sv(leads.filter(l => l.stage === "new").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
                     <div class="stage-bar" style="width: ${totalLeads > 0 ? (newLeads/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="loss_runs_requested">
                     <div class="stage-header">
                         <h3>Loss Runs Requested</h3>
-                        <span class="stage-count">${leads.filter(l => l.stage === "loss_runs_requested").length}</span>
+                        <span class="stage-count">${_lrrCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "loss_runs_requested").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (leads.filter(l => l.stage === "loss_runs_requested").length/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "loss_runs_requested").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (_lrrCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="quote-sent">
                     <div class="stage-header">
                         <h3>Quote Sent</h3>
-                        <span class="stage-count">${quoteSentUnaware + quoteSentAware}</span>
+                        <span class="stage-count">${_qsCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "quote-sent-unaware" || l.stage === "quote-sent-aware").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar" style="width: ${totalLeads > 0 ? ((quoteSentUnaware + quoteSentAware)/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "quote-sent-unaware" || l.stage === "quote-sent-aware").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (_qsCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="app_sent">
                     <div class="stage-header">
                         <h3>Waiting on Markets</h3>
-                        <span class="stage-count">${leads.filter(l => l.stage === "app_sent").length}</span>
+                        <span class="stage-count">${_asCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "app_sent").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (leads.filter(l => l.stage === "app_sent").length/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "app_sent").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar" style="width: ${totalLeads > 0 ? (_asCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);"></div>
                 </div>
                 <div class="pipeline-stage" data-stage="sale">
                     <div class="stage-header success">
                         <h3>Sale</h3>
-                        <span class="stage-count">${leads.filter(l => l.stage === "sale").length}</span>
+                        <span class="stage-count">${_saleCount}</span>
                     </div>
-                    <div class="stage-value">$${leads.filter(l => l.stage === "sale").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString()}</div>
-                    <div class="stage-bar success" style="width: ${totalLeads > 0 ? (leads.filter(l => l.stage === "sale").length/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);"></div>
+                    ${_sv(leads.filter(l => l.stage === "sale").reduce((sum, l) => sum + safeParsePremium(l.premium), 0).toLocaleString())}
+                    <div class="stage-bar success" style="width: ${totalLeads > 0 ? (_saleCount/totalLeads)*100 : 0}%; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);"></div>
                 </div>
-            </div>
+            </div>`;
+            })()}
             
             <!-- Lead Stats -->
             <div class="lead-stats">
@@ -9845,9 +9954,9 @@ function showNewLead() {
 
                             <div class="form-group">
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Insurance Type</label>
-                                <select class="form-control" id="leadInsuranceType" style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: white;">
+                                <select class="form-control" id="leadInsuranceType" onchange="document.getElementById('leadDotGroup').style.display = this.value === 'Commercial Auto' ? '' : 'none'" style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: white;">
                                     <option value="Auto">Auto</option>
-                                    <option value="Commercial Auto">Commercial Auto</option>
+                                    <option value="Commercial Auto" selected>Commercial Auto</option>
                                     <option value="Home">Home</option>
                                     <option value="Life">Life</option>
                                     <option value="Health">Health</option>
@@ -9856,7 +9965,12 @@ function showNewLead() {
                                     <option value="Other">Other</option>
                                 </select>
                             </div>
-                            
+
+                            <div class="form-group" id="leadDotGroup">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">US DOT #</label>
+                                <input type="text" class="form-control" id="leadDotNumber" placeholder="e.g. 1234567" style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px;">
+                            </div>
+
                             <div class="form-group">
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Assigned To <span style="color: #ef4444;">*</span></label>
                                 <select class="form-control" id="leadAssignedTo" required style="width: 100%; padding: 12px 14px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; background: white;">
@@ -9940,6 +10054,7 @@ async function saveNewLead(event) {
     // Lead Source field removed - set default value
     const source = 'Manual Entry';
     const insuranceType = document.getElementById('leadInsuranceType').value;
+    const dotNumber = (document.getElementById('leadDotNumber')?.value || '').trim();
     const assignedTo = document.getElementById('leadAssignedTo').value;
     const premium = parseFloat(document.getElementById('leadPremium').value) || 0;
     const stage = document.getElementById('leadStage').value;
@@ -9962,6 +10077,7 @@ async function saveNewLead(event) {
         source,
         insuranceType,
         product: insuranceType, // Add product field for compatibility
+        dotNumber,
         assignedTo,
         premium,
         priority: 'Mid', // Set default priority to Mid (blue text)
@@ -10389,6 +10505,9 @@ function saveLeadEdits(leadId) {
             if (tableBody) {
                 const rows = tableBody.querySelectorAll('tr');
                 rows.forEach(row => {
+                    // Never touch builtin-highlighted rows (timestamps, CSR-pending blue, etc.)
+                    if (row.dataset.highlightSource === 'builtin' || row.classList.contains('csr-done-pending')) return;
+
                     const todoCell = row.querySelector('td:nth-child(6)'); // TO DO column
                     if (todoCell) {
                         const todoText = todoCell.textContent.trim();
@@ -10517,7 +10636,135 @@ function refreshLeadsTable() {
     }, 100);
 
     console.log('✅ Leads table refreshed successfully');
+    updateLeadsNavBadge();
 }
+
+// Update the blue todo-count badge on the Leads nav item
+function updateLeadsNavBadge() {
+    const badge = document.getElementById('leads-todo-badge');
+    if (!badge) return;
+    try {
+        const userData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const isCsr = (userData.role || '') === 'csr';
+        // Badges are CSR-only — hide immediately for admins/producers
+        if (!isCsr) {
+            badge.style.setProperty('display', 'none', 'important');
+            const subBadge = document.getElementById('active-leads-sub-badge');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+            return;
+        }
+        const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const currentUser = userData.username ? userData.username.charAt(0).toUpperCase() + userData.username.slice(1).toLowerCase() : '';
+
+        const visibleLeads = leads.filter(l => !l.archived && l.stage !== 'closed' && l.stage !== 'Closed');
+
+        let count = 0;
+        if (isCsr) {
+            visibleLeads.forEach(l => { if (l.csrTodo && l.csrTodo.trim() && !l.csrTodoDone) count++; });
+        } else {
+            const actionMap = {
+                'new': 'Assign Stage', 'contact_attempted': 'Reach out',
+                'info_requested': 'Reach out to lead', 'info_received': 'Prepare Quote',
+                'loss_runs_requested': 'Reach out to lead', 'loss_runs_received': 'Prepare app.',
+                'app_prepared': 'Email brokers', 'quoted': 'Email Quote, and make contact',
+                'quote_sent': 'Reach out to lead', 'quote-sent-unaware': 'Reach out to lead',
+                'quote-sent-aware': 'Reach out', 'sale': 'Process sale', 'not-interested': 'Archive lead'
+            };
+            visibleLeads.forEach(l => {
+                if (l.assignedTo === currentUser && actionMap[l.stage]) count++;
+            });
+        }
+
+        const subBadge = document.getElementById('active-leads-sub-badge');
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.setProperty('display', 'inline-block', 'important');
+            if (subBadge) { subBadge.textContent = count; subBadge.style.setProperty('display', 'inline-block', 'important'); }
+        } else {
+            badge.style.setProperty('display', 'none', 'important');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+        }
+    } catch (e) {
+        badge.style.setProperty('display', 'none', 'important');
+        const subBadge = document.getElementById('active-leads-sub-badge');
+        if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+    }
+}
+window.updateLeadsNavBadge = updateLeadsNavBadge;
+
+// Run badge update on page load at several intervals to catch whenever leads land in localStorage
+setTimeout(updateLeadsNavBadge, 500);
+setTimeout(updateLeadsNavBadge, 1500);
+setTimeout(updateLeadsNavBadge, 3000);
+setTimeout(updateLeadsNavBadge, 6000);
+setInterval(updateLeadsNavBadge, 30000); // Keep synced every 30s
+
+// ── Clients nav badge: combined count of renewals needing attention ──────────
+async function updateClientsNavBadge() {
+    const badge = document.getElementById('clients-renewal-badge');
+    if (!badge) return;
+    try {
+        const userData = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const isCsr = (userData.role || '') === 'csr';
+        // Badges are CSR-only — hide immediately for admins/producers
+        if (!isCsr) {
+            badge.style.setProperty('display', 'none', 'important');
+            const subBadge = document.getElementById('renewals-sub-badge');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+            return;
+        }
+        const currentUser = userData.username ? userData.username.charAt(0).toUpperCase() + userData.username.slice(1).toLowerCase() : '';
+        const isAdmin = userData.isAdmin === true || userData.role === 'admin';
+
+        let allPolicies;
+        try { allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { allPolicies = []; }
+        if (!Array.isArray(allPolicies)) allPolicies = [];
+
+        // Apply same agent filter as renewals view
+        if (!isAdmin && !isCsr && currentUser) {
+            allPolicies = allPolicies.filter(p => {
+                const a = (p.assignedTo || p.agent || p.assignedAgent || p.producer || '').toLowerCase();
+                return a === currentUser.toLowerCase();
+            });
+        }
+
+        // Use cached completions or fetch once
+        let completions = window._renewalCompletionsCache || null;
+        if (!completions) {
+            try {
+                const resp = await fetch('/api/renewal-completions');
+                if (resp.ok) { completions = await resp.json(); window._renewalCompletionsCache = completions; }
+            } catch(e) {}
+        }
+        completions = completions || {};
+
+        const today = new Date();
+        let count30to45 = 0, countMonth = 0;
+        allPolicies.forEach(p => {
+            if (!p.expirationDate) return;
+            const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+            if (!completions[p.id]) {
+                if (days >= 30 && days <= 45) count30to45++;
+                if (days >= 0 && days < 30) countMonth++;
+            }
+        });
+
+        const total = count30to45 + countMonth;
+        const subBadge = document.getElementById('renewals-sub-badge');
+        if (total > 0) {
+            badge.textContent = total;
+            badge.style.setProperty('display', 'inline-block', 'important');
+            if (subBadge) { subBadge.textContent = total; subBadge.style.setProperty('display', 'inline-block', 'important'); }
+        } else {
+            badge.style.setProperty('display', 'none', 'important');
+            if (subBadge) subBadge.style.setProperty('display', 'none', 'important');
+        }
+    } catch(e) { /* ignore */ }
+}
+window.updateClientsNavBadge = updateClientsNavBadge;
+setTimeout(updateClientsNavBadge, 800);
+setTimeout(updateClientsNavBadge, 2500);
+setInterval(updateClientsNavBadge, 60000); // Refresh every minute
 
 // Function to update a specific lead row in the table without refreshing the entire table
 function updateLeadRowInTable(leadId, updatedLead) {
@@ -11702,9 +11949,10 @@ function sortLeads(field) {
             if (window.forceAllHighlighting) {
                 window.forceAllHighlighting();
             }
+            updateLeadsNavBadge();
         }, 100);
     }
-    
+
     // Update sort arrows
     updateSortArrows(field, currentSort.direction);
 }
@@ -12674,7 +12922,9 @@ function loadPoliciesView() {
     }
 
     // Load policies from localStorage first, then update from server in background
-    let policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    let policies;
+    try { policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { policies = []; }
+    if (!Array.isArray(policies)) policies = [];
     console.log('📊 Loading policies from localStorage:', policies.length);
 
     // ── Filter by agent BEFORE computing stats — non-admins only see their own ──
@@ -13080,8 +13330,11 @@ async function loadRenewalsView() {
     }
 
     // Get real policy data from localStorage (now fresh for CSR)
-    let allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
-    let clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    let allPolicies, clients;
+    try { allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]'); } catch(e) { allPolicies = []; }
+    if (!Array.isArray(allPolicies)) allPolicies = [];
+    try { clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]'); } catch(e) { clients = []; }
+    if (!Array.isArray(clients)) clients = [];
 
     // Agency → agent mapping (same as Carriers tab)
     const RENEWAL_AGENCY_AGENTS = {
@@ -13148,7 +13401,8 @@ async function loadRenewalsView() {
 
     // Process policies for renewals
     const renewalPolicies = getRealRenewalPolicies(allPolicies, clients);
-    
+    window._currentRenewalPolicies = renewalPolicies; // used by loadRenewalTaskBadges
+
     // Calculate renewal statistics
     const stats = calculateRenewalStats(renewalPolicies);
     
@@ -13158,8 +13412,13 @@ async function loadRenewalsView() {
                 <h1>Policy Renewals</h1>
                 <div class="header-actions">
                     <div class="view-toggle">
-                        <button class="view-btn ${currentRenewalView === 'month' ? 'active' : ''}" onclick="switchRenewalView('month')">
+                        <button class="view-btn ${currentRenewalView === '30-45' ? 'active' : ''}" onclick="switchRenewalView('30-45')" title="30–45 day renewals with no tasks started" style="position:relative;">
+                            <i class="fas fa-exclamation-circle"></i> 30-45 Days
+                            <span id="thirty45BtnBadge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 4px;margin-left:6px;vertical-align:middle;"></span>
+                        </button>
+                        <button class="view-btn ${currentRenewalView === 'month' ? 'active' : ''}" onclick="switchRenewalView('month')" style="position:relative;">
                             <i class="fas fa-calendar-day"></i> Month View
+                            <span id="monthViewBtnBadge" style="display:none;background:#ef4444;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 4px;margin-left:6px;vertical-align:middle;"></span>
                         </button>
                         <button class="view-btn ${currentRenewalView === '3month' ? 'active' : ''}" onclick="switchRenewalView('3month')">
                             <i class="fas fa-calendar-week"></i> 3-Month View
@@ -13199,7 +13458,8 @@ async function loadRenewalsView() {
             
             <div class="renewal-content">
                 <div id="renewalListContainer" class="renewal-list-container">
-                    ${currentRenewalView === 'month' ? renderMonthView(renewalPolicies, isAdmin) :
+                    ${currentRenewalView === '30-45' ? render30to45View(renewalPolicies, isAdmin) :
+                      currentRenewalView === 'month' ? renderMonthView(renewalPolicies, isAdmin) :
                       currentRenewalView === '3month' ? renderThreeMonthView(renewalPolicies, isAdmin) :
                       renderYearView(renewalPolicies, isAdmin)}
                 </div>
@@ -13214,11 +13474,15 @@ async function loadRenewalsView() {
     // Add necessary styles
     addRenewalStyles();
 
-    // Restore green highlights for completed renewals
-    restoreRenewalHighlighting();
+    // Restore green highlights for completed renewals — MUST await so green is
+    // applied before loadRenewalTaskBadges checks card DOM state
+    await restoreRenewalHighlighting();
 
     // Apply name display preference (person vs business)
     applyRenewalNameDisplay();
+
+    // Load task counts and apply badges/filters async
+    loadRenewalTaskBadges();
 }
 
 function getRealRenewalPolicies(policies, clients) {
@@ -13404,8 +13668,12 @@ function renderMonthView(policies, isAdmin = false) {
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
                          onclick="showRenewalProfile('${policy.id}')"
                          id="renewal-card-${policy.id}"
+                         data-policy-id="${policy.id}"
                          data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
-                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}">
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
+                         style="position:relative;">
+                        <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
+                        <span id="red-badge-${policy.id}" style="display:none;position:absolute;top:-8px;left:-8px;background:#ef4444;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
                         <div class="renewal-header">
                             <div class="renewal-info">
                                 <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
@@ -13430,6 +13698,262 @@ function renderMonthView(policies, isAdmin = false) {
     `;
 }
 
+function render30to45View(policies, isAdmin = false) {
+    const today = new Date();
+    const filtered = policies.filter(p => {
+        const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+        return days >= 30 && days <= 45;
+    });
+
+    if (filtered.length === 0) {
+        return `
+            <div class="thirty45-view">
+                <h3>Renewals Due in 30–45 Days</h3>
+                <p style="color:#6b7280;padding:20px 0;">No renewals fall in this window.</p>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="thirty45-view">
+            <h3>Renewals Due in 30–45 Days</h3>
+            <div class="renewal-list" id="thirty45List">
+                ${filtered.map(policy => `
+                    <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
+                         onclick="showRenewalProfile('${policy.id}')"
+                         id="renewal-card-${policy.id}"
+                         data-policy-id="${policy.id}"
+                         data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
+                         style="position:relative;">
+                        <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
+                        <div class="renewal-header">
+                            <div class="renewal-info">
+                                <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
+                                <p>${policy.type || 'Commercial Auto'} - ${policy.carrier || 'Unknown Carrier'}</p>
+                                <p class="policy-number">Policy #${policy.policyNumber || 'N/A'}</p>
+                            </div>
+                            <div class="renewal-date">
+                                <span class="date-label">Expires</span>
+                                <span class="date-value">${formatDate(policy.expirationDate)}</span>
+                                <span class="days-remaining">${getDaysRemaining(policy.expirationDate)}</span>
+                            </div>
+                        </div>
+                        <div class="renewal-footer">
+                            ${isAdmin ? `<span class="premium">$${(policy.premium || 0).toLocaleString()}/yr</span>` : ''}
+                            <span class="agent-badge" title="Assigned to ${policy.agent || policy.assignedTo || 'Unassigned'}">${policy.agent || policy.assignedTo || 'Unassigned'}</span>
+                            <span class="status-badge ${policy.status || ''}">${(policy.status || 'pending').replace('-', ' ')}</span>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+async function loadRenewalTaskBadges() {
+    const today = new Date();
+    const _badgeSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsrBadge = (_badgeSess.role || '') === 'csr';
+
+    // Nav badges are CSR-only — hide them for admins/producers
+    if (!_isCsrBadge) {
+        ['clients-renewal-badge', 'renewals-sub-badge', 'active-leads-sub-badge'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.setProperty('display', 'none', 'important');
+        });
+    }
+
+    // Use completions already fetched by restoreRenewalHighlighting (which runs first).
+    // This avoids a duplicate API call and prevents count mismatch if the second fetch fails.
+    let renewalCompletions = window._renewalCompletionsCache || {};
+    if (!window._renewalCompletionsCache) {
+        // Fallback: fetch if cache not populated (e.g. called standalone)
+        try {
+            const compUrl = window.location.hostname === 'localhost'
+                ? 'http://localhost:3001/api/renewal-completions'
+                : '/api/renewal-completions';
+            const compResp = await fetch(compUrl);
+            if (compResp.ok) renewalCompletions = await compResp.json();
+        } catch (e) { /* ignore */ }
+    }
+
+    // Helper: is a policy considered fully done (manual completion OR all tasks checked)?
+    const isPolicyDone = (policyId, tasks) => {
+        if (renewalCompletions[policyId]) return true; // manually marked complete
+        if (tasks && tasks.length > 0 && tasks.every(t => t.completed)) return true;
+        return false;
+    };
+
+    // Always compute button badges regardless of current view
+    const allRenewalPolicies = window._currentRenewalPolicies || [];
+
+    const policies30to45 = allRenewalPolicies.filter(p => {
+        const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+        return days >= 30 && days <= 45;
+    });
+    const policiesMonth = allRenewalPolicies.filter(p => {
+        const days = Math.floor((new Date(p.expirationDate) - today) / (1000 * 60 * 60 * 24));
+        return days >= 0 && days <= 30;
+    });
+
+    // Fetch tasks for all button-relevant policies (deduplicated)
+    const fetchedTasks = {}; // policyId -> tasks[]|null
+    const policiesToFetch = [...new Map([...policies30to45, ...policiesMonth].map(p => [p.id, p])).values()];
+    await Promise.all(policiesToFetch.map(async (p) => {
+        try {
+            const resp = await fetch(getRenewalTasksApiUrl(p.id));
+            if (!resp.ok) { fetchedTasks[p.id] = null; return; }
+            const data = await resp.json();
+            fetchedTasks[p.id] = (data.tasks && data.tasks.length > 0) ? data.tasks : null;
+        } catch (e) { fetchedTasks[p.id] = null; }
+    }));
+
+    // 30-45 button badge = policies with ZERO tasks checked AND not manually completed
+    const noCompletedCount = policies30to45.filter(p => {
+        if (renewalCompletions[p.id]) return false; // manually marked complete — exclude
+        const t = fetchedTasks[p.id];
+        const doneCount = t ? t.filter(x => x.completed).length : 0;
+        return doneCount === 0; // only count if no tasks started at all
+    }).length;
+
+    const btnBadge = document.getElementById('thirty45BtnBadge');
+    if (btnBadge) {
+        if (noCompletedCount > 0) {
+            btnBadge.textContent = noCompletedCount;
+            btnBadge.style.display = 'inline-block';
+        } else {
+            btnBadge.style.display = 'none';
+        }
+    }
+
+    // Month View button badge = month policies NOT fully done
+    const monthNotDoneCount = policiesMonth.filter(p => !isPolicyDone(p.id, fetchedTasks[p.id])).length;
+
+    const monthBtnBadge = document.getElementById('monthViewBtnBadge');
+    if (monthBtnBadge) {
+        if (monthNotDoneCount > 0) {
+            monthBtnBadge.textContent = monthNotDoneCount;
+            monthBtnBadge.style.display = 'inline-block';
+        } else {
+            monthBtnBadge.style.display = 'none';
+        }
+    }
+
+    // Clients nav badge = combined total (30-45 unstarted + month view not-done)
+    const clientsNavBadge = document.getElementById('clients-renewal-badge');
+    const renewalsSubBadge = document.getElementById('renewals-sub-badge');
+    const combinedTotal = noCompletedCount + monthNotDoneCount;
+    [clientsNavBadge, renewalsSubBadge].forEach(b => {
+        if (!b) return;
+        if (combinedTotal > 0) {
+            b.textContent = combinedTotal;
+            b.style.setProperty('display', 'inline-block', 'important');
+        } else {
+            b.style.setProperty('display', 'none', 'important');
+        }
+    });
+
+    // Update card badges and handle view-specific logic
+    const is30to45View = !!document.querySelector('.thirty45-view');
+    const isMonthView = !!document.querySelector('.month-view');
+    const cards = document.querySelectorAll('[data-policy-id]');
+
+    await Promise.all(Array.from(cards).map(async (card) => {
+        const policyId = card.getAttribute('data-policy-id');
+        if (!policyId) return;
+
+        // Re-use already-fetched result or fetch now
+        let tasks;
+        if (Object.prototype.hasOwnProperty.call(fetchedTasks, policyId)) {
+            tasks = fetchedTasks[policyId];
+        } else {
+            try {
+                const resp = await fetch(getRenewalTasksApiUrl(policyId));
+                if (!resp.ok) return;
+                const data = await resp.json();
+                tasks = (data.tasks && data.tasks.length > 0) ? data.tasks : null;
+            } catch (e) { return; }
+        }
+
+        // Blue card badge:
+        //   CSR view  → show ! when NO tasks started (attention indicator), hide once any task checked
+        //   Agent view → show completed task count (progress indicator)
+        const completedCount = tasks ? tasks.filter(t => t.completed).length : 0;
+        const cardBadge = document.getElementById(`task-badge-${policyId}`);
+        if (cardBadge) {
+            if (_isCsrBadge) {
+                const noneStarted = completedCount === 0 && !renewalCompletions[policyId];
+                if (noneStarted) {
+                    cardBadge.textContent = '!';
+                    cardBadge.style.display = 'inline-block';
+                } else {
+                    cardBadge.style.display = 'none';
+                }
+            } else {
+                if (completedCount > 0) {
+                    cardBadge.textContent = completedCount;
+                    cardBadge.style.display = 'inline-block';
+                } else {
+                    cardBadge.style.display = 'none';
+                }
+            }
+        }
+
+        // Month view: red badge for incomplete, green card when fully done
+        if (isMonthView) {
+            // Check DOM state as reliable fallback: restoreRenewalHighlighting already ran
+            // and applied border-left: 4px solid rgb(16, 185, 129) to manually-completed cards
+            const cardIsGreenInDom = !!(
+                (card.style.borderLeft && card.style.borderLeft.includes('16, 185, 129')) ||
+                (card.style.background && card.style.background.includes('209, 250, 229'))
+            );
+            const allDone = cardIsGreenInDom || isPolicyDone(policyId, tasks);
+            const redBadge = document.getElementById(`red-badge-${policyId}`);
+            if (allDone) {
+                // Fully done — ensure green card, hide red badge
+                if (!cardIsGreenInDom) {
+                    card.style.setProperty('background-color', 'rgba(16, 185, 129, 0.2)', 'important');
+                    card.style.setProperty('border-left', '4px solid #10b981', 'important');
+                    card.style.setProperty('border-right', '2px solid #10b981', 'important');
+                }
+                if (redBadge) redBadge.style.display = 'none';
+            } else {
+                // Not fully done — red badge with remaining count (or ! if no tasks at all)
+                if (redBadge) {
+                    redBadge.textContent = tasks ? tasks.filter(t => !t.completed).length : '!';
+                    redBadge.style.display = 'inline-block';
+                }
+            }
+        }
+
+        // 30-45 view: cards always stay visible regardless of task status
+    }));
+
+
+
+    // Recount Month View button badge by counting visible red badges after all updates.
+    // This is more reliable than color checks — if a card's red badge is hidden, it's done.
+    if (isMonthView) {
+        const monthCards = document.querySelectorAll('.month-view .renewal-card[data-policy-id]');
+        let stillNotDone = 0;
+        monthCards.forEach(c => {
+            const policyId = c.getAttribute('data-policy-id');
+            const redBadge = document.getElementById(`red-badge-${policyId}`);
+            if (redBadge && redBadge.style.display !== 'none') stillNotDone++;
+        });
+        const monthBtn = document.getElementById('monthViewBtnBadge');
+        if (monthBtn) {
+            if (stillNotDone > 0) {
+                monthBtn.textContent = stillNotDone;
+                monthBtn.style.display = 'inline-block';
+            } else {
+                monthBtn.style.display = 'none';
+            }
+        }
+    }
+}
+
 function renderThreeMonthView(policies, isAdmin = false) {
     const today = new Date();
     // Show policies expiring within 90 days (3 months)
@@ -13451,8 +13975,11 @@ function renderThreeMonthView(policies, isAdmin = false) {
                     <div class="renewal-card ${policy.status || ''} ${selectedRenewalPolicyId === policy.id ? 'selected' : ''}"
                          onclick="showRenewalProfile('${policy.id}')"
                          id="renewal-card-${policy.id}"
+                         data-policy-id="${policy.id}"
                          data-person-name="${(policy.personName || '').replace(/"/g, '&quot;')}"
-                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}">
+                         data-biz-name="${(policy.businessName || '').replace(/"/g, '&quot;')}"
+                         style="position:relative;">
+                        <span class="renewal-task-badge" id="task-badge-${policy.id}" style="display:none;position:absolute;top:-8px;right:-8px;background:#3b82f6;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;line-height:20px;text-align:center;padding:0 4px;z-index:10;pointer-events:none;"></span>
                         <div class="renewal-header">
                             <div class="renewal-info">
                                 <h4 class="renewal-display-name">${policy.businessName || policy.client || 'Unknown Client'}</h4>
@@ -13512,8 +14039,11 @@ function renderYearView(policies, isAdmin = false) {
                                 <div class="mini-policy ${selectedRenewalPolicyId === p.id ? 'selected' : ''}"
                                      onclick="showRenewalProfile('${p.id}')"
                                      id="renewal-card-${p.id}"
+                                     data-policy-id="${p.id}"
                                      data-person-name="${(p.personName || '').replace(/"/g, '&quot;')}"
-                                     data-biz-name="${(p.businessName || '').replace(/"/g, '&quot;')}">
+                                     data-biz-name="${(p.businessName || '').replace(/"/g, '&quot;')}"
+                                     style="position:relative;">
+                                    <span class="renewal-task-badge" id="task-badge-${p.id}" style="display:none;position:absolute;top:-6px;right:-6px;background:#3b82f6;color:white;border-radius:50%;min-width:16px;height:16px;font-size:10px;font-weight:700;line-height:16px;text-align:center;padding:0 3px;z-index:10;pointer-events:none;"></span>
                                     <span class="renewal-display-name">${p.businessName || p.client}</span>
                                     <span class="mini-date">${p.expirationDate.getDate()}</span>
                                 </div>
@@ -13919,7 +14449,7 @@ function getDaysRemaining(date) {
 function getRenewalTasksApiUrl(policyId) {
     const base = window.location.hostname === 'localhost'
         ? 'https://localhost:3001'
-        : `https://${window.location.hostname}:3001`;
+        : '';
     return `${base}/api/renewal-tasks/${policyId}`;
 }
 
@@ -14144,7 +14674,7 @@ function highlightPolicyAsCompleted() {
     // Store completion status to server using policyId as key
     const completionApiUrl = window.location.hostname === 'localhost'
         ? 'http://localhost:3001/api/renewal-completions'
-        : `https://${window.location.hostname}:3001/api/renewal-completions`;
+        : '/api/renewal-completions';
     fetch(completionApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14191,7 +14721,7 @@ function removePolicyHighlight() {
     // Remove completion status from server using policyId as key
     const completionDeleteUrl = window.location.hostname === 'localhost'
         ? `http://localhost:3001/api/renewal-completions/${currentPolicyId}`
-        : `https://${window.location.hostname}:3001/api/renewal-completions/${currentPolicyId}`;
+        : `/api/renewal-completions/${currentPolicyId}`;
     fetch(completionDeleteUrl, { method: 'DELETE' })
         .then(r => { if (r.ok) console.log('✅ Removed renewal completion from server'); })
         .catch(e => console.error('Error removing completion:', e));
@@ -14205,11 +14735,11 @@ async function restoreRenewalHighlighting() {
     try {
         const apiUrl = window.location.hostname === 'localhost'
             ? 'http://localhost:3001/api/renewal-completions'
-            : `https://${window.location.hostname}:3001/api/renewal-completions`;
+            : '/api/renewal-completions';
         const response = await fetch(apiUrl);
         if (response.ok) {
             completions = await response.json();
-            console.log('✅ Loaded renewal completions from server');
+            window._renewalCompletionsCache = completions; // share with loadRenewalTaskBadges
         }
     } catch (error) {
         console.error('Error loading completions:', error);
@@ -14234,7 +14764,7 @@ async function restoreRenewalHighlighting() {
                 // Migrate to server so localStorage is no longer needed
                 const migrateUrl = window.location.hostname === 'localhost'
                     ? 'http://localhost:3001/api/renewal-completions'
-                    : `https://${window.location.hostname}:3001/api/renewal-completions`;
+                    : '/api/renewal-completions';
                 fetch(migrateUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -17161,9 +17691,14 @@ async function fetchLeadsFromServer() {
         const serverLeads = await response.json();
         console.log(`✅ DEBUG: Fetched ${serverLeads.length} leads from server`);
 
-        // Store in localStorage for future use
-        localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
-        console.log('💾 DEBUG: Stored leads in localStorage as insurance_leads');
+        // Smart merge: preserve any localStorage-only leads (e.g. manually added leads
+        // whose POST may not have completed yet) instead of direct overwrite
+        const existingLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const serverIdSet = new Set(serverLeads.map(l => String(l.id)));
+        const localOnly = existingLeads.filter(l => !serverIdSet.has(String(l.id)));
+        const merged = [...serverLeads, ...localOnly];
+        localStorage.setItem('insurance_leads', JSON.stringify(merged));
+        console.log(`💾 DEBUG: Smart-merged ${serverLeads.length} server + ${localOnly.length} local-only leads`);
 
         return serverLeads;
 
@@ -20413,6 +20948,29 @@ async function _jnSilentImport(parsedPolicies) {
             if (!ep.term) ep.term = _ivansCalcTerm(ep.effectiveDate, ep.expirationDate);
             const _siNR = _ivansNewRenewal(p.transactionCode);
             if (_siNR && !ep.newRenewal) ep.newRenewal = _siNR;
+            // Update policy status based on download purpose and expiration
+            const _siDlP = (p.downloadPurpose || '').toLowerCase();
+            if (_siDlP.includes('cancel')) {
+                ep.policyStatus = _siDlP.includes('confirm') ? 'Cancelled' : 'Pending Cancel';
+            } else if (_siDlP.includes('reinstat')) {
+                ep.policyStatus = 'Active';
+            } else if (_siDlP.includes('non-renew') || _siDlP.includes('nonrenew')) {
+                ep.policyStatus = 'Expired';
+            } else {
+                const _siExpStr = ep.expirationDate || '';
+                if (_siExpStr) {
+                    const _siExpP = _siExpStr.split('/');
+                    let _siExpD;
+                    if (_siExpP.length === 3) _siExpD = new Date(_siExpP[2], _siExpP[0]-1, _siExpP[1]);
+                    else if (/^\d{4}-/.test(_siExpStr)) _siExpD = new Date(_siExpStr);
+                    if (_siExpD && !isNaN(_siExpD) && _siExpD < new Date()) {
+                        const _siCurSt = (ep.policyStatus || '').toLowerCase();
+                        if (_siCurSt === 'active' || _siCurSt === '' || _siCurSt === 'pending renewal') {
+                            ep.policyStatus = 'Expired';
+                        }
+                    }
+                }
+            }
             ep.ivansUpdated = new Date().toISOString();
             ep.source = ep.source || 'jenesis';
             updated++;
@@ -20446,7 +21004,21 @@ async function _jnSilentImport(parsedPolicies) {
                 premium:        n ? `$${n.toLocaleString()}/yr` : '',
                 financial:      { 'Annual Premium': n || 0 },
                 lob:            p.lob || '',
-                policyStatus:   'active',
+                policyStatus:   (() => {
+                    const _dp = (p.downloadPurpose || '').toLowerCase();
+                    if (_dp.includes('cancel') && _dp.includes('confirm')) return 'Cancelled';
+                    if (_dp.includes('cancel')) return 'Pending Cancel';
+                    if (_dp.includes('non-renew') || _dp.includes('nonrenew')) return 'Expired';
+                    const _ex = p.expirationDate || '';
+                    if (_ex) {
+                        const _ep = _ex.split('/');
+                        let _ed;
+                        if (_ep.length === 3) _ed = new Date(_ep[2], _ep[0]-1, _ep[1]);
+                        else if (/^\d{4}-/.test(_ex)) _ed = new Date(_ex);
+                        if (_ed && !isNaN(_ed) && _ed < new Date()) return 'Expired';
+                    }
+                    return 'Active';
+                })(),
                 source:         'jenesis',
                 createdAt:      Date.now(),
                 ivansUpdated:   new Date().toISOString(),
@@ -23163,6 +23735,30 @@ async function confirmIvansImport() {
                 if (!policies[idx].term) policies[idx].term = _ivansCalcTerm(policies[idx].effectiveDate, policies[idx].expirationDate);
                 const _ciNR = _ivansNewRenewal(p.transactionCode);
                 if (_ciNR && !policies[idx].newRenewal) policies[idx].newRenewal = _ciNR;
+                // Update policy status based on download purpose and expiration date
+                const _dlPurpose = (p.downloadPurpose || '').toLowerCase();
+                if (_dlPurpose.includes('cancel')) {
+                    policies[idx].policyStatus = _dlPurpose.includes('confirm') ? 'Cancelled' : 'Pending Cancel';
+                } else if (_dlPurpose.includes('reinstat')) {
+                    policies[idx].policyStatus = 'Active';
+                } else if (_dlPurpose.includes('non-renew') || _dlPurpose.includes('nonrenew')) {
+                    policies[idx].policyStatus = 'Expired';
+                } else {
+                    // Check if policy is expired based on expiration date
+                    const _expStr = policies[idx].expirationDate || '';
+                    if (_expStr) {
+                        const _expParts = _expStr.split('/');
+                        let _expDate;
+                        if (_expParts.length === 3) _expDate = new Date(_expParts[2], _expParts[0]-1, _expParts[1]);
+                        else if (/^\d{4}-/.test(_expStr)) _expDate = new Date(_expStr);
+                        if (_expDate && !isNaN(_expDate) && _expDate < new Date()) {
+                            const curStatus = (policies[idx].policyStatus || '').toLowerCase();
+                            if (curStatus === 'active' || curStatus === '' || curStatus === 'pending renewal') {
+                                policies[idx].policyStatus = 'Expired';
+                            }
+                        }
+                    }
+                }
                 policies[idx].ivansUpdated = new Date().toISOString();
                 updated++;
                 // Upsert client record FIRST so clientId is set before server sync
@@ -23233,7 +23829,22 @@ async function confirmIvansImport() {
                 premium:        resolvedPrem ? `$${resolvedPrem.toLocaleString()}/yr` : '',
                 financial:      { 'Annual Premium': resolvedPrem||0 },
                 lob:            p.lob||'',
-                policyStatus:   'active',
+                policyStatus:   (() => {
+                    const _dp = (p.downloadPurpose || '').toLowerCase();
+                    if (_dp.includes('cancel') && _dp.includes('confirm')) return 'Cancelled';
+                    if (_dp.includes('cancel')) return 'Pending Cancel';
+                    if (_dp.includes('non-renew') || _dp.includes('nonrenew')) return 'Expired';
+                    // Check if expiration date is in the past
+                    const _ex = p.expirationDate || '';
+                    if (_ex) {
+                        const _ep = _ex.split('/');
+                        let _ed;
+                        if (_ep.length === 3) _ed = new Date(_ep[2], _ep[0]-1, _ep[1]);
+                        else if (/^\d{4}-/.test(_ex)) _ed = new Date(_ex);
+                        if (_ed && !isNaN(_ed) && _ed < new Date()) return 'Expired';
+                    }
+                    return 'Active';
+                })(),
                 source:         'ivans',
                 createdAt:      Date.now(),
                 ivansUpdated:   new Date().toISOString(),
@@ -24241,21 +24852,24 @@ function generateViewTabContent(tabId, policy) {
         }
             
         case 'vehicles': {
-            const vehicles = Array.isArray(policy.vehicles) ? policy.vehicles : [];
+            const _allUnitsV = Array.isArray(policy.vehicles) ? policy.vehicles : [];
             const _pIdV = policy.id || policy.policyNumber || '';
-            const _vehDataAttrV = vehicles.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(vehicles))}"` : '';
-            return `
-                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
-                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
-                        <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
-                        <span style="display:flex;gap:6px;">
-                            <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
-                            ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
-                        </span>
-                    </h3>
-                    ${vehicles.length === 0
-                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
-                        : `<div style="overflow-x:auto;">
+            const _vehDataAttrV = _allUnitsV.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(_allUnitsV))}"` : '';
+            const _TRL_MAKES_V = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
+            const _TRL_VIN_V = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+            const _isTrailerV = (v) => {
+                const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
+                if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                const make = (v.make || v.Make || '').toLowerCase().trim();
+                if (_TRL_MAKES_V.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
+                if (make === 'mac') return true;
+                const vin = (v.vin || v.VIN || v.id || '').toUpperCase().trim();
+                if (vin.length >= 3 && _TRL_VIN_V.some(p => vin.startsWith(p))) return true;
+                return false;
+            };
+            const vehiclesV = _allUnitsV.map((v, i) => ({...v, _origIdx: i})).filter(v => !_isTrailerV(v));
+            const trailersV = _allUnitsV.map((v, i) => ({...v, _origIdx: i})).filter(v => _isTrailerV(v));
+            const _unitTable = (units) => `<div style="overflow-x:auto;">
                             <table style="width:100%;border-collapse:collapse;font-size:13px;">
                                 <thead>
                                     <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
@@ -24266,13 +24880,13 @@ function generateViewTabContent(tabId, policy) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${vehicles.map((v, i) => `
+                                    ${units.map((v, i) => `
                                         <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
                                             <td style="padding:4px 6px;text-align:center;">
-                                                <button onclick="showVehicleDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                                <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View details">
                                                     <i class="fas fa-eye" style="font-size:12px;"></i>
                                                 </button>
                                             </td>
@@ -24280,7 +24894,31 @@ function generateViewTabContent(tabId, policy) {
                                     `).join('')}
                                 </tbody>
                             </table>
-                        </div>`}
+                        </div>`;
+            return `
+                <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                        <span><i class="fas fa-truck" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehiclesV.length})</span>
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${vehiclesV.length > 0 ? `<button onclick="showVehicleDetailModal(${vehiclesV[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
+                    </h3>
+                    ${vehiclesV.length === 0
+                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
+                        : _unitTable(vehiclesV)}
+                </div>
+                <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="trailersViewSection" ${_vehDataAttrV} data-policy-id="${_pIdV}">
+                    <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                        <span><i class="fas fa-trailer" style="margin-right:7px;color:#374151;"></i>Trailers (${trailersV.length})</span>
+                        <span style="display:flex;gap:6px;">
+                            <button onclick="window.addNewTrailer()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                            ${trailersV.length > 0 ? `<button onclick="showVehicleDetailModal(${trailersV[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                        </span>
+                    </h3>
+                    ${trailersV.length === 0
+                        ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No trailers on this policy</p>'
+                        : _unitTable(trailersV)}
                 </div>
             `;
         }
@@ -24503,10 +25141,24 @@ function generateViewTabContent(tabId, policy) {
                     })()}
                 `;
 
-                // Vehicles (right column)
-                const vehicles = Array.isArray(policy.vehicles) ? policy.vehicles : [];
-                const _vehDataAttr = vehicles.length > 0
-                    ? `data-vehicles="${encodeURIComponent(JSON.stringify(vehicles))}"`
+                // Vehicles + Trailers (right column) — split by bodyType, make, or VIN
+                const _allUnits = Array.isArray(policy.vehicles) ? policy.vehicles : [];
+                const _TRAILER_MAKES = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
+                const _TRAILER_VIN_PFX = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+                const _isTrailerBT = (v) => {
+                    const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
+                    if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                    const make = (v.make || v.Make || '').toLowerCase().trim();
+                    if (_TRAILER_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
+                    if (make === 'mac') return true;
+                    const vin = (v.vin || v.VIN || v.id || '').toUpperCase().trim();
+                    if (vin.length >= 3 && _TRAILER_VIN_PFX.some(p => vin.startsWith(p))) return true;
+                    return false;
+                };
+                const vehicles = _allUnits.map((v, i) => ({...v, _origIdx: i})).filter(v => !_isTrailerBT(v));
+                const trailers = _allUnits.map((v, i) => ({...v, _origIdx: i})).filter(v => _isTrailerBT(v));
+                const _vehDataAttr = _allUnits.length > 0
+                    ? `data-vehicles="${encodeURIComponent(JSON.stringify(_allUnits))}"`
                     : '';
                 const vehiclesHTML = vehicles.length === 0
                     ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No vehicles on this policy</p>'
@@ -24527,7 +25179,35 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
-                                            <button onclick="showVehicleDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                            <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
+                                                <i class="fas fa-eye" style="font-size:12px;"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+                const trailersHTML = trailers.length === 0
+                    ? '<p style="color:#9ca3af;text-align:center;padding:12px;font-size:13px;">No trailers on this policy</p>'
+                    : `<div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                            <thead>
+                                <tr style="background:#f3f4f6;border-bottom:2px solid #d1d5db;">
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;width:36px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${trailers.map((v, i) => `
+                                    <tr style="border-bottom:1px solid #e5e7eb;background:${i%2===0?'#fff':'#f9fafb'};">
+                                        <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:4px 6px;text-align:center;">
+                                            <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View trailer details">
                                                 <i class="fas fa-eye" style="font-size:12px;"></i>
                                             </button>
                                         </td>
@@ -24577,17 +25257,27 @@ function generateViewTabContent(tabId, policy) {
                             ${coverageTableHTML}
                         </div>
 
-                        <!-- Right: Vehicles + Drivers -->
+                        <!-- Right: Vehicles + Trailers + Drivers -->
                         <div>
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
-                                    <span><i class="fas fa-car" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
+                                    <span><i class="fas fa-truck" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
                                     <span style="display:flex;gap:6px;">
                                         <button onclick="window.addNewVehicle()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new vehicle"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
-                                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(0)" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                        ${vehicles.length > 0 ? `<button onclick="showVehicleDetailModal(${vehicles[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all vehicle details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
                                     </span>
                                 </h3>
                                 ${vehiclesHTML}
+                            </div>
+                            <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="trailersViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
+                                <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                                    <span><i class="fas fa-trailer" style="margin-right:7px;color:#374151;"></i>Trailers (${trailers.length})</span>
+                                    <span style="display:flex;gap:6px;">
+                                        <button onclick="window.addNewTrailer()" style="background:#dcfce7;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#16a34a;font-size:12px;font-weight:500;" title="Add a new trailer"><i class="fas fa-plus" style="margin-right:4px;"></i>Add</button>
+                                        ${trailers.length > 0 ? `<button onclick="showVehicleDetailModal(${trailers[0]._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:#4f46e5;font-size:12px;font-weight:500;" title="View all trailer details"><i class="fas fa-eye" style="margin-right:4px;"></i>Details</button>` : ''}
+                                    </span>
+                                </h3>
+                                ${trailersHTML}
                             </div>
                             <div class="form-section" style="margin-bottom:0;padding:20px;border-radius:12px;" id="driversViewSection" ${_drvDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
@@ -25184,19 +25874,26 @@ window.syncFromJenesis = async function(policyId, policyNumber, clientName) {
         }
 
         // Drivers — use detail data from JenesisNow modal (DOB, license, etc.)
+        // Skip placeholder entries like "No data." to avoid overwriting real driver data
         if (jn.drivers && jn.drivers.length) {
-            const oldDrivers = pol.drivers || [];
-            pol.drivers = jn.drivers.map(d => {
-                const name = (d.name || '').trim();
-                const existing = oldDrivers.find(od => (od.name || '').trim().toLowerCase() === name.toLowerCase());
-                return {
-                    name: d.firstName && d.lastName ? `${d.firstName} ${d.middleName || ''} ${d.lastName}`.replace(/\s+/g, ' ').trim() : name,
-                    licenseNumber: d.licenseNumber || existing?.licenseNumber || existing?.license || '',
-                    licenseState: d.licenseState || existing?.licenseState || '',
-                    dateOfBirth: d.dateOfBirth ? _jnDateToISO(d.dateOfBirth) : (existing?.dateOfBirth || ''),
-                    gender: d.gender || existing?.gender || '',
-                };
+            const realDrivers = jn.drivers.filter(d => {
+                const n = (d.name || '').trim().toLowerCase();
+                return n && n !== 'no data.' && n !== 'no data' && n !== 'n/a' && n !== 'none' && n.length > 2;
             });
+            if (realDrivers.length > 0) {
+                const oldDrivers = pol.drivers || [];
+                pol.drivers = realDrivers.map(d => {
+                    const name = (d.name || '').trim();
+                    const existing = oldDrivers.find(od => (od.name || '').trim().toLowerCase() === name.toLowerCase());
+                    return {
+                        name: d.firstName && d.lastName ? `${d.firstName} ${d.middleName || ''} ${d.lastName}`.replace(/\s+/g, ' ').trim() : name,
+                        licenseNumber: d.licenseNumber || existing?.licenseNumber || existing?.license || '',
+                        licenseState: d.licenseState || existing?.licenseState || '',
+                        dateOfBirth: d.dateOfBirth ? _jnDateToISO(d.dateOfBirth) : (existing?.dateOfBirth || ''),
+                        gender: d.gender || existing?.gender || '',
+                    };
+                });
+            }
         }
 
         // Coverages — write in CoveragesArray format so the coverage tab renders them
@@ -25471,6 +26168,26 @@ window.addNewVehicle = function() {
     const blank = { year:'', make:'', model:'', vin:'', bodyType:'', gvw:'', garageState:'', garageZip:'', garageAddress:'', garageCity:'', use:'', radius:'', costNew:'', cargoLimit:'' };
     vehicles.push(blank);
     section.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+    // Also update trailersViewSection data-vehicles to stay in sync
+    const trlSec = document.getElementById('trailersViewSection');
+    if (trlSec) trlSec.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+    showVehicleDetailModal(vehicles.length - 1);
+};
+
+window.addNewTrailer = function() {
+    const section = document.getElementById('vehiclesViewSection') || document.getElementById('trailersViewSection');
+    if (!section) return;
+    const raw = section.getAttribute('data-vehicles');
+    let vehicles = [];
+    try { if (raw) vehicles = JSON.parse(decodeURIComponent(raw)); } catch(e) {}
+    const blank = { year:'', make:'', model:'', vin:'', bodyType:'Trailer', gvw:'', garageState:'', garageZip:'', garageAddress:'', garageCity:'', use:'', radius:'', costNew:'', cargoLimit:'' };
+    vehicles.push(blank);
+    const encoded = encodeURIComponent(JSON.stringify(vehicles));
+    // Update both sections' data-vehicles to stay in sync
+    const vehSec = document.getElementById('vehiclesViewSection');
+    const trlSec = document.getElementById('trailersViewSection');
+    if (vehSec) vehSec.setAttribute('data-vehicles', encoded);
+    if (trlSec) trlSec.setAttribute('data-vehicles', encoded);
     showVehicleDetailModal(vehicles.length - 1);
 };
 
@@ -25768,7 +26485,10 @@ window.showVehicleDetailModal = function(startIndex) {
 
         vehicles[currentIdx] = updated;
         const sec = document.getElementById('vehiclesViewSection');
-        if (sec) sec.setAttribute('data-vehicles', encodeURIComponent(JSON.stringify(vehicles)));
+        const encoded_v = encodeURIComponent(JSON.stringify(vehicles));
+        if (sec) sec.setAttribute('data-vehicles', encoded_v);
+        const trlSec = document.getElementById('trailersViewSection');
+        if (trlSec) trlSec.setAttribute('data-vehicles', encoded_v);
 
         const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
         const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
@@ -29783,8 +30503,11 @@ async function fetchLeadsForReport(agentName) {
         const serverLeads = await response.json();
         console.log(`Fetched ${serverLeads.length} leads from server`);
 
-        // Save to localStorage for future use
-        localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
+        // Smart merge: preserve localStorage-only leads instead of direct overwrite
+        const existingLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+        const serverIdSet = new Set(serverLeads.map(l => String(l.id)));
+        const localOnly = existingLeads.filter(l => !serverIdSet.has(String(l.id)));
+        localStorage.setItem('insurance_leads', JSON.stringify([...serverLeads, ...localOnly]));
 
         // Now call the original download function with fresh data
         downloadAgentReport(agentName);
@@ -38309,10 +39032,10 @@ function getNextAction(stage, lead) {
         console.log(`🔍 STAGE CHECK: stage="${stage}" (type: ${typeof stage})`);
         console.log(`🔍 STAGE CHECK: Checking conditions...`);
         if (stage === 'quoted' || stage === 'info_requested' || stage === 'Info Requested' ||
+            stage === 'full_info_requested' || stage === 'Full Info Requested' ||
             stage === 'contact_attempted' || stage === 'Contact Attempted' ||
             stage === 'loss_runs_requested' || stage === 'Loss Runs Requested' ||
-            stage === 'quote_sent' || stage === 'quote-sent-unaware' || stage === 'quote-sent-aware' ||
-            stage === 'sale' || stage === 'Sale') {
+            stage === 'quote_sent' || stage === 'quote-sent-unaware' || stage === 'quote-sent-aware') {
             console.log(`🔍 STAGE CHECK: ✅ STAGE MATCHED - proceeding to completion check`);
 
             // Reach out is complete when ACTUAL completion actions happened:
@@ -38368,9 +39091,11 @@ function getNextAction(stage, lead) {
         'new': 'Assign Stage',
         'contact_attempted': 'Reach out',
         'info_requested': 'Reach out',
-        'info_received': 'Prepare Quote',
+        'info_received': 'Prepare Basic Quote',
+        'full_info_requested': 'Reach out',
+        'full_info_received': 'Prepare App & Quotes',
         'loss_runs_requested': 'Reach out',
-        'loss_runs_received': 'Prepare app.',
+        'loss_runs_received': 'Send out loss runs',
         'app_prepared': 'Email brokers',
         'app_sent': '',
         'quoted': 'Email Quote, and make contact',
@@ -38379,15 +39104,18 @@ function getNextAction(stage, lead) {
         'quote-sent-aware': 'Reach out',
         'interested': 'Reach out',
         'not-interested': 'Archive lead',
+        'sale': 'Update Client',
         'closed': 'Process complete',
 
         // Title case with spaces format (actual database format)
         'New': 'Assign Stage',
         'Contact Attempted': 'Reach out',
         'Info Requested': 'Reach out',
-        'Info Received': 'Prepare Quote',
+        'Info Received': 'Prepare Basic Quote',
+        'Full Info Requested': 'Reach out',
+        'Full Info Received': 'Prepare App & Quotes',
         'Loss Runs Requested': 'Reach out',
-        'Loss Runs Received': 'Prepare app.',
+        'Loss Runs Received': 'Send out loss runs',
         'App Prepared': 'Email brokers',
         'App Sent': '',
         'Quoted': 'Email Quote, and make contact',
@@ -38396,6 +39124,7 @@ function getNextAction(stage, lead) {
         'Quote Sent Aware': 'Reach out',
         'Interested': 'Reach out',
         'Not Interested': 'Archive lead',
+        'Sale': 'Update Client',
         'Closed': 'Process complete'
     };
 
@@ -39367,11 +40096,24 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                       policy.insuredName ||
                       'Unknown Client';
 
-    // Extract vehicle data from policy
+    // Extract vehicle data from policy — separate trucks from trailers by bodyType
     const vehicleData = [];
+    const trailerData = [];
+    const _QA_TRL_MAKES = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
+    const _QA_TRL_VIN = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+    const _isTrailerQA = (v) => {
+        const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
+        if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+        const make = (v.make || v.Make || '').toLowerCase().trim();
+        if (_QA_TRL_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
+        if (make === 'mac') return true;
+        const vin = (v.vin || v.VIN || v.id || '').toUpperCase().trim();
+        if (vin.length >= 3 && _QA_TRL_VIN.some(p => vin.startsWith(p))) return true;
+        return false;
+    };
     if (policy.vehicles && Array.isArray(policy.vehicles)) {
         policy.vehicles.forEach((vehicle, index) => {
-            vehicleData.push({
+            const unit = {
                 year: vehicle.Year || vehicle.year || '',
                 make: vehicle.Make || vehicle.make || '',
                 model: vehicle.Model || vehicle.model || '',
@@ -39379,7 +40121,12 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                 type: vehicle.Type || vehicle.type || '',
                 value: vehicle.Value || vehicle.value || '',
                 radius: vehicle.Radius || vehicle.radius || ''
-            });
+            };
+            if (_isTrailerQA(vehicle)) {
+                trailerData.push(unit);
+            } else {
+                vehicleData.push(unit);
+            }
         });
     }
 
@@ -39492,6 +40239,18 @@ window.createQuoteApplicationForPolicy = function(policyId) {
     });
 
     // Create a temporary lead-like object for the policy-based quote application
+    // Use expiration date as the renewal effective date
+    const _expRaw = policy.expirationDate || policy.expiration_date || '';
+    let _renewalEffDate = '';
+    if (_expRaw) {
+        // Convert MM/DD/YYYY or YYYY-MM-DD to YYYY-MM-DD for the date input
+        const _expParts = _expRaw.split('/');
+        if (_expParts.length === 3 && _expParts[2].length === 4) {
+            _renewalEffDate = `${_expParts[2]}-${_expParts[0].padStart(2,'0')}-${_expParts[1].padStart(2,'0')}`;
+        } else if (/^\d{4}-\d{2}-\d{2}/.test(_expRaw)) {
+            _renewalEffDate = _expRaw.substring(0, 10);
+        }
+    }
     const tempLeadData = {
         id: `policy_${policyId}`,
         name: clientName,
@@ -39504,7 +40263,9 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         policyId: policyId,
         isPolicyQuote: true,
         agent: policy.agent || '',
+        renewalDate: _renewalEffDate,
         policyVehicles: vehicleData,
+        policyTrailers: trailerData,
         policyDrivers: driverData
     };
 
@@ -44836,6 +45597,10 @@ function filterTodosBySchedule(todos, scheduleView) {
         if (me && CHAT_USERS.includes(me)) {
             _ensureBubble();
             _chatBubble.style.display = 'flex';
+        } else if (me) {
+            // Non-chat users (CSR, etc.) still get bug report & suggestion buttons
+            _ensureBubble();
+            if (_chatBubble) _chatBubble.style.display = 'flex';
         } else if (++_bubbleInitTries < 40) {
             setTimeout(_initBubble, 250);
         }
