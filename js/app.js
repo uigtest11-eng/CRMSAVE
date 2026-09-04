@@ -25187,6 +25187,7 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Value</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25196,6 +25197,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View trailer details">
                                                 <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -25220,7 +25222,8 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Date of Hire</th>
-                                    <th style="padding:7px 8px;text-align:left;color:#374151;">CDL Exp</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">CDL Length</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Yrs Exp</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25231,7 +25234,8 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d.dateOfHire||'—'}</td>
-                                        <td style="padding:7px 8px;color:#374151;">${d.cdlExpiration||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.cdlLength||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.yearsCommercialExperience||d.yearsExperience||'—'}</td>
                                         <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
                                     </tr>
                                 `).join('')}
@@ -26661,7 +26665,6 @@ window.showDriverDetailModal = function(startIndex) {
                             ${_inp('originalLicenseDate','Orig. License Date', get('originalLicenseDate','Originallicensedate','original_license_date'))}
                             ${_inp('dateOfHire','Date of Hire', get('dateOfHire','date_of_hire','Dateofhire'))}
                             ${_inp('cdlLength','CDL Length (yrs)', get('cdlLength','cdl_length','Cdllength'))}
-                            ${_inp('cdlExpiration','CDL Expiration', get('cdlExpiration','cdl_expiration','Cdlexpiration'))}
                             ${_sH('Other','16px 0')}
                             ${_inp('yearsCommercialExperience','Years Commercial Exp', get('yearsCommercialExperience','Yearscommercialexperience','years_commercial_experience'))}
                             ${_inp('percentUse','Percent Use', get('percentUse','Percentuse','percent_use'))}
@@ -26698,7 +26701,7 @@ window.showDriverDetailModal = function(startIndex) {
             vehicleId: g('vehicleId'), licenseState: g('licenseState'), licenseNumber: g('licenseNumber'),
             'License Number': g('licenseNumber'),
             stateLicenseYear: g('stateLicenseYear'), originalLicenseDate: g('originalLicenseDate'),
-            dateOfHire: g('dateOfHire'), cdlLength: g('cdlLength'), cdlExpiration: g('cdlExpiration'),
+            dateOfHire: g('dateOfHire'), cdlLength: g('cdlLength'),
             yearsCommercialExperience: g('yearsCommercialExperience'), percentUse: g('percentUse'),
             comment: g('comment'),
             dateAdded: g('dateAdded'), effectiveDateAdded: g('effectiveDateAdded'),
