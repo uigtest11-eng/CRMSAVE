@@ -364,7 +364,31 @@ window.createQuoteApplicationSimple = function(leadId) {
     const leads = JSON.parse(localStorage.getItem('leads') || '[]');
     const insuranceLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
     const allLeads = [...leads, ...insuranceLeads];
-    const lead = allLeads.find(l => l.id == leadId);
+    let lead = allLeads.find(l => l.id == leadId);
+
+    // If not found and leadId has policy_ prefix, look up from policy/client data
+    if (!lead && typeof leadId === 'string' && leadId.startsWith('policy_')) {
+        const policyId = leadId.replace('policy_', '');
+        const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const clients = JSON.parse(localStorage.getItem('clients') || '[]');
+        const policy = allPolicies.find(p => p.id === policyId || p.policyNumber === policyId);
+        if (policy) {
+            const client = clients.find(c => c.id === policy.clientId) || {};
+            lead = {
+                id: leadId,
+                name: policy.insuredName || policy.insured?.['Name/Business Name'] || policy.clientName || client.name || '',
+                phone: client.phone || policy.clientPhone || '',
+                email: client.email || policy.clientEmail || '',
+                address: client.address || policy.insured?.['Mailing Address'] || '',
+                dotNumber: policy.insured?.['USDOT'] || policy.dotNumber || client.dotNumber || '',
+                mcNumber: policy.insured?.['MC#'] || policy.mcNumber || client.mcNumber || '',
+                yearsInBusiness: policy.insured?.['Years in Business'] || client.yearsInBusiness || '',
+                renewalDate: policy.expirationDate || policy.endDate || '',
+                agent: policy.agent || ''
+            };
+            console.log('📋 Built lead from policy data:', policy.policyNumber);
+        }
+    }
 
     if (!lead) {
         console.error('Lead not found with ID:', leadId);
@@ -423,6 +447,13 @@ window.createQuoteApplicationSimple = function(leadId) {
         position: relative;
     `;
 
+    // Determine agency branding based on agent
+    const _agentName = (lead.agent || lead.assignedTo || '').toLowerCase().trim();
+    const _isUIG = _agentName === 'maureen';
+    const _agencyName = _isUIG ? 'United Insurance Group LLC' : 'Vanguard Insurance Group LLC';
+    const _agencyAddr = _isUIG ? 'Medina, OH 44256 • 330-259-7438' : 'Brunswick, OH 44256 • 330-460-0872';
+    const _agencyPhone = _isUIG ? '330-259-7438' : '330-460-0872';
+
     content.innerHTML = `
         <div style="position: relative;">
             <button onclick="closeQuoteApplicationModal();"
@@ -433,8 +464,8 @@ window.createQuoteApplicationSimple = function(leadId) {
                 <span style="margin-top: -2px;">&times;</span>
             </button>
             <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
-                <h2 style="margin: 0; color: #0066cc;">Vanguard Insurance Group LLC</h2>
-                <p style="margin: 5px 0;">Brunswick, OH 44256 • 330-460-0872</p>
+                <h2 style="margin: 0; color: #0066cc;">${_agencyName}</h2>
+                <p style="margin: 5px 0;">${_agencyAddr}</p>
                 <h3 style="margin: 10px 0 0 0;">TRUCKING APPLICATION</h3>
             </div>
         </div>
@@ -549,6 +580,13 @@ window.createQuoteApplicationSimple = function(leadId) {
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-size: 12px;">Tanker:</label>
+                        <div style="display: flex; align-items: center;">
+                            <input type="text" value="" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
+                            <span style="margin-left: 3px;">%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 3px; font-size: 12px;">Hopper-Bottom Trailer:</label>
                         <div style="display: flex; align-items: center;">
                             <input type="text" value="" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
                             <span style="margin-left: 3px;">%</span>
@@ -787,13 +825,13 @@ window.createQuoteApplicationSimple = function(leadId) {
                             <option value="$30,000/$1,000 Ded.">$30,000/$1,000 Ded.</option>
                             <option value="$40,000/$1,000 Ded.">$40,000/$1,000 Ded.</option>
                             <option value="$40,000/$2,000 Ded.">$40,000/$2,000 Ded.</option>
-                            <option value="$50,000" selected>$50,000</option>
+                            <option value="$50,000">$50,000</option>
                             <option value="$60,000/$2,000 Ded.">$60,000/$2,000 Ded.</option>
                             <option value="$75,000">$75,000</option>
                             <option value="$100,000">$100,000</option>
                             <option value="$145,000/$1,000 Ded.">$145,000/$1,000 Ded.</option>
                             <option value="$150,000">$150,000</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -801,11 +839,11 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="$25,000">$25,000</option>
                             <option value="$30,000/$1,000 Ded.">$30,000/$1,000 Ded.</option>
-                            <option value="$50,000" selected>$50,000</option>
+                            <option value="$50,000">$50,000</option>
                             <option value="$75,000">$75,000</option>
                             <option value="$100,000">$100,000</option>
                             <option value="$150,000">$150,000</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -813,7 +851,7 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="Included">Included</option>
                             <option value="$250 DED.">$250 DED.</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -821,8 +859,10 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="$500,000">$500,000</option>
                             <option value="$1,000,000" selected>$1,000,000</option>
+                            <option value="$1,000,000 / $2,000,000 Aggregate">$1,000,000 / $2,000,000 Aggregate</option>
                             <option value="$1,500,000">$1,500,000</option>
                             <option value="$2,000,000">$2,000,000</option>
+                            <option value="$2,000,000 / $4,000,000 Aggregate">$2,000,000 / $4,000,000 Aggregate</option>
                             <option value="$5,000,000">$5,000,000</option>
                             <option value="Not Included">Not Included</option>
                         </select>
@@ -856,12 +896,12 @@ window.createQuoteApplicationSimple = function(leadId) {
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                             <option value="$5,000">$5,000</option>
                             <option value="$10,000">$10,000</option>
-                            <option value="$15,000" selected>$15,000</option>
+                            <option value="$15,000">$15,000</option>
                             <option value="$25,000">$25,000</option>
                             <option value="$50,000">$50,000</option>
                             <option value="Included DED. $2500">Included DED. $2500</option>
                             <option value="$150,000/$2,500 DED.">$150,000/$2,500 DED.</option>
-                            <option value="Not Included">Not Included</option>
+                            <option value="Not Included" selected>Not Included</option>
                         </select>
                     </div>
                     <div>
@@ -896,6 +936,9 @@ window.createQuoteApplicationSimple = function(leadId) {
     document.body.appendChild(modal);
     console.log('Enhanced modal created and added to DOM');
 
+    // Always inject "Custom..." option into coverage dropdowns
+    setTimeout(() => { _injectCustomOptions(content); }, 50);
+
     // AUTO-POPULATE from lead profile data with improved timing
     setTimeout(() => {
         // Skip auto-population if we're editing an existing application
@@ -919,7 +962,10 @@ window.createQuoteApplicationSimple = function(leadId) {
             }
 
             let trailersToPopulate = [];
-            if (lead.trailers && lead.trailers.length > 0) {
+            if (lead.isPolicyQuote && lead.policyTrailers && lead.policyTrailers.length > 0) {
+                console.log(`🚚 Found ${lead.policyTrailers.length} policy trailers to populate`);
+                trailersToPopulate = lead.policyTrailers;
+            } else if (lead.trailers && lead.trailers.length > 0) {
                 console.log(`🚚 Found ${lead.trailers.length} trailers to populate`);
                 trailersToPopulate = lead.trailers;
             }
@@ -1028,7 +1074,15 @@ window.createQuoteApplicationSimple = function(leadId) {
                     if (driverRows[index]) {
                         const inputs = driverRows[index].querySelectorAll('input');
                         if (inputs[0]) inputs[0].value = driver.name || '';
-                        if (inputs[1]) inputs[1].value = driver.dateOfBirth || '';
+                        if (inputs[1]) {
+                            // Convert DOB to YYYY-MM-DD for date input (handles MM/DD/YYYY, M/D/YYYY, YYYY-MM-DD)
+                            let _dob = driver.dateOfBirth || driver.dob || '';
+                            if (_dob && !_dob.match(/^\d{4}-/)) {
+                                const _dp = _dob.split('/');
+                                if (_dp.length === 3) _dob = (_dp[2].length === 4 ? _dp[2] : '19' + _dp[2]) + '-' + _dp[0].padStart(2,'0') + '-' + _dp[1].padStart(2,'0');
+                            }
+                            inputs[1].value = _dob;
+                        }
                         if (inputs[2]) inputs[2].value = driver.licenseNumber || driver.dlNumber || '';
                         if (inputs[3]) inputs[3].value = driver.state || driver.licenseState || '';
                         if (inputs[4]) inputs[4].value = driver.yearsExperience || driver.cdlExperience || '';
@@ -1137,7 +1191,7 @@ function prefillApplicationForm(applicationData) {
             const parentDiv = input.closest('div');
             const foundLabel = parentDiv?.querySelector('label')?.textContent?.trim().replace(':', '') ||
                              parentDiv?.previousElementSibling?.textContent?.trim().replace(':', '') ||
-                             parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker)/)?.[1];
+                             parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker|Hopper-Bottom Trailer)/)?.[1];
             if (foundLabel) {
                 label = foundLabel;
             }
@@ -1174,6 +1228,7 @@ function prefillApplicationForm(applicationData) {
             'Dumptruck': formData['Dumptruck'],
             'Dump Trailer': formData['Dump Trailer'],
             'Tanker': formData['Tanker'],
+            'Hopper-Bottom Trailer': formData['Hopper-Bottom Trailer'],
 
             // Coverage fields
             'Auto Liability': formData['Auto Liability'],
@@ -1203,7 +1258,16 @@ function prefillApplicationForm(applicationData) {
             }
         }
 
-        if (value) {
+        if (value && value !== '__custom__') {
+            // For selects, add custom value as an option if it doesn't exist
+            if (input.tagName === 'SELECT' && !Array.from(input.options).some(o => o.value === value)) {
+                const customOpt = document.createElement('option');
+                customOpt.value = value;
+                customOpt.text = value;
+                // Insert before "Custom..." option if present, otherwise append
+                const customPlaceholder = Array.from(input.options).find(o => o.value === '__custom__');
+                input.insertBefore(customOpt, customPlaceholder || null);
+            }
             input.value = value;
             console.log(`✅ Pre-filled "${label}" with: "${value}"`);
         } else if (label) {
@@ -1468,7 +1532,7 @@ window.saveQuoteApplication = async function() {
                     // Try to find the label within the same container
                     const label = parentDiv?.querySelector('label')?.textContent?.trim().replace(':', '') ||
                                  parentDiv?.previousElementSibling?.textContent?.trim().replace(':', '') ||
-                                 parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker)/)?.[1];
+                                 parentDiv?.textContent?.match(/(Dry Van|Flatbed|Heavy Haul|Auto Hauler|Box Truck|Reefer|Dumptruck|Dump Trailer|Tanker|Hopper-Bottom Trailer)/)?.[1];
 
                     if (label) {
                         rawLabel = label;
@@ -1494,13 +1558,15 @@ window.saveQuoteApplication = async function() {
                     mappedKey = 'taxId';
                 }
 
-                const value = input.value?.trim() || '';
+                let value = input.value?.trim() || '';
+                // Don't save the "__custom__" placeholder — it means the user opened the custom input but didn't type anything
+                if (value === '__custom__') value = '';
                 formData[mappedKey] = value;
                 formData[rawLabel] = value; // Also keep original label
 
                 // Log Class of Risk fields specifically for debugging
                 if (rawLabel.includes('Dry Van') || rawLabel.includes('Flatbed') || rawLabel.includes('Heavy Haul') ||
-                    rawLabel.includes('Auto Hauler') || rawLabel.includes('Box Truck') || rawLabel.includes('Reefer') || rawLabel.includes('Dumptruck') || rawLabel.includes('Dump Trailer') || rawLabel.includes('Tanker')) {
+                    rawLabel.includes('Auto Hauler') || rawLabel.includes('Box Truck') || rawLabel.includes('Reefer') || rawLabel.includes('Dumptruck') || rawLabel.includes('Dump Trailer') || rawLabel.includes('Tanker') || rawLabel.includes('Hopper-Bottom Trailer')) {
                     console.log(`🔍 Class of Risk field: "${rawLabel}" = "${value}"`);
                 }
             }
@@ -1645,6 +1711,9 @@ window.saveQuoteApplication = async function() {
             } else if (parentText.includes('Tanker') || grandparentText.includes('Tanker')) {
                 formData['Tanker'] = value;
                 console.log(`🎯 Explicitly captured Tanker: "${value}"`);
+            } else if (parentText.includes('Hopper-Bottom Trailer') || grandparentText.includes('Hopper-Bottom Trailer')) {
+                formData['Hopper-Bottom Trailer'] = value;
+                console.log(`🎯 Explicitly captured Hopper-Bottom Trailer: "${value}"`);
             }
         });
 
@@ -1918,7 +1987,31 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
     const leads = JSON.parse(localStorage.getItem('leads') || '[]');
     const insuranceLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
     const allLeads = [...leads, ...insuranceLeads];
-    const lead = allLeads.find(l => l.id == leadId);
+    let lead = allLeads.find(l => l.id == leadId);
+
+    // If not found and leadId has policy_ prefix, look up from policy/client data
+    if (!lead && typeof leadId === 'string' && leadId.startsWith('policy_')) {
+        const policyId = leadId.replace('policy_', '');
+        const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+        const clients = JSON.parse(localStorage.getItem('clients') || '[]');
+        const policy = allPolicies.find(p => p.id === policyId || p.policyNumber === policyId);
+        if (policy) {
+            const client = clients.find(c => c.id === policy.clientId) || {};
+            lead = {
+                id: leadId,
+                name: policy.insuredName || policy.insured?.['Name/Business Name'] || policy.clientName || client.name || '',
+                phone: client.phone || policy.clientPhone || '',
+                email: client.email || policy.clientEmail || '',
+                address: client.address || policy.insured?.['Mailing Address'] || '',
+                dotNumber: policy.insured?.['USDOT'] || policy.dotNumber || client.dotNumber || '',
+                mcNumber: policy.insured?.['MC#'] || policy.mcNumber || client.mcNumber || '',
+                yearsInBusiness: policy.insured?.['Years in Business'] || client.yearsInBusiness || '',
+                renewalDate: policy.expirationDate || policy.endDate || '',
+                agent: policy.agent || ''
+            };
+            console.log('📋 Built lead from policy data:', policy.policyNumber);
+        }
+    }
 
     if (!lead) {
         console.error('Lead not found with ID:', leadId);
@@ -1981,18 +2074,28 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
     // Helper function to get saved value or default
     // Helper function to generate dropdown options with correct selection
     function generateDropdownOptions(options, selectedValue) {
-        const isCustom = selectedValue && !options.includes(selectedValue);
+        const isCustom = selectedValue && selectedValue !== '__custom__' && !options.includes(selectedValue);
         const opts = options.map(option =>
             `<option value="${option}" ${option === selectedValue ? 'selected' : ''}>${option}</option>`
         ).join('');
-        const customOpt = `<option value="__custom__" ${isCustom ? 'selected' : ''}>Custom...</option>`;
-        return opts + customOpt;
+        // If a custom value was previously saved, add it as a real option so it persists
+        const savedCustomOpt = isCustom
+            ? `<option value="${selectedValue}" selected>${selectedValue}</option>`
+            : '';
+        const customOpt = `<option value="__custom__">Custom...</option>`;
+        return opts + savedCustomOpt + customOpt;
     }
 
     function getSavedValue(key, defaultValue = '') {
         return savedData[key] || savedData[key.replace(/\s/g, '')] || defaultValue;
     }
 
+
+    // Determine agency branding based on agent
+    const _agentName2 = (lead.agent || lead.assignedTo || '').toLowerCase().trim();
+    const _isUIG2 = _agentName2 === 'maureen';
+    const _agencyName2 = _isUIG2 ? 'United Insurance Group LLC' : 'Vanguard Insurance Group LLC';
+    const _agencyAddr2 = _isUIG2 ? 'Medina, OH 44256 • 330-259-7438' : 'Brunswick, OH 44256 • 330-460-0872';
 
     content.innerHTML = `
         <div style="position: sticky; top: 0; background: white; z-index: 1000; border-bottom: 1px solid #ccc;">
@@ -2003,8 +2106,8 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                 <span style="margin-top: -2px;">&times;</span>
             </button>
             <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
-                <h2 style="margin: 0; color: #0066cc;">Vanguard Insurance Group LLC</h2>
-                <p style="margin: 5px 0;">Brunswick, OH 44256 • 330-460-0872</p>
+                <h2 style="margin: 0; color: #0066cc;">${_agencyName2}</h2>
+                <p style="margin: 5px 0;">${_agencyAddr2}</p>
                 <h3 style="margin: 10px 0 0 0;">TRUCKING APPLICATION (VIEW/EDIT)</h3>
             </div>
         </div>
@@ -2016,7 +2119,7 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Effective Date:</label>
-                        <input type="date" value="${(() => { const saved = getSavedValue('Effective Date', ''); if (saved) return saved.replace(/^\d{4}/, '2026'); const rd = lead.renewalDate || ''; if (rd) { const p = rd.split('/'); if (p.length === 3) return '2026-' + p[0].padStart(2,'0') + '-' + p[1].padStart(2,'0'); } return new Date().toISOString().split('T')[0]; })()}" style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
+                        <input type="date" value="${(() => { const saved = getSavedValue('Effective Date', ''); if (saved) return saved; const rd = lead.renewalDate || ''; if (rd) { if (/^\d{4}-\d{2}-\d{2}/.test(rd)) return rd.substring(0,10); const p = rd.split('/'); if (p.length === 3) return (p[2].length === 4 ? p[2] : '20'+p[2]) + '-' + p[0].padStart(2,'0') + '-' + p[1].padStart(2,'0'); } return new Date().toISOString().split('T')[0]; })()}" style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Insured's Name (including DBA):</label>
@@ -2121,6 +2224,13 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                         <label style="display: block; margin-bottom: 3px; font-size: 12px;">Tanker:</label>
                         <div style="display: flex; align-items: center;">
                             <input type="text" value="${getSavedValue('Tanker', '')}" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
+                            <span style="margin-left: 3px;">%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 3px; font-size: 12px;">Hopper-Bottom Trailer:</label>
+                        <div style="display: flex; align-items: center;">
+                            <input type="text" value="${getSavedValue('Hopper-Bottom Trailer', '')}" style="width: 60px; padding: 3px; border: 1px solid #ccc; border-radius: 3px;">
                             <span style="margin-left: 3px;">%</span>
                         </div>
                     </div>
@@ -2314,25 +2424,25 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Non-Owned Trailer Phys Dam:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$20,000/$1,000 Ded.', '$20,000/$2,000 Ded.', '$25,000', '$30,000/$1,000 Ded.', '$40,000/$1,000 Ded.', '$40,000/$2,000 Ded.', '$50,000', '$60,000/$2,000 Ded.', '$75,000', '$100,000', '$145,000/$1,000 Ded.', '$150,000', 'Not Included'], getSavedValue('Non-Owned Trailer Phys Dam', '$50,000'))}
+                            ${generateDropdownOptions(['$20,000/$1,000 Ded.', '$20,000/$2,000 Ded.', '$25,000', '$30,000/$1,000 Ded.', '$40,000/$1,000 Ded.', '$40,000/$2,000 Ded.', '$50,000', '$60,000/$2,000 Ded.', '$75,000', '$100,000', '$145,000/$1,000 Ded.', '$150,000', 'Not Included'], getSavedValue('Non-Owned Trailer Phys Dam', 'Not Included'))}
                         </select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Trailer Interchange:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$25,000', '$30,000/$1,000 Ded.', '$50,000', '$75,000', '$100,000', '$150,000', 'Not Included'], getSavedValue('Trailer Interchange', '$50,000'))}
+                            ${generateDropdownOptions(['$25,000', '$30,000/$1,000 Ded.', '$50,000', '$75,000', '$100,000', '$150,000', 'Not Included'], getSavedValue('Trailer Interchange', 'Not Included'))}
                         </select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Roadside Assistance:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['Included', '$250 DED.', 'Not Included'], getSavedValue('Roadside Assistance', 'Included'))}
+                            ${generateDropdownOptions(['Included', '$250 DED.', 'Not Included'], getSavedValue('Roadside Assistance', 'Not Included'))}
                         </select>
                     </div>
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">General Liability:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$500,000', '$1,000,000', '$1,500,000', '$2,000,000', '$5,000,000', 'Not Included'], getSavedValue('General Liability', '$1,000,000'))}
+                            ${generateDropdownOptions(['$500,000', '$1,000,000', '$1,000,000 / $2,000,000 Aggregate', '$1,500,000', '$2,000,000', '$2,000,000 / $4,000,000 Aggregate', '$5,000,000', 'Not Included'], getSavedValue('General Liability', '$1,000,000'))}
                         </select>
                     </div>
                     <div>
@@ -2350,7 +2460,7 @@ window.showEnhancedQuoteApplicationWithData = function(leadId, application) {
                     <div>
                         <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Reefer Breakdown:</label>
                         <select style="width: 100%; padding: 5px; border: 1px solid #ccc; border-radius: 3px;">
-                            ${generateDropdownOptions(['$5,000', '$10,000', '$15,000', '$25,000', '$50,000', 'Included DED. $2500', '$150,000/$2,500 DED.', 'Not Included'], getSavedValue('Reefer Breakdown', '$15,000'))}
+                            ${generateDropdownOptions(['$5,000', '$10,000', '$15,000', '$25,000', '$50,000', 'Included DED. $2500', '$150,000/$2,500 DED.', 'Not Included'], getSavedValue('Reefer Breakdown', 'Not Included'))}
                         </select>
                     </div>
                     <div>
@@ -2659,7 +2769,8 @@ window.downloadQuoteApplicationPDF = function() {
                              input.name ||
                              input.id ||
                              `field_${index}`;
-                formData[label] = input.value || '';
+                const val = input.value || '';
+                formData[label] = val === '__custom__' ? '' : val;
             }
         });
 
@@ -2697,10 +2808,54 @@ window.downloadQuoteApplicationPDF = function() {
             } else if (parentText.includes('Tanker') || grandparentText.includes('Tanker')) {
                 formData['Tanker'] = value;
                 console.log(`🎯 Download: Captured Tanker: "${value}"`);
+            } else if (parentText.includes('Hopper-Bottom Trailer') || grandparentText.includes('Hopper-Bottom Trailer')) {
+                formData['Hopper-Bottom Trailer'] = value;
+                console.log(`🎯 Download: Captured Hopper-Bottom Trailer: "${value}"`);
             }
         });
 
         // Capture array data with indexed keys for download
+        // If we have saved application data (e.g. downloading from renewals page), use it directly
+        // since the modal DOM rows may not be fully populated yet due to async timing
+        const _savedFD = window.editingApplicationData?.formData;
+        if (_savedFD && (_savedFD.drivers?.length || _savedFD.trucks?.length || _savedFD.trailers?.length || _savedFD.commodities?.length)) {
+            console.log('📋 Using saved application data for download (bypassing DOM read)');
+            // Merge saved structured arrays into formData as indexed keys
+            (_savedFD.commodities || []).forEach((c, i) => {
+                formData[`Commodity_${i}`] = c.commodity || c.name || '';
+                formData[`% of Loads_${i}`] = c.percentage || c.percent || '';
+            });
+            (_savedFD.drivers || []).forEach((d, i) => {
+                formData[`Driver Name_${i}`] = d.name || '';
+                formData[`Date of Birth_${i}`] = d.dob || d.dateOfBirth || '';
+                formData[`License Number_${i}`] = d.license || d.licenseNumber || '';
+                formData[`State_${i}`] = d.state || '';
+                formData[`Years Experience_${i}`] = d.experience || d.yearsExperience || '';
+                formData[`Date of Hire_${i}`] = d.hireDate || d.dateOfHire || '';
+                formData[`# Accidents/Violations_${i}`] = d.accidents || '';
+            });
+            (_savedFD.trucks || []).forEach((t, i) => {
+                formData[`Year_${i}`] = t.year || '';
+                formData[`Make/Model_${i}`] = t.make || t.makeModel || '';
+                formData[`Type of Truck_${i}`] = t.type || '';
+                formData[`VIN_${i}`] = t.vin || '';
+                formData[`Value_${i}`] = t.value || '';
+                formData[`Radius_${i}`] = t.radius || '';
+            });
+            (_savedFD.trailers || []).forEach((t, i) => {
+                formData[`Trailer Year_${i}`] = t.year || '';
+                formData[`Trailer Make/Model_${i}`] = t.make || t.makeModel || '';
+                formData[`Trailer Type_${i}`] = t.type || '';
+                formData[`Trailer VIN_${i}`] = t.vin || '';
+                formData[`Trailer Value_${i}`] = t.value || '';
+                formData[`Trailer Radius_${i}`] = t.radius || '';
+            });
+            // Also copy over any other formData fields from saved data
+            for (const [key, val] of Object.entries(_savedFD)) {
+                if (!formData[key] && typeof val === 'string') formData[key] = val;
+            }
+        } else {
+        // Fallback: read from DOM (works when modal is fully rendered)
         modal.querySelectorAll('#commodities-container .commodity-row').forEach((row, index) => {
             const commodity = row.querySelector('input')?.value?.trim() || '';
             const percentage = row.querySelectorAll('input')[1]?.value?.trim() || '';
@@ -2761,13 +2916,24 @@ window.downloadQuoteApplicationPDF = function() {
             formData[`Trailer Value_${index}`] = value;
             formData[`Trailer Radius_${index}`] = radius;
         });
+        } // end DOM fallback
 
         // Get lead information
         const leadId = window.currentLeadId;
         const leads = JSON.parse(localStorage.getItem('leads') || '[]');
         const insuranceLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
         const allLeads = [...leads, ...insuranceLeads];
-        const lead = allLeads.find(l => l.id == leadId) || {};
+        let lead = allLeads.find(l => l.id == leadId) || {};
+
+        // If not found and leadId has policy_ prefix, look up from policy data
+        if (!lead.id && typeof leadId === 'string' && leadId.startsWith('policy_')) {
+            const _pid = leadId.replace('policy_', '');
+            const _pols = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const _pol = _pols.find(p => p.id === _pid || p.policyNumber === _pid);
+            if (_pol) {
+                lead = { id: leadId, name: _pol.insuredName || _pol.clientName || '', agent: _pol.agent || '' };
+            }
+        }
 
         console.log('📊 PDF data collected:', { leadId, lead, formData });
 
@@ -2787,6 +2953,14 @@ function generateApplicationPDF(lead, formData) {
     try {
         const currentDate = new Date().toLocaleDateString();
         const companyName = formData['name'] || formData["Insured's Name (including DBA)"] || lead.name || 'N/A';
+
+        // Determine agency branding based on agent
+        const _pdfAgent = (lead.agent || lead.assignedTo || '').toLowerCase().trim();
+        const _pdfIsUIG = _pdfAgent === 'maureen';
+        const _pdfAgencyName = _pdfIsUIG ? 'UNITED INSURANCE GROUP LLC' : 'VANGUARD INSURANCE GROUP LLC';
+        const _pdfAgencyAddr = _pdfIsUIG ? 'Medina, OH 44256 • 330-259-7438' : 'Brunswick, OH 44256 • 330-460-0872';
+        const _pdfAgencyPhone = _pdfIsUIG ? '330-259-7438' : '330-460-0872';
+        const _pdfAgencyFull = _pdfIsUIG ? 'United Insurance Group LLC' : 'Vanguard Insurance Group LLC';
 
         // Count vehicles
         const truckCount = formData.truckCount || 0;
@@ -3068,8 +3242,8 @@ function generateApplicationPDF(lead, formData) {
 <body>
     <!-- Header -->
     <div class="header">
-        <h1>VANGUARD INSURANCE GROUP LLC</h1>
-        <div class="contact">Brunswick, OH 44256 • 330-460-0872</div>
+        <h1>${_pdfAgencyName}</h1>
+        <div class="contact">${_pdfAgencyAddr}</div>
         <h2>COMMERCIAL TRUCKING APPLICATION</h2>
     </div>
 
@@ -3152,6 +3326,18 @@ function generateApplicationPDF(lead, formData) {
                 <div class="field-label">Dumptruck:</div>
                 <div class="field-value">${formData['Dumptruck'] || ''}${formData['Dumptruck'] ? '%' : ''}</div>
             </div>
+            <div class="field">
+                <div class="field-label">Dump Trailer:</div>
+                <div class="field-value">${formData['Dump Trailer'] || ''}${formData['Dump Trailer'] ? '%' : ''}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Tanker:</div>
+                <div class="field-value">${formData['Tanker'] || ''}${formData['Tanker'] ? '%' : ''}</div>
+            </div>
+            <div class="field">
+                <div class="field-label">Hopper-Bottom Trailer:</div>
+                <div class="field-value">${formData['Hopper-Bottom Trailer'] || ''}${formData['Hopper-Bottom Trailer'] ? '%' : ''}</div>
+            </div>
         </div>
     </div>
 
@@ -3184,15 +3370,15 @@ function generateApplicationPDF(lead, formData) {
             </div>
             <div class="field">
                 <div class="field-label">Non-Owned Trailer Phys Dam:</div>
-                <div class="field-value">${formData['Non-Owned Trailer Phys Dam'] || formData['Non-Owned Trailer Physical Damage'] || '$50,000'}</div>
+                <div class="field-value">${formData['Non-Owned Trailer Phys Dam'] || formData['Non-Owned Trailer Physical Damage'] || 'Not Included'}</div>
             </div>
             <div class="field">
                 <div class="field-label">Trailer Interchange:</div>
-                <div class="field-value">${formData['Trailer Interchange'] || '$50,000'}</div>
+                <div class="field-value">${formData['Trailer Interchange'] || 'Not Included'}</div>
             </div>
             <div class="field">
                 <div class="field-label">Roadside Assistance:</div>
-                <div class="field-value">${formData['Roadside Assistance'] || '$1,000 (If applicable)'}</div>
+                <div class="field-value">${formData['Roadside Assistance'] || 'Not Included'}</div>
             </div>
             <div class="field">
                 <div class="field-label">General Liability:</div>
@@ -3208,15 +3394,15 @@ function generateApplicationPDF(lead, formData) {
             </div>
             <div class="field">
                 <div class="field-label">Reefer Breakdown:</div>
-                <div class="field-value">${formData['Reefer Breakdown'] || '$15,000'}</div>
+                <div class="field-value">${formData['Reefer Breakdown'] || 'Not Included'}</div>
             </div>
         </div>
     </div>
 
     <!-- Footer -->
     <div class="footer">
-        <p>This application was generated electronically by Vanguard Insurance Group LLC</p>
-        <p>For questions or modifications, please contact us at 330-460-0872</p>
+        <p>This application was generated electronically by ${_pdfAgencyFull}</p>
+        <p>For questions or modifications, please contact us at ${_pdfAgencyPhone}</p>
     </div>
 
     <script>
@@ -3703,7 +3889,17 @@ function populateClassOfRisk(modal, commodities) {
         'gravel': 'Dump Truck',
         'dirt': 'Dump Truck',
         'rock': 'Dump Truck',
-        'demolition': 'Dump Truck'
+        'demolition': 'Dump Truck',
+
+        // Hopper-Bottom Trailer commodities
+        'grain': 'Hopper-Bottom Trailer',
+        'wheat': 'Hopper-Bottom Trailer',
+        'corn': 'Hopper-Bottom Trailer',
+        'soybeans': 'Hopper-Bottom Trailer',
+        'feed': 'Hopper-Bottom Trailer',
+        'seed': 'Hopper-Bottom Trailer',
+        'fertilizer': 'Hopper-Bottom Trailer',
+        'agricultural': 'Hopper-Bottom Trailer'
     };
 
     // Count occurrences of each risk category

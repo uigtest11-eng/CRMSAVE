@@ -178,4 +178,92 @@ window.removeTruckRow = removeTruckRow;
 window.addTrailerRow = addTrailerRow;
 window.removeTrailerRow = removeTrailerRow;
 
-console.log('✅ Enhanced Quote Form Functions Loaded');
+// ── VIN Auto-Decode (NHTSA free API) ──────────────────────────────────────────
+// Uses event delegation on the quote modal so it works for initial + dynamically added rows
+function initVinDecoder() {
+    const modal = document.getElementById('quote-application-modal');
+    if (!modal) return;
+
+    modal.addEventListener('focusout', function(e) {
+        const inp = e.target;
+        if (inp.tagName !== 'INPUT' || inp.type !== 'text') return;
+
+        // Check if this is a VIN input (4th input in a truck-row or trailer-row)
+        const row = inp.closest('.truck-row') || inp.closest('.trailer-row');
+        if (!row) return;
+        const inputs = row.querySelectorAll('input');
+        if (inputs.length < 4 || inputs[3] !== inp) return;
+
+        const vin = inp.value.trim().toUpperCase();
+        if (!vin || vin.length !== 17) return;
+
+        // Don't re-decode if we already decoded this VIN
+        if (inp.dataset.decodedVin === vin) return;
+
+        // Show loading indicator on the VIN input
+        const origBorder = inp.style.border;
+        inp.style.border = '2px solid #f59e0b';
+        inp.value = vin; // normalize to uppercase
+
+        fetch('https://vpic.nhtsa.dot.gov/api/vehicles/decodevin/' + encodeURIComponent(vin) + '?format=json')
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                var results = data.Results || [];
+                var year = '', make = '', model = '', bodyClass = '';
+
+                results.forEach(function(r) {
+                    var val = (r.Value || '').trim();
+                    if (!val || val === 'Not Applicable') return;
+                    switch (r.Variable) {
+                        case 'Model Year': year = val; break;
+                        case 'Make': make = val; break;
+                        case 'Model': model = val; break;
+                        case 'Body Class': bodyClass = val; break;
+                    }
+                });
+
+                if (!year && !make && !model) {
+                    inp.style.border = '2px solid #ef4444';
+                    setTimeout(function() { inp.style.border = origBorder; }, 2000);
+                    console.warn('VIN decode returned no data for:', vin);
+                    return;
+                }
+
+                // inputs[0]=Year, inputs[1]=Make/Model, inputs[2]=Type, inputs[3]=VIN
+                if (year && !inputs[0].value) inputs[0].value = year;
+                if ((make || model) && !inputs[1].value) {
+                    inputs[1].value = (make + ' ' + model).trim();
+                }
+                if (bodyClass && !inputs[2].value) inputs[2].value = bodyClass;
+
+                inp.dataset.decodedVin = vin;
+                inp.style.border = '2px solid #10b981';
+                setTimeout(function() { inp.style.border = origBorder; }, 2000);
+                console.log('VIN decoded:', vin, '->', year, make, model, bodyClass);
+            })
+            .catch(function(err) {
+                console.error('VIN decode error:', err);
+                inp.style.border = '2px solid #ef4444';
+                setTimeout(function() { inp.style.border = origBorder; }, 2000);
+            });
+    });
+}
+
+// Watch for the quote modal to appear and attach VIN decoder
+var _vinObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+        m.addedNodes.forEach(function(node) {
+            if (node.id === 'quote-application-modal' || (node.querySelector && node.querySelector('#quote-application-modal'))) {
+                setTimeout(initVinDecoder, 200);
+            }
+        });
+    });
+});
+_vinObserver.observe(document.body, { childList: true });
+
+// Also init if modal already exists
+if (document.getElementById('quote-application-modal')) initVinDecoder();
+
+window.initVinDecoder = initVinDecoder;
+
+console.log('✅ Enhanced Quote Form Functions Loaded (with VIN decode)');

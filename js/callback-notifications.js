@@ -197,13 +197,34 @@
         updateNotificationDisplay();
         updateNotificationBadge();
 
-        showPopupNotification(notification);
-        fireBrowserNotification(title, `${lead.name} · ${fmtTime}`, leadId);
-        playNotificationSound(notification);
+        // ── User filter: only show popup/sound if this callback belongs to current user ──
+        const _sess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        const _curUsr = (_sess.username || '').toLowerCase();
+        const _isGrant = _curUsr === 'grant';
+        const _showAll = _isGrant && isGrantAllUsersOn();
+        const _agent = (lead.assignedTo || '').toLowerCase();
+
+        // Determine if this user should get the popup
+        let _shouldPopup = true;
+        if (_isGrant && !_showAll) {
+            // Grant with "My Leads" toggle: only popup for Grant's leads (or unassigned)
+            _shouldPopup = !_agent || _agent === _curUsr;
+        } else if (!_isGrant && _curUsr) {
+            // Non-admin users: only popup for their own leads (or unassigned)
+            _shouldPopup = !_agent || _agent === _curUsr;
+        }
+
+        if (_shouldPopup) {
+            showPopupNotification(notification);
+            fireBrowserNotification(title, `${lead.name} · ${fmtTime}`, leadId);
+            playNotificationSound(notification);
+        } else {
+            console.log(`🔔 Popup suppressed for ${lead.name} (assigned to "${lead.assignedTo}", current user "${_curUsr}")`);
+        }
 
         if (!isUrgent) sendEmailReminder(notification);
 
-        console.log(`🔔 Alarm FIRED [${type}] for ${lead.name} at ${fmtTime}`);
+        console.log(`🔔 Alarm FIRED [${type}] for ${lead.name} at ${fmtTime}${_shouldPopup ? '' : ' (no popup)'}`);
     }
 
     // ── Popup ──────────────────────────────────────────────────────────────────
@@ -321,7 +342,7 @@
 
     // ── Grant all-users toggle ─────────────────────────────────────────────────
     function isGrantAllUsersOn() {
-        return localStorage.getItem('grantAllUsersNotif') !== 'false';
+        return localStorage.getItem('grantAllUsersNotif') === 'true';
     }
 
     window.toggleGrantAllUsers = function() {

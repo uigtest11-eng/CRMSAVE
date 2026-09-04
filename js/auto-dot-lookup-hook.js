@@ -37,6 +37,11 @@
                 const delay = queued * 800 + 500;
                 queued++;
                 setTimeout(() => {
+                    // Stop DOT lookups if localStorage is full to prevent cascade
+                    if (window._localStorageQuotaFull) {
+                        console.log(`⏸️ AUTO DOT: Skipping DOT lookup for ${lead.name} — localStorage quota full`);
+                        return;
+                    }
                     if (typeof performBuiltInDOTLookup === 'function') {
                         console.log(`🚛 AUTO DOT (storage hook): Triggering DOT lookup for ${lead.name} (DOT: ${lead.dotNumber})`);
                         performBuiltInDOTLookup(lead.id, lead.dotNumber);
@@ -117,32 +122,26 @@
                     originalSetItem.call(localStorage, 'insurance_leads', JSON.stringify(leads));
                     window.dotLookupInProgress = false;
 
-                    // CRITICAL: Also save DOT data to SERVER using updateLeadField
-                    if (window.updateLeadField) {
-                        console.log(`💾 AUTO DOT: Saving DOT data to server for lead ${leadId}`);
-                        if (leads[leadIndex].state) {
-                            window.updateLeadField(leadId, 'state', leads[leadIndex].state);
-                            console.log(`💾 AUTO DOT: Saved state to server: ${leads[leadIndex].state}`);
-                        }
-                        if (leads[leadIndex].yearsInBusiness) {
-                            window.updateLeadField(leadId, 'yearsInBusiness', leads[leadIndex].yearsInBusiness);
-                            console.log(`💾 AUTO DOT: Saved yearsInBusiness to server: ${leads[leadIndex].yearsInBusiness}`);
-                        }
-                        if (leads[leadIndex].commodityHauled) {
-                            window.updateLeadField(leadId, 'commodityHauled', leads[leadIndex].commodityHauled);
-                            console.log(`💾 AUTO DOT: Saved commodityHauled to server: ${leads[leadIndex].commodityHauled}`);
-                        }
-                        if (leads[leadIndex].ownerName) {
-                            window.updateLeadField(leadId, 'ownerName', leads[leadIndex].ownerName);
-                            console.log(`💾 AUTO DOT: Saved ownerName to server: ${leads[leadIndex].ownerName}`);
-                        }
-                        if (leads[leadIndex].contact) {
-                            window.updateLeadField(leadId, 'contact', leads[leadIndex].contact);
-                            console.log(`💾 AUTO DOT: Saved contact to server: ${leads[leadIndex].contact}`);
-                        }
-                        if (leads[leadIndex].name) {
-                            window.updateLeadField(leadId, 'name', leads[leadIndex].name);
-                            console.log(`💾 AUTO DOT: Saved name to server: ${leads[leadIndex].name}`);
+                    // CRITICAL: Save DOT data to SERVER in a single batch PUT (not 6 separate updateLeadField calls)
+                    {
+                        const dotFields = {};
+                        if (leads[leadIndex].state) dotFields.state = leads[leadIndex].state;
+                        if (leads[leadIndex].yearsInBusiness) dotFields.yearsInBusiness = leads[leadIndex].yearsInBusiness;
+                        if (leads[leadIndex].commodityHauled) dotFields.commodityHauled = leads[leadIndex].commodityHauled;
+                        if (leads[leadIndex].ownerName) dotFields.ownerName = leads[leadIndex].ownerName;
+                        if (leads[leadIndex].contact) dotFields.contact = leads[leadIndex].contact;
+                        if (leads[leadIndex].name) dotFields.name = leads[leadIndex].name;
+
+                        if (Object.keys(dotFields).length > 0) {
+                            console.log(`💾 AUTO DOT: Batch saving ${Object.keys(dotFields).length} fields to server for lead ${leadId}`);
+                            fetch(`/api/leads/${leadId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(dotFields)
+                            }).then(r => {
+                                if (r.ok) console.log(`✅ AUTO DOT: Batch saved DOT fields to server for lead ${leadId}`);
+                                else console.warn(`⚠️ AUTO DOT: Server save failed for lead ${leadId}`);
+                            }).catch(e => console.warn(`⚠️ AUTO DOT: Server save error for lead ${leadId}:`, e));
                         }
 
                         // Save vehicles, trailers, AND drivers to server if any were created
@@ -168,8 +167,6 @@
                                 }
                             }, 2000); // Delay to ensure all other saves complete first
                         }
-                    } else {
-                        console.log(`⚠️ AUTO DOT: updateLeadField not available, server save skipped`);
                     }
 
                     console.log(`✅ BUILT-IN DOT: Updated lead ${leadId} with DOT data`);

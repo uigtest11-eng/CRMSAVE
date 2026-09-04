@@ -48,7 +48,7 @@
             return '';
         }
 
-        const stagesRequiringReachOut = ['quoted', 'info_requested', 'quote_sent', 'quote-sent-unaware', 'quote-sent-aware', 'interested'];
+        const stagesRequiringReachOut = ['quoted', 'info_requested', 'full_info_requested', 'quote_sent', 'quote-sent-unaware', 'quote-sent-aware', 'interested'];
 
         if (stagesRequiringReachOut.includes(stage)) {
             const hasActiveHighlight = isHighlightActiveForLead(lead);
@@ -94,7 +94,10 @@
 
         const actionMap = {
             'new': 'Assign Stage',
-            'info_received': 'Prepare Quote',
+            'info_received': 'Prepare Basic Quote',
+            'full_info_received': 'Prepare App & Quotes',
+            'loss_runs_received': 'Send out loss runs',
+            'sale': 'Update Client',
             'app_sent': '',  // App sent stage should have NO TODO text
             'app sent': '', // Handle both variations
             'not-interested': 'Archive lead',

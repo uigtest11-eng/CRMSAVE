@@ -367,9 +367,10 @@ const vicidialUploader = {
         `;
         
         // Add modal to page if not exists
-        if (!document.getElementById('vicidialUploadModal')) {
-            document.body.insertAdjacentHTML('beforeend', modalHtml);
-        }
+        // Always remove old modal so fresh HTML is inserted (previous upload may have replaced body)
+        const existingModal = document.getElementById('vicidialUploadModal');
+        if (existingModal) existingModal.remove();
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
         
         // Show modal
         document.getElementById('vicidialUploadModal').style.display = 'block';
@@ -429,6 +430,12 @@ const vicidialUploader = {
         const statusDiv = document.getElementById('vicidialConnectionStatus');
         const listsContainer = document.getElementById('vicidialListsContainer');
         const listSelection = document.getElementById('vicidialListSelection');
+
+        // If dialog body was replaced (e.g. previous result still showing), bail out
+        if (!statusDiv) {
+            console.warn('⚠️ vicidialConnectionStatus not found — dialog may need reset');
+            return;
+        }
 
         // Check if we have cached lists to avoid re-scanning
         if (this.cachedLists && this.cachedLists.length > 0 && this.listsAlreadyLoaded) {

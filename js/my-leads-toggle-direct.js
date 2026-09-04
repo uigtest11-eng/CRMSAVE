@@ -1,7 +1,11 @@
 // My Leads Toggle - Direct Element Targeting
 console.log('🚀 Direct My Leads Toggle loading...');
 
-window.myLeadsOnlyActive = true;
+// CSR users see all leads by default; other roles see only their own
+window.myLeadsOnlyActive = !(function() {
+    try { return (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr'; }
+    catch(e) { return false; }
+})();
 
 function getCurrentUser() {
     try {

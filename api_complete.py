@@ -2023,7 +2023,7 @@ from urllib.parse import urlencode
 
 # Gmail OAuth configuration
 GMAIL_CLIENT_ID = os.getenv('GMAIL_CLIENT_ID', '794453705883-6b32cpfctd77t5ls5kktu2s9ub27p19q.apps.googleusercontent.com')
-GMAIL_CLIENT_SECRET = os.getenv('GMAIL_CLIENT_SECRET', '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')
+GMAIL_CLIENT_SECRET = os.getenv('GMAIL_CLIENT_SECRET', '')
 GMAIL_REDIRECT_URI = os.getenv('GMAIL_REDIRECT_URI', 'http://162-220-14-239.nip.io/api/gmail/callback')
 
 @app.get("/api/gmail/auth")

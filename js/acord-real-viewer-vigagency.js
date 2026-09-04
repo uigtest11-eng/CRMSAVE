@@ -355,9 +355,15 @@ window.createRealACORDViewer = async function(policyId, policyData = null) {
         );
     }
 
+    // Always derive united flag from agency field (agency is the source of truth)
+    if (policy && policy.agency) {
+        policy.united = policy.agency.toLowerCase() === 'united';
+    }
+
     console.log('🔍 Using policy data in createRealACORDViewer:', policy);
     console.log('🔍 POLICY AGENCY DEBUGGING:');
     console.log('  - policy?.agency:', policy?.agency);
+    console.log('  - policy?.united:', policy?.united);
     console.log('  - Full policy object keys:', policy ? Object.keys(policy) : 'policy is null/undefined');
 
     // Create our REAL viewer with EXACT original layout
@@ -708,7 +714,11 @@ function createRealFormFields(policyId, policyData) {
 
     // Determine if GL coverage is present and not excluded
     // Check flat keys first, then CoveragesArray for GL/GLCBI/GLACC/GLAGG codes
-    const _covArrPreGL = policyData?.coverage?.CoveragesArray || {};
+    let _covArrPreGL = policyData?.coverage?.CoveragesArray || {};
+    try {
+        const _covOvr = Storage.prototype.getItem.call(localStorage, '_covOverride_' + (policyData?.id || ''));
+        if (_covOvr) { const p = JSON.parse(_covOvr); if (p && typeof p === 'object') _covArrPreGL = { ..._covArrPreGL, ...p }; }
+    } catch(e) {}
     const _glFromCovArr = _covArrPreGL['GL'] || _covArrPreGL['GLCBI'] || _covArrPreGL['GLACC'] || _covArrPreGL['GLAGG'] || null;
     const glAggregateRaw = policyData?.coverage?.['coverage-general-aggregate'] ||
                            policyData?.coverage?.['General Aggregate'] ||
@@ -731,8 +741,18 @@ function createRealFormFields(policyId, policyData) {
     }
 
     // Pre-compute cargo and physical damage presence
-    // Check flat keys, CoveragesArray (policy-level), and vehicle-level coverages
-    const _covArr = policyData?.coverage?.CoveragesArray || {};
+    // Check flat keys, CoveragesArray (policy-level), override key, and vehicle-level coverages
+    let _covArr = policyData?.coverage?.CoveragesArray || {};
+    // Also check dedicated coverage override key (bypasses localStorage interceptors)
+    try {
+        const _covOverride = Storage.prototype.getItem.call(localStorage, '_covOverride_' + (policyData?.id || ''));
+        if (_covOverride) {
+            const parsed = JSON.parse(_covOverride);
+            if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+                _covArr = { ..._covArr, ...parsed };
+            }
+        }
+    } catch(e) {}
     const _vehs = Array.isArray(policyData?.vehicles) ? policyData.vehicles : [];
     // Helper: find a coverage by code in CoveragesArray or vehicle CoveragesArrays
     function _findCov(code) {
@@ -747,11 +767,13 @@ function createRealFormFields(policyId, policyData) {
     const _compCov = _findCov('COMP');
     const _collCov = _findCov('COLL');
 
-    const _cargoLimitRaw = policyData?.coverage?.cargo_limit || policyData?.coverage?.['Cargo Limit'] || (_mtcCov?.Amount || _mtcCov?.Limit || '') || '';
-    const _cargoDeductRaw = policyData?.coverage?.cargo_deductible || policyData?.coverage?.['Cargo Deductible'] || (_mtcCov?.Deductible || '') || '';
+    // CoveragesArray/override values take priority over flat keys (user edits override IVANS imports)
+    const _cargoLimitRaw = (_mtcCov?.Amount || _mtcCov?.Limit || '') || policyData?.coverage?.cargo_limit || policyData?.coverage?.['Cargo Limit'] || '';
+    const _cargoDeductRaw = (_mtcCov?.Deductible || '') || policyData?.coverage?.cargo_deductible || policyData?.coverage?.['Cargo Deductible'] || '';
     const hasCargoRow = !!_cargoLimitRaw && _cargoLimitRaw !== '0' && _cargoLimitRaw !== 'None';
-    const _compDedRaw = policyData?.coverage?.comprehensive_deductible || policyData?.coverage?.['Comprehensive Deductible'] || (_compCov?.Deductible || '') || '0';
-    const _collDedRaw = policyData?.coverage?.collision_deductible || policyData?.coverage?.['Collision Deductible'] || (_collCov?.Deductible || '') || '0';
+    console.log('📦 CARGO DEBUG: _cargoLimitRaw =', JSON.stringify(_cargoLimitRaw), '| _cargoDeductRaw =', JSON.stringify(_cargoDeductRaw), '| hasCargoRow =', hasCargoRow, '| _mtcCov =', _mtcCov);
+    const _compDedRaw = (_compCov?.Deductible || '') || policyData?.coverage?.comprehensive_deductible || policyData?.coverage?.['Comprehensive Deductible'] || '0';
+    const _collDedRaw = (_collCov?.Deductible || '') || policyData?.coverage?.collision_deductible || policyData?.coverage?.['Collision Deductible'] || '0';
     const hasPhysDmg = _compDedRaw !== 'None' && _collDedRaw !== 'None' &&
                        parseFloat(String(_compDedRaw).replace(/[$,]/g,'')) > 0 &&
                        parseFloat(String(_collDedRaw).replace(/[$,]/g,'')) > 0;
@@ -992,6 +1014,13 @@ function createRealFormFields(policyId, policyData) {
         // === AUTO LIABILITY LIMITS (ALL MISSING FIELDS) ===
         { id: 'autoCombinedSingle', x: 684, y: 499, width: 83, height: 16,
           value: (function() {
+              // Check CoveragesArray for CSL/CSL_AUTO first
+              const cslCov = _findCov('CSL') || _findCov('CSL_AUTO') || _findCov('BISPL');
+              if (cslCov && cslCov.Amount) {
+                  const num = parseFloat(String(cslCov.Amount).replace(/[$,\s]/g, ''));
+                  if (!isNaN(num) && num > 0) return `$${num.toLocaleString()}`;
+              }
+              // Fall back to flat coverage fields
               const raw = policyData?.coverage?.['Liability Limits'] || '';
               if (!raw) return '';
               const num = parseFloat(String(raw).replace(/[$,\s]/g, ''));
@@ -1124,79 +1153,55 @@ function createRealFormFields(policyId, policyData) {
           })() },
 
         // === LAST ROW (y: 718) — Trailer Interchange if present, else Non-Owned Trailer ===
-        // Helper values computed once for this row
-        { id: 'lastRowInsurer', x: 23, y: 718, width: 23, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              const hasNOT = not && not !== 'None' && not !== 'Not Included';
-              console.log('🚛 LAST ROW DEBUG: TI =', ti, '| Non-Owned Trailer =', not);
-              return (hasTI || hasNOT) ? 'A' : '';
-          })() },
-        { id: 'lastRowText', x: 52, y: 718, width: 173, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              const hasNOT = not && not !== 'None' && not !== 'Not Included';
-              if (hasTI) return 'TRAILER INTERCHANGE';
-              if (hasNOT) return 'NON OWNED TRAIL PHYS DAMAGE';
-              return '';
-          })() },
-        { id: 'lastRowPolicyNum', x: 281, y: 718, width: 146, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              const hasNOT = not && not !== 'None' && not !== 'Not Included';
-              return (hasTI || hasNOT) ? (policyData?.policy_number || policyData?.policyNumber || '') : '';
-          })() },
-        { id: 'lastRowEffDate', x: 430, y: 718, width: 61, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              const hasNOT = not && not !== 'None' && not !== 'Not Included';
-              return (hasTI || hasNOT) ? formatDateForACORD(policyData?.effective_date) : '';
-          })() },
-        { id: 'lastRowExpDate', x: 491, y: 718, width: 61, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              const hasNOT = not && not !== 'None' && not !== 'Not Included';
-              return (hasTI || hasNOT) ? formatDateForACORD(policyData?.expiration_date) : '';
-          })() },
-        { id: 'lastRowLimits', x: 552, y: 718, width: 83, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const not = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              if (hasTI) {
-                  // Parse '60000/2000ded' → '$60,000'
-                  if (ti.toLowerCase().includes('/')) {
-                      const limit = parseInt(ti.split('/')[0]);
-                      return isNaN(limit) ? '' : `$${limit.toLocaleString()}`;
+        // Pre-compute TI and NON-OWNED values from flat keys AND CoveragesArray (TI/NOTI codes)
+        ...((function() {
+            const _tiCov = _findCov('TI') || _findCov('COMTI') || _findCov('COLTI');
+            const _notiCov = _findCov('NOTI');
+            const _tiRaw = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || (_tiCov?.Amount || _tiCov?.Limit || '') || '';
+            const _notRaw = policyData?.coverage?.non_owned_trailer || policyData?.coverage?.['Non-Owned Trailer Phys Dam'] || policyData?.coverage?.['Non-Owned Trailer Physical Damage'] || (_notiCov?.Amount || _notiCov?.Limit || '') || '';
+            const _hasTI = _tiRaw && _tiRaw !== '0' && _tiRaw !== 'No Coverage' && _tiRaw !== 'None';
+            const _hasNOT = _notRaw && _notRaw !== 'None' && _notRaw !== 'Not Included' && _notRaw !== '0';
+            const _tiDedRaw = _tiCov?.Deductible || '';
+            const _notiDedRaw = _notiCov?.Deductible || policyData?.coverage?.non_owned_trailer_deductible || '';
+            console.log('🚛 LAST ROW DEBUG: TI =', _tiRaw, '| Non-Owned Trailer =', _notRaw, '| TI from CoveragesArray:', !!_tiCov, '| NOTI from CoveragesArray:', !!_notiCov);
+            return [
+            { id: 'lastRowInsurer', x: 23, y: 718, width: 23, height: 16,
+              value: (_hasTI || _hasNOT) ? 'A' : '' },
+            { id: 'lastRowText', x: 52, y: 718, width: 173, height: 16,
+              value: _hasTI ? 'TRAILER INTERCHANGE' : (_hasNOT ? 'NON OWNED TRAIL PHYS DAMAGE' : '') },
+            { id: 'lastRowPolicyNum', x: 281, y: 718, width: 146, height: 16,
+              value: (_hasTI || _hasNOT) ? (policyData?.policy_number || policyData?.policyNumber || '') : '' },
+            { id: 'lastRowEffDate', x: 430, y: 718, width: 61, height: 16,
+              value: (_hasTI || _hasNOT) ? formatDateForACORD(policyData?.effective_date || policyData?.effectiveDate) : '' },
+            { id: 'lastRowExpDate', x: 491, y: 718, width: 61, height: 16,
+              value: (_hasTI || _hasNOT) ? formatDateForACORD(policyData?.expiration_date || policyData?.expirationDate) : '' },
+            { id: 'lastRowLimits', x: 552, y: 718, width: 83, height: 16,
+              value: (function() {
+                  if (_hasTI) {
+                      const s = String(_tiRaw);
+                      if (s.includes('/')) { const n = parseInt(s.split('/')[0]); return isNaN(n) ? '' : `$${n.toLocaleString()}`; }
+                      const num = parseFloat(s.replace(/[$,\s]/g, ''));
+                      return isNaN(num) ? s : `$${num.toLocaleString()}`;
                   }
-                  const num = parseInt(ti);
-                  return isNaN(num) ? ti : `$${num.toLocaleString()}`;
-              }
-              const hasNOT = not && not !== 'None' && not !== 'Not Included';
-              return hasNOT ? not : '';
-          })() },
-        { id: 'lastRowDeductible', x: 684, y: 718, width: 83, height: 16,
-          value: (function() {
-              const ti = policyData?.coverage?.['Trailer Interchange Limit'] || policyData?.coverage?.trailer_interchange_limit || '';
-              const hasTI = ti && ti !== '0' && ti !== 'No Coverage' && ti !== 'None';
-              if (hasTI && ti.toLowerCase().includes('/')) {
-                  // Parse '60000/2000ded' → '$2,000 Ded.'
-                  const ded = parseInt(ti.toLowerCase().replace(/ded/g, '').split('/')[1]);
-                  return isNaN(ded) ? '' : `$${ded.toLocaleString()} Ded.`;
-              }
-              const nonOwnedTrailerDed = policyData?.coverage?.non_owned_trailer_deductible || '';
-              return nonOwnedTrailerDed ? `DED. ${nonOwnedTrailerDed}` : '';
-          })() },
+                  if (_hasNOT) {
+                      const num = parseFloat(String(_notRaw).replace(/[$,\s]/g, ''));
+                      return isNaN(num) ? _notRaw : `$${num.toLocaleString()}`;
+                  }
+                  return '';
+              })() },
+            { id: 'lastRowDeductible', x: 684, y: 718, width: 83, height: 16,
+              value: (function() {
+                  if (_hasTI) {
+                      const s = String(_tiRaw);
+                      if (s.includes('/')) { const ded = parseInt(s.toLowerCase().replace(/ded/g, '').split('/')[1]); return isNaN(ded) ? '' : `$${ded.toLocaleString()} Ded.`; }
+                      if (_tiDedRaw) { const ded = parseFloat(String(_tiDedRaw).replace(/[$,\s]/g, '')); return isNaN(ded) ? _tiDedRaw : `$${ded.toLocaleString()} Ded.`; }
+                      return '';
+                  }
+                  const ded = _notiDedRaw || policyData?.coverage?.non_owned_trailer_deductible || '';
+                  return ded ? `DED. ${ded}` : '';
+              })() },
+            ];
+        })()),
 
 
         // === GENERAL LIABILITY LIMITS ===

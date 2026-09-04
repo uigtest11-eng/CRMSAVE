@@ -97,6 +97,7 @@ class QuoteApplicationServer {
             autoHauler: lead.autoHauler || '0',
             boxTruck: lead.boxTruck || '0',
             reefer: lead.reefer || '0',
+            hopperBottom: lead.hopperBottom || '0',
             otherClass: lead.otherClass || '0',
 
             // INSURANCE HISTORY

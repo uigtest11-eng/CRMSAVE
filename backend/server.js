@@ -201,7 +201,7 @@ app.use('/api/auth', authRoutes);
 
 // Protect all /api/* routes except public paths
 app.use('/api', (req, res, next) => {
-    const publicPaths = ['/auth/', '/health', '/portal/', '/bug-report',
+    const publicPaths = ['/auth/', '/health', '/portal/', '/bug-report', '/suggestion',
                          '/twilio/incoming-call',
                          '/twilio/call-status', '/twilio/recording-status',
                          '/twilio/voicemail-transcription', '/twilio/recording-complete',
@@ -428,6 +428,13 @@ function initializeDatabase() {
     db.run(`CREATE INDEX IF NOT EXISTS idx_documents_client_id ON documents(client_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_documents_policy_id ON documents(policy_id)`);
 
+    // Migrate existing loss_runs table to add doc_type column if missing
+    db.run(`ALTER TABLE loss_runs ADD COLUMN doc_type TEXT DEFAULT 'Other'`, err => {
+        if (err && !err.message.includes('duplicate column')) {
+            console.error('Error adding doc_type column:', err.message);
+        }
+    });
+
     // Loss runs tracking table
     db.run(`CREATE TABLE IF NOT EXISTS loss_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -435,6 +442,7 @@ function initializeDatabase() {
         file_name TEXT NOT NULL,
         file_size INTEGER,
         file_type TEXT,
+        doc_type TEXT DEFAULT 'Other',
         status TEXT DEFAULT 'uploaded',
         uploaded_date DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (lead_id) REFERENCES leads(id)
@@ -3198,7 +3206,7 @@ app.post('/api/vicidial/clear-list', async (req, res) => {
 });
 
 // Overwrite Vicidial list endpoint (GET version for URL parameters)
-app.get('/api/vicidial/overwrite', requireRole('admin'), async (req, res) => {
+app.get('/api/vicidial/overwrite', requireRole('master_admin', 'united_admin', 'agent', 'producer'), async (req, res) => {
     try {
         const { list_id, state, insurance_company, days_until_expiry, skip_days, limit } = req.query;
 
@@ -3286,7 +3294,7 @@ async function processLargeUpload(targetListId, leads) {
 }
 
 // Overwrite Vicidial list endpoint (POST version with body data)
-app.post('/api/vicidial/overwrite', requireRole('admin'), async (req, res) => {
+app.post('/api/vicidial/overwrite', requireRole('master_admin', 'united_admin', 'agent', 'producer'), async (req, res) => {
     try {
         const { list_id, criteria, leads } = req.body;
         const queryParams = req.query;
@@ -3697,7 +3705,10 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
             if (comments) {
                 // Fleet size extraction patterns - updated for new format
                 const fleetPatterns = [
-                    // NEW FORMAT: "Fl: 2" pattern (highest priority)
+                    // NEWEST FORMAT: "Driver count: X | Fleet size: X"
+                    /Fleet size:\s*(\d+)/i,
+                    /Driver count:\s*\d+\s*\|\s*Fleet size:\s*(\d+)/i,
+                    // OLD FORMAT: "Fl: 2" pattern
                     /Fl:\s*(\d+)/i,
                     /Dr:\s*\d+\s*\|\s*Fl:\s*(\d+)/i,
                     // OLD FORMAT: "Size:" patterns
@@ -3780,8 +3791,9 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                     console.log(`✅ Stage from comments: "${parsedStage}"`);
                 }
 
-                // NEXT CALL parsing
-                const cbMatch = comments.match(/NEXT CALL\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i)
+                // NEXT CALL parsing — handles new format "-----NEXT CALL---------------\nDate: MM/DD/YYYY Time: HH:MMAM\nCallback Notes: ..."
+                // and legacy formats
+                const cbMatch = comments.match(/NEXT CALL[^\n]*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i)
                              || comments.match(/--scheduled next call-+\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i);
                 if (cbMatch) {
                     parsedCallbackDate = cbMatch[1].trim();
@@ -3789,10 +3801,117 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                     console.log(`✅ Callback from comments: ${parsedCallbackDate} at ${parsedCallbackTime}`);
                 }
 
-                // Owner name
-                const nameMatch = comments.match(/------------Name--------------\s*\n\s*([^\n\r-]+)/i);
+                // Owner name — new format "----OWNERS INFO-------\nName: X", legacy "---Name---\nX"
+                const nameMatch = comments.match(/OWNERS INFO[^\n]*\n\s*Name:\s*([^\n\r]+)/i)
+                               || comments.match(/------------Name--------------\s*\n\s*([^\n\r-]+)/i);
                 if (nameMatch) {
                     parsedOwnerName = nameMatch[1].trim();
+                }
+            }
+
+            // ── Parse documentation status (RQ = requested, RC = received) ──
+            const parsedDocStatus = {
+                docStatus_coi: 'not_requested',
+                docStatus_dec_page: 'not_requested',
+                docStatus_loss_runs: 'not_requested',
+                docStatus_iftas: 'not_requested'
+            };
+            if (comments) {
+                const docMappings = [
+                    { pattern: /COI\s*\(([^)]*)\)/i,        field: 'docStatus_coi' },
+                    { pattern: /DEC\s*PAGE\s*\(([^)]*)\)/i,  field: 'docStatus_dec_page' },
+                    { pattern: /LOSS\s*RUNS\s*\(([^)]*)\)/i, field: 'docStatus_loss_runs' },
+                    { pattern: /IFTAS\s*\(([^)]*)\)/i,       field: 'docStatus_iftas' }
+                ];
+                for (const { pattern, field } of docMappings) {
+                    const m = comments.match(pattern);
+                    if (m) {
+                        const val = m[1].trim().toUpperCase();
+                        if (val === 'RQ') parsedDocStatus[field] = 'requested';
+                        else if (val === 'RC') parsedDocStatus[field] = 'received';
+                    }
+                }
+                console.log(`📋 Doc status parsed:`, parsedDocStatus);
+            }
+
+            // ── Parse OPERATION section (Mile Radius, Commodities) ──
+            let parsedMileRadius = '';
+            let parsedCommodities = '';
+            if (comments) {
+                const mileMatch = comments.match(/Mile\s*Radius:\s*([^\n\r]+)/i);
+                if (mileMatch && mileMatch[1].trim()) parsedMileRadius = mileMatch[1].trim();
+                const commMatch = comments.match(/Commodities:\s*([^\n\r]+)/i);
+                if (commMatch && commMatch[1].trim()) parsedCommodities = commMatch[1].trim();
+            }
+
+            // ── Parse UNITS and TRAILERS sections into vehicle/trailer arrays ──
+            const parsedVehicles = [];
+            const parsedTrailers = [];
+            if (comments) {
+                const isPlaceholder = (v) => !v || v === 'XXXX' || v.toLowerCase() === 'unknown' || v === 'XXXXXXXXXXXXXXXX';
+                // Units
+                const unitsMatch = comments.match(/-----UNITS\(\d+\)-+\n?([\s\S]*?)(?=-----TRAILERS|$)/i);
+                if (unitsMatch) {
+                    const blocks = unitsMatch[1].split(/\n(?=Year:)/i).filter(b => b.trim());
+                    for (const block of blocks) {
+                        const year  = (block.match(/Year:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const make  = (block.match(/Make:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const model = (block.match(/Model:\s*([^\n\r]*)/i) || [])[1]?.trim() || '';
+                        const type  = (block.match(/Type:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const vin   = (block.match(/VIN:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const value = (block.match(/Value:\s*([^\n\r]*)/i) || [])[1]?.trim() || '';
+                        if (!isPlaceholder(year) && !isPlaceholder(make)) {
+                            parsedVehicles.push({ year, make, model, type, vin, value });
+                        }
+                    }
+                }
+                // Trailers
+                const trailersMatch = comments.match(/-----TRAILERS\(\d+\)-+\n?([\s\S]*)$/i);
+                if (trailersMatch) {
+                    const blocks = trailersMatch[1].split(/\n(?=Year:)/i).filter(b => b.trim());
+                    for (const block of blocks) {
+                        const year  = (block.match(/Year:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const make  = (block.match(/Make:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const type  = (block.match(/Type:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const vin   = (block.match(/VIN:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const value = (block.match(/Value:\s*([^\n\r]*)/i) || [])[1]?.trim() || '';
+                        if (!isPlaceholder(year) && !isPlaceholder(make)) {
+                            parsedTrailers.push({ year, make, type, vin, value });
+                        }
+                    }
+                }
+                if (parsedVehicles.length) console.log(`🚛 Parsed ${parsedVehicles.length} vehicle(s) from comments`);
+                if (parsedTrailers.length) console.log(`🚛 Parsed ${parsedTrailers.length} trailer(s) from comments`);
+            }
+
+            // ── Stage auto-detection: full_info_received if owner + all drivers fully filled ──
+            if (comments) {
+                const hasVal = (s) => s && s.trim() && s.trim() !== 'MM/YYYY' && s.trim() !== 'MM/DD/YYYY';
+                // Owner info
+                const ownerBlock = (comments.match(/OWNERS INFO[^\n]*\n([\s\S]*?)(?=---OPERATION|--DRIVERS|-----UNITS|$)/i) || [])[1] || '';
+                const ownerFilled = ownerBlock &&
+                    hasVal((ownerBlock.match(/Name:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((ownerBlock.match(/DOB:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((ownerBlock.match(/DL[#\s]?\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((ownerBlock.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]);
+                // All drivers info
+                const driversBlock = (comments.match(/DRIVERS INFO\(\d+\)[^\n]*\n([\s\S]*?)(?=-----UNITS|$)/i) || [])[1] || '';
+                const driverSubBlocks = driversBlock.split(/Driver \d+/i).filter(b => b.trim());
+                const allDriversFilled = driverSubBlocks.length > 0 && driverSubBlocks.every(block =>
+                    hasVal((block.match(/Name:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/DOB:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/DL[#\s]?\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/Hire Date:\s*([^\n\r]+)/i) || [])[1])
+                );
+                // Units must have real (non-placeholder) entries or count is 0
+                const unitCountMatch = comments.match(/-----UNITS\((\d+)\)/i);
+                const unitCount = parseInt(unitCountMatch?.[1] || '0');
+                const unitsOk = unitCount === 0 || parsedVehicles.length > 0;
+
+                if (ownerFilled && allDriversFilled && unitsOk) {
+                    parsedStage = 'full_info_received';
+                    console.log(`✅ Stage auto-set to full_info_received (all owner/driver info populated)`);
                 }
             }
 
@@ -3839,8 +3958,8 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 city: (lead.city || '').toUpperCase(),
                 state: lead.state || 'OH',
                 zip: "",
-                radiusOfOperation: "Regional",
-                commodityHauled: "",
+                radiusOfOperation: parsedMileRadius || (existingLead ? existingLead.radiusOfOperation : '') || '',
+                commodityHauled: parsedCommodities || (existingLead ? existingLead.commodityHauled : '') || '',
                 operatingStates: [lead.state || 'OH'],
                 annualRevenue: "",
                 safetyRating: "Satisfactory",
@@ -3912,6 +4031,11 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 })(),
                 // Owner name from ViciDial comments
                 ownerName: parsedOwnerName || (existingLead ? existingLead.ownerName : '') || lead.contact || '',
+                // Vehicles/trailers parsed from UNITS/TRAILERS sections (preserve existing if no new data)
+                vehicles: parsedVehicles.length > 0 ? parsedVehicles : (existingLead ? existingLead.vehicles || [] : []),
+                trailers: parsedTrailers.length > 0 ? parsedTrailers : (existingLead ? existingLead.trailers || [] : []),
+                // Documentation status from DOCUMENTATION section (RQ/RC markers)
+                ...parsedDocStatus,
                 // Callback from ViciDial comments NEXT CALL section
                 ...(parsedCallbackDate && parsedCallbackTime && !parsedCallbackDate.startsWith('MM') && !existingLead ? (() => {
                     try {
@@ -8375,17 +8499,24 @@ app.post('/api/loss-runs-upload', upload.array('files'), async (req, res) => {
 
         const uploadedFiles = [];
 
+        // Parse doc types array sent from client (one per file by index)
+        let docTypes = [];
+        try {
+            docTypes = req.body.docTypes ? JSON.parse(req.body.docTypes) : [];
+        } catch(e) { docTypes = []; }
+
         // Process each uploaded file with proper async database operations
-        for (const file of req.files) {
+        for (const [fileIndex, file] of req.files.entries()) {
             const fileId = path.basename(file.filename, path.extname(file.filename));
+            const docType = docTypes[fileIndex] || 'Other';
 
             try {
                 // Insert file metadata into database using the retry operation
                 const result = await retryDatabaseOperation((callback) => {
                     db.run(`
-                        INSERT INTO loss_runs (lead_id, file_name, file_size, file_type, status)
-                        VALUES (?, ?, ?, ?, 'uploaded')
-                    `, [leadId, file.filename, file.size, file.mimetype], function(err) {
+                        INSERT INTO loss_runs (lead_id, file_name, file_size, file_type, doc_type, status)
+                        VALUES (?, ?, ?, ?, ?, 'uploaded')
+                    `, [leadId, file.filename, file.size, file.mimetype, docType], function(err) {
                         callback(err, err ? null : this.lastID);
                     });
                 });
@@ -8400,6 +8531,7 @@ app.post('/api/loss-runs-upload', upload.array('files'), async (req, res) => {
                     original_name: file.originalname,
                     file_size: file.size,
                     file_type: file.mimetype,
+                    doc_type: docType,
                     uploaded_date: new Date().toISOString()
                 });
 
@@ -8448,7 +8580,7 @@ app.get('/api/loss-runs-upload', async (req, res) => {
 
         const rows = await retryDatabaseOperation((callback) => {
             db.all(`
-                SELECT id, lead_id, file_name, file_size, file_type, uploaded_date, status
+                SELECT id, lead_id, file_name, file_size, file_type, doc_type, uploaded_date, status
                 FROM loss_runs
                 WHERE lead_id = ?
                 ORDER BY uploaded_date DESC
@@ -9987,6 +10119,59 @@ app.post('/api/bug-report', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error('Bug report email failed:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/api/suggestion', async (req, res) => {
+    const { title, area, description, reportedBy, url, timestamp } = req.body;
+
+    if (!title || !description) {
+        return res.status(400).json({ success: false, error: 'Title and description are required' });
+    }
+
+    try {
+        const nodemailer = require('nodemailer');
+        const transporter = nodemailer.createTransport({
+            host: 'smtpout.secureserver.net',
+            port: 465,
+            secure: true,
+            auth: {
+                user: 'contact@vigagency.com',
+                pass: process.env.GODADDY_VIG_PASSWORD || process.env.GODADDY_PASSWORD
+            }
+        });
+
+        const html = `
+<div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;">
+  <div style="background:#2563eb;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0;">
+    <h2 style="margin:0;">Suggestion</h2>
+    <p style="margin:4px 0 0;opacity:.85;">Vanguard CRM</p>
+  </div>
+  <div style="background:#f8fafc;padding:24px;border:1px solid #e2e8f0;border-radius:0 0 8px 8px;">
+    <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:20px;">
+      <tr><td style="width:120px;color:#666;padding:6px 0;font-weight:600;">Submitted By</td><td style="color:#111;font-weight:500;">${reportedBy || 'Unknown'}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">Area</td><td>${area || 'Not specified'}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">Title</td><td style="font-weight:700;color:#111;">${title}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">Time</td><td>${timestamp || new Date().toLocaleString()}</td></tr>
+      <tr><td style="color:#666;padding:6px 0;font-weight:600;">URL</td><td style="font-size:12px;word-break:break-all;">${url || ''}</td></tr>
+    </table>
+    <h3 style="margin:0 0 8px;color:#111;font-size:15px;">Description</h3>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:14px;margin-bottom:20px;white-space:pre-wrap;font-size:14px;line-height:1.6;">${description}</div>
+  </div>
+</div>`;
+
+        await transporter.sendMail({
+            from: '"VIG Suggestion" <contact@vigagency.com>',
+            to: 'Grant@vigagency.com',
+            subject: `[SUGGESTION] ${title} — from ${reportedBy || 'Unknown'}`,
+            html
+        });
+
+        console.log('Suggestion sent from', reportedBy, ':', title);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Suggestion email failed:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

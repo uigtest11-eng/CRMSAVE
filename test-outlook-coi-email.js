@@ -19,7 +19,7 @@ async function testOutlookCOIEmail() {
             secure: true, // Use SSL
             auth: {
                 user: 'contact@vigagency.com',
-                pass: '25nickc124!'
+                pass: process.env.GODADDY_VIG_PASSWORD || ''
             },
             tls: {
                 rejectUnauthorized: false // Accept self-signed certificates

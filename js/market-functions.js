@@ -532,6 +532,8 @@ function showLogQuoteModal(carrierName = null) {
                         <option value="Crum & Forster">Crum & Forster</option>
                         <option value="Nico">Nico</option>
                         <option value="Berkley Prime">Berkley Prime</option>
+                        <option value="Star Mutual">Star Mutual</option>
+                        <option value="Corgi">Corgi</option>
                     </select>
                 </div>
 

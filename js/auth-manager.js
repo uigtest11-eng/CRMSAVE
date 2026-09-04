@@ -221,6 +221,10 @@
                         if (_isAdmin()) {
                             section.style.display = 'block';
                             section.style.visibility = 'visible';
+                        } else if (isCsrRole()) {
+                            // CSR: show section, applyCsrNavRestrictions controls individual items
+                            section.style.display = 'block';
+                            section.style.visibility = 'visible';
                         } else {
                             section.style.display = 'none';
                             section.style.visibility = 'hidden';
@@ -528,24 +532,39 @@
             if (el) { el.style.display = 'none'; el.style.visibility = 'hidden'; }
         };
 
-        // Hide entire Administration section
+        // Show Administration section but only Downloads for CSR
         document.querySelectorAll('.menu-section').forEach(sec => {
             const h3 = sec.querySelector('h3');
-            if (h3 && h3.textContent.trim() === 'Administration') hideNavItem(sec);
+            if (h3 && h3.textContent.trim() === 'Administration') {
+                // Keep the section visible, but hide individual admin-only items
+                sec.style.display = '';
+                sec.style.visibility = '';
+                const items = sec.querySelectorAll('ul > li');
+                items.forEach(li => {
+                    const anchor = li.querySelector('a');
+                    if (!anchor) return;
+                    const href = anchor.getAttribute('href') || '';
+                    // Only show Downloads for CSR
+                    if (href === '#downloads') {
+                        li.style.display = '';
+                        li.style.visibility = '';
+                    } else {
+                        hideNavItem(li);
+                    }
+                });
+            }
         });
 
-        // Hide Lead Generation, Market, Leads nav links by matching href/onclick
+        // Hide Lead Generation and Market nav links (but NOT Leads)
         document.querySelectorAll('.sidebar-menu a, .sidebar-menu li').forEach(el => {
             const href = el.getAttribute('href') || '';
             const onclick = el.getAttribute('onclick') || '';
             const text = el.querySelector('span')?.textContent.trim() || el.textContent.trim();
             if (
                 onclick.includes('toggleLeadGenFolder') ||
-                onclick.includes('toggleLeadsFolder') ||
                 href === '#market' ||
                 text === 'Lead Generation' ||
-                text === 'Market' ||
-                text === 'Leads'
+                text === 'Market'
             ) {
                 const li = el.closest('li') || el;
                 hideNavItem(li);
@@ -555,8 +574,6 @@
         // Also hide any lead-gen sub-folder items
         const leadGenFolder = document.getElementById('leadGenFolder');
         if (leadGenFolder) hideNavItem(leadGenFolder);
-        const leadsFolder = document.getElementById('leadsFolder');
-        if (leadsFolder) hideNavItem(leadsFolder);
 
         // Hide goals bar
         const goalsBar = document.getElementById('dashboard-goals-bar');

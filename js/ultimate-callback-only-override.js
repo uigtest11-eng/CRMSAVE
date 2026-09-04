@@ -2,6 +2,11 @@
 // This completely disables ALL other TO DO systems and enforces ONLY callback-based logic
 // RULE: Red "Reach out: CALL" ONLY shows when there's an OVERDUE scheduled callback
 
+// CSR users: skip entirely — CSRs use csrTodo, not callback-based reach outs
+var _ucoIsCsr = false;
+try { _ucoIsCsr = (JSON.parse(sessionStorage.getItem('vanguard_user') || '{}').role || '') === 'csr'; } catch(e) {}
+if (_ucoIsCsr) { console.log('Ultimate Callback Override: skipped for CSR'); } else {
+
 console.log('🛡️ LOADED: Ultimate Callback-Only Override - Disabling ALL competing systems');
 
 // NUCLEAR OPTION: Disable all competing systems immediately and repeatedly
@@ -221,3 +226,5 @@ window.checkUltimateOverdueCallback = checkUltimateOverdueCallback;
 
 console.log('🛡️ ULTIMATE CALLBACK-ONLY SYSTEM LOADED');
 console.log('💡 Manual commands: installUltimateOverride(), forceCleanAllTableCells(), nukeAllCompetingSystems()');
+
+} // end CSR skip block

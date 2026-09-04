@@ -4,7 +4,7 @@ console.log('📞 Loading alternative calling solutions...');
 /**
  * The current SIP timeout issue is likely due to one of:
  * 1. Invalid Twilio SIP domain (vanguard1.sip.twilio.com may not exist)
- * 2. Invalid credentials (Grant/GrantCorp2006@ may be placeholders)
+ * 2. Invalid credentials (Grant/REDACTED may be placeholders)
  * 3. Twilio account not configured for SIP
  * 4. Network/firewall blocking SIP WebSocket connections
  *
@@ -159,7 +159,7 @@ async function smartTroubleshooter() {
     }
 
     // Check 2: Placeholder credentials
-    if (config.username === 'Grant' && config.password === 'GrantCorp2006@') {
+    if (config.username === 'Grant' && config.password === 'REDACTED') {
         issues.push('Using placeholder credentials');
         solutions.push('Replace with real Twilio SIP credentials');
     }

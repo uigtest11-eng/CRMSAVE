@@ -7804,6 +7804,9 @@ function getStageHtml(stage, lead) {
         'info_received': 'stage-info-received',
         'loss_runs_requested': 'stage-loss-runs-requested',
         'loss_runs_received': 'stage-loss-runs-received',
+        'full_info_requested': 'stage-info-requested',
+        'full_info_received': 'stage-info-received',
+        'quote_prepared': 'stage-info-received',
         'qualified': 'stage-qualified',
         'quoted': 'stage-quoted',
         'quote_sent': 'stage-quote-sent',
@@ -7825,6 +7828,9 @@ function getStageHtml(stage, lead) {
         'info_received': 'Info Received',
         'loss_runs_requested': 'Loss Runs Requested',
         'loss_runs_received': 'Loss Runs Received',
+        'full_info_requested': 'Full Info Requested',
+        'full_info_received': 'Full Info Received',
+        'quote_prepared': 'Quote Prepared',
         'app_prepared': 'App Prepared',
         'app_sent': 'Waiting on Markets',
         'app_quote_received': 'App Quote Received',
@@ -8581,6 +8587,12 @@ window.toggleCsrTodoDone = async function(leadId, done) {
             textEl.textContent = lead.csrTodo || '';
         }
     }
+    // Clear/restore the textarea immediately
+    const textareaEl = document.getElementById('csr-todo-' + leadId);
+    if (textareaEl) {
+        textareaEl.value = done ? '' : (lead.csrTodo || '');
+    }
+
     // Update the container border/bg
     const cb = document.getElementById('csr-done-cb-' + leadId);
     if (cb) {
@@ -8660,6 +8672,15 @@ window.acknowledgeCsrTodo = async function(leadId, approved) {
     lead.csrTodoAcknowledged = true; // Removes blue row highlight
 
     if (approved) {
+        // Auto-advance stage based on what task was completed
+        const completedTask = (lead.csrTodoOriginal || '').trim();
+        if (completedTask === 'Prepare Basic Quote') {
+            lead.stage = 'quote_prepared';
+            lead.stageUpdatedAt = new Date().toISOString();
+        } else if (completedTask === 'Prepare App & Quotes') {
+            lead.stage = 'app_prepared';
+            lead.stageUpdatedAt = new Date().toISOString();
+        }
         // Task accepted: clear everything, textarea comes back blank
         lead.csrTodo = '';
         lead.csrTodoOriginal = '';
@@ -9287,10 +9308,13 @@ async function loadLeadsView() {
                             <option value="">All Stages</option>
                             <option value="new">New</option>
                             <option value="contact_attempted">Contact Attempted</option>
-                            <option value="info_requested">Info Requested</option>
-                            <option value="info_received">Info Received</option>
+                            <option value="info_requested">Basic Info Requested</option>
+                            <option value="info_received">Basic Info Received</option>
+                            <option value="full_info_requested">Full Info Requested</option>
+                            <option value="full_info_received">Full Info Received</option>
                             <option value="loss_runs_requested">Loss Runs Requested</option>
                             <option value="loss_runs_received">Loss Runs Received</option>
+                            <option value="quote_prepared">Quote Prepared</option>
                             <option value="app_prepared">App Prepared</option>
                             <option value="app_sent">Waiting on Markets</option>
                             <option value="app_quote_received">App Quote Received</option>
@@ -35639,12 +35663,15 @@ async function generateLeadsFromForm() {
             phone: carrier.phone || 'N/A',
             email: carrier.email_address || carrier.email || 'N/A',
             fleet_size: carrier.powerUnits || carrier.power_units || 0,
+            drivers: carrier.drivers || carrier.total_drivers || 0,
             insurance_expiry: carrier.renewalDate || carrier.insurance_expiry_date || carrier.policy_renewal_date || carrier.expiry || 'N/A',
             insurance_company: carrier.insuranceCompany || carrier.insurance_company || carrier.insurance_carrier || 'Unknown',
             insurance_amount: carrier.premium || carrier.liability_insurance_amount || carrier.bipd_insurance_on_file_amount || carrier.insurance_on_file || 0,
             policy_number: carrier.policy_number || 'N/A',
             safety_rating: carrier.safety_rating || 'None',
-            operating_status: carrier.operating_status || carrier.status || 'Unknown'
+            operating_status: carrier.operating_status || carrier.status || 'Unknown',
+            commodities_hauled: carrier.commodities_hauled || '',
+            cargo_carried: carrier.cargo_carried || ''
         }));
         
         // Calculate statistics
@@ -39008,10 +39035,10 @@ function getNextAction(stage, lead) {
         console.log(`🔍 STAGE CHECK: stage="${stage}" (type: ${typeof stage})`);
         console.log(`🔍 STAGE CHECK: Checking conditions...`);
         if (stage === 'quoted' || stage === 'info_requested' || stage === 'Info Requested' ||
+            stage === 'full_info_requested' || stage === 'Full Info Requested' ||
             stage === 'contact_attempted' || stage === 'Contact Attempted' ||
             stage === 'loss_runs_requested' || stage === 'Loss Runs Requested' ||
-            stage === 'quote_sent' || stage === 'quote-sent-unaware' || stage === 'quote-sent-aware' ||
-            stage === 'sale' || stage === 'Sale') {
+            stage === 'quote_sent' || stage === 'quote-sent-unaware' || stage === 'quote-sent-aware') {
             console.log(`🔍 STAGE CHECK: ✅ STAGE MATCHED - proceeding to completion check`);
 
             // Reach out is complete when ACTUAL completion actions happened:
@@ -39067,9 +39094,11 @@ function getNextAction(stage, lead) {
         'new': 'Assign Stage',
         'contact_attempted': 'Reach out',
         'info_requested': 'Reach out',
-        'info_received': 'Prepare Quote',
+        'info_received': 'Prepare Basic Quote',
+        'full_info_requested': 'Reach out',
+        'full_info_received': 'Prepare App & Quotes',
         'loss_runs_requested': 'Reach out',
-        'loss_runs_received': 'Prepare app.',
+        'loss_runs_received': 'Send out loss runs',
         'app_prepared': 'Email brokers',
         'app_sent': '',
         'quoted': 'Email Quote, and make contact',
@@ -39078,15 +39107,18 @@ function getNextAction(stage, lead) {
         'quote-sent-aware': 'Reach out',
         'interested': 'Reach out',
         'not-interested': 'Archive lead',
+        'sale': 'Update Client',
         'closed': 'Process complete',
 
         // Title case with spaces format (actual database format)
         'New': 'Assign Stage',
         'Contact Attempted': 'Reach out',
         'Info Requested': 'Reach out',
-        'Info Received': 'Prepare Quote',
+        'Info Received': 'Prepare Basic Quote',
+        'Full Info Requested': 'Reach out',
+        'Full Info Received': 'Prepare App & Quotes',
         'Loss Runs Requested': 'Reach out',
-        'Loss Runs Received': 'Prepare app.',
+        'Loss Runs Received': 'Send out loss runs',
         'App Prepared': 'Email brokers',
         'App Sent': '',
         'Quoted': 'Email Quote, and make contact',
@@ -39095,6 +39127,7 @@ function getNextAction(stage, lead) {
         'Quote Sent Aware': 'Reach out',
         'Interested': 'Reach out',
         'Not Interested': 'Archive lead',
+        'Sale': 'Update Client',
         'Closed': 'Process complete'
     };
 

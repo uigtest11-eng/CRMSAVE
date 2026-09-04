@@ -33,10 +33,12 @@ window.viewClientOriginal = async function(id) {
 
     // Merge server policies into localStorage without overwriting local-only entries
     try {
-        const response = await fetch('/api/policies?includeInactive=true');
+        const response = await fetch('/api/policies?includeInactive=true&limit=500');
         if (response.ok) {
-            const serverPolicies = await response.json();
-            const localPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const _serverRaw = await response.json();
+            const serverPolicies = Array.isArray(_serverRaw) ? _serverRaw : [];
+            const _localRaw = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const localPolicies = Array.isArray(_localRaw) ? _localRaw : [];
             // Build map of server policies by id
             const serverMap = {};
             serverPolicies.forEach(p => { if (p.id) serverMap[p.id] = p; });
@@ -50,13 +52,23 @@ window.viewClientOriginal = async function(id) {
         console.log('⚠️ Could not sync from server, using localStorage data:', error.message);
     }
 
-    const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const _rawPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const allPolicies = Array.isArray(_rawPolicies) ? _rawPolicies : [];
     console.log('Total policies in storage:', allPolicies.length);
     console.log('Client ID:', id, 'Client Name:', client.name);
 
     // Build identity key for this client (name + DOB) for fuzzy matching
     const clientDob = client.dateOfBirth || client['Date of Birth'] || '';
     const clientKey = _clientIdentityKey(client.name || client.businessName || '', clientDob);
+
+    // Normalize helpers for broad matching
+    const _nStr = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+    const _nPh  = s => (s || '').replace(/\D/g, '');
+    const clientNameN = _nStr(client.name);
+    const clientBizN  = _nStr(client.businessName || client.companyName || '');
+    const clientEmailN = (client.email || '').toLowerCase().trim();
+    const clientPhoneN = _nPh(client.phone);
+    const clientPeopleNames = (client.people || []).map(p => _nStr((p.firstName || '') + ' ' + (p.lastName || '') || p.name || '')).filter(Boolean);
 
     const clientPolicies = allPolicies.filter(policy => {
         // 1. Exact clientId match — always wins
@@ -68,31 +80,90 @@ window.viewClientOriginal = async function(id) {
         const polKey   = _clientIdentityKey(polOwner, polDob);
         if (clientKey && polKey && polKey === clientKey) return true;
 
-        // 3. Insured name exact match against client name
-        const insuredName = policy.insured?.['Name/Business Name'] ||
-                           policy.insured?.['Primary Named Insured'] ||
-                           policy.insured?.['Full Name'] ||
-                           policy.insured?.['Business Name'] ||
-                           policy.insuredName ||
-                           policy.clientName;
-        if (insuredName && client.name && insuredName.toLowerCase() === client.name.toLowerCase()) return true;
+        // Gather all name variants from the policy
+        const polNames = [
+            policy.insured?.['Name/Business Name'],
+            policy.insured?.['Primary Named Insured'],
+            policy.insured?.['Business Name'],
+            policy.insured?.['Full Name'],
+            policy.insuredName,
+            policy.clientName,
+            policy.contact?.['Owner Name'],
+            policy.contact?.['Business Name']
+        ].filter(Boolean);
+
+        // 3. Exact name match (person name, business name, people contacts)
+        for (const pn of polNames) {
+            const pnN = _nStr(pn);
+            if (pnN && clientNameN && pnN === clientNameN) return true;
+            if (pnN && clientBizN && pnN === clientBizN) return true;
+            if (pnN && clientPeopleNames.some(cn => cn === pnN)) return true;
+        }
 
         // 4. Fuzzy identity key on insured/client name
-        if (insuredName) {
-            const polKeyFallback = _clientIdentityKey(insuredName, '');
+        for (const pn of polNames) {
+            const polKeyFallback = _clientIdentityKey(pn, '');
             if (clientKey && polKeyFallback && polKeyFallback === clientKey) return true;
         }
 
-        // 5. Business name match (catches policies where auto-created client biz name = real client biz name)
-        const polBizName = policy.contact?.['Business Name'] || policy.clientName || '';
-        if (polBizName && client.businessName) {
-            const polBizKey    = _clientIdentityKey(polBizName, '');
-            const clientBizKey = _clientIdentityKey(client.businessName, '');
-            if (polBizKey && clientBizKey && polBizKey === clientBizKey) return true;
+        // 5. Business name containment (handles "LOPEZ TRUCKING COMPANY LLC" vs "Lopez Trucking")
+        if (clientBizN && clientBizN.length >= 4) {
+            for (const pn of polNames) {
+                const pnN = _nStr(pn);
+                if (pnN && (pnN.includes(clientBizN) || clientBizN.includes(pnN))) return true;
+            }
+        }
+
+        // 6. Email match
+        const polEmail = (policy.contact?.['Email'] || policy.contact?.['email'] || policy.contact?.['Email Address'] || policy.insured?.['Email'] || '').toLowerCase().trim();
+        if (clientEmailN && polEmail && clientEmailN === polEmail) return true;
+
+        // 7. Phone match
+        const polPhone = _nPh(policy.contact?.['Phone'] || policy.contact?.['phone'] || policy.contact?.['Phone Number'] || policy.insured?.['Phone'] || '');
+        if (clientPhoneN && clientPhoneN.length >= 10 && polPhone.length >= 10 && clientPhoneN === polPhone) return true;
+
+        // 8. Client name match against policy.clientName (IVANS imports set this)
+        if (policy.clientName && client.name) {
+            const pcN = _nStr(policy.clientName);
+            if (pcN && clientNameN && pcN === clientNameN) return true;
+        }
+
+        // 9. Legacy client.policies array
+        if (client.policies && Array.isArray(client.policies)) {
+            return client.policies.some(p => {
+                if (typeof p === 'string') return p === policy.id || p === policy.policyNumber;
+                if (typeof p === 'object' && p) return p.id === policy.id || p.policyNumber === policy.policyNumber;
+                return false;
+            });
         }
 
         return false;
     });
+
+    // Deduplicate policies by policyNumber (keep the newest by updated_at or id)
+    const _seenPolicyNumbers = new Map();
+    clientPolicies.forEach(p => {
+        const key = p.policyNumber || p.id;
+        if (!key) return;
+        const existing = _seenPolicyNumbers.get(key);
+        if (!existing) {
+            _seenPolicyNumbers.set(key, p);
+        } else {
+            // Keep the one with more data (more keys) or newer timestamp
+            const existingKeys = Object.keys(existing).length;
+            const currentKeys = Object.keys(p).length;
+            if (currentKeys > existingKeys) {
+                _seenPolicyNumbers.set(key, p);
+            }
+        }
+    });
+    const dedupedPolicies = Array.from(_seenPolicyNumbers.values());
+    if (dedupedPolicies.length < clientPolicies.length) {
+        console.log(`🔄 Deduplicated ${clientPolicies.length} → ${dedupedPolicies.length} policies`);
+    }
+    // Replace clientPolicies with deduped version
+    clientPolicies.length = 0;
+    clientPolicies.push(...dedupedPolicies);
 
     console.log('Client policies found:', clientPolicies.length);
 
@@ -344,9 +415,7 @@ window.viewClientOriginal = async function(id) {
                                     + fRow2('Business Type','type', client.businessType||'', 'FEIN','fein', client.fein||'')
                                     + fRow('Website','website', client.website||'')
                                     + fRow('Email','email', client.businessEmail||client.email||'')
-                                    + fRow('GL Code','glCode', client.glCode||'')
-                                    + fRow('SIC Code','sicCode', client.sicCode||'')
-                                    + fRow('NAICS Code','naicsCode', client.naicsCode||'');
+                                    + fRow('DOT #','dotNumber', client.dotNumber||client.dot||'');
                             })()}
                         </div>
                     </div>
@@ -407,6 +476,30 @@ window.viewClientOriginal = async function(id) {
                 </div>
 
                 <!-- Policies - Right Side -->
+                ${(() => {
+                    const today = new Date();
+                    today.setHours(0,0,0,0);
+                    const _parseExpDate = (d) => {
+                        if (!d) return null;
+                        // Handle MM/DD/YYYY
+                        const slashMatch = String(d).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                        if (slashMatch) return new Date(slashMatch[3], slashMatch[1]-1, slashMatch[2]);
+                        // Handle YYYY-MM-DD
+                        const dashMatch = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                        if (dashMatch) return new Date(dashMatch[1], dashMatch[2]-1, dashMatch[3]);
+                        const parsed = new Date(d);
+                        return isNaN(parsed) ? null : parsed;
+                    };
+                    const activePolicies = clientPolicies.filter(p => {
+                        const exp = _parseExpDate(p.expirationDate || p.overview?.['Expiration Date']);
+                        return !exp || exp >= today;
+                    });
+                    const expiredPolicies = clientPolicies.filter(p => {
+                        const exp = _parseExpDate(p.expirationDate || p.overview?.['Expiration Date']);
+                        return exp && exp < today;
+                    });
+                    window._clientExpiredPolicies = expiredPolicies;
+                    return `
                 <div style="background: white; border-radius: 12px; padding: 28px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); border: 1px solid #e5e7eb;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px;">
                         <div style="display: flex; align-items: center;">
@@ -415,13 +508,14 @@ window.viewClientOriginal = async function(id) {
                             </div>
                             <div>
                                 <h2 style="margin: 0; color: #1f2937; font-size: 22px; font-weight: 600;">Active Policies</h2>
-                                <p style="margin: 4px 0 0 0; color: #6b7280; font-size: 14px;">${clientPolicies.length} ${clientPolicies.length === 1 ? 'Policy' : 'Policies'} Found</p>
+                                <p style="margin: 4px 0 0 0; color: #6b7280; font-size: 14px;">${activePolicies.length} Active${expiredPolicies.length ? ', ' + expiredPolicies.length + ' Expired' : ''}</p>
                             </div>
                         </div>
+                        ${expiredPolicies.length ? `<button onclick="window._showExpiredPolicies()" style="display:flex;align-items:center;gap:6px;background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;" onmouseover="this.style.background='#e5e7eb'" onmouseout="this.style.background='#f3f4f6'"><i class="fas fa-history"></i> Policy History (${expiredPolicies.length})</button>` : ''}
                     </div>
 
                     <div style="display: grid; gap: 16px;">
-                        ${clientPolicies.length > 0 ? clientPolicies.map(policy => {
+                        ${activePolicies.length > 0 ? activePolicies.map(policy => {
                             const premium = policy.financial?.['Annual Premium'] ||
                                           policy.financial?.['Premium'] ||
                                           policy.premium || 0;
@@ -505,9 +599,10 @@ window.viewClientOriginal = async function(id) {
                         }).join('') : `
                             <div style="text-align: center; padding: 40px; color: #9ca3af;">
                                 <i class="fas fa-file-contract" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                                <p style="margin: 0 0 16px 0; font-size: 16px;">No policies found</p>
+                                <p style="margin: 0 0 16px 0; font-size: 16px;">No active policies</p>
+                                ${expiredPolicies.length ? `<p style="margin: 0 0 16px 0; font-size: 14px;">Check <strong>Policy History</strong> for ${expiredPolicies.length} expired ${expiredPolicies.length === 1 ? 'policy' : 'policies'}</p>` : ''}
                                 <button onclick="addPolicyToClient('${id}')" style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer;">
-                                    <i class="fas fa-plus"></i> Add First Policy
+                                    <i class="fas fa-plus"></i> Add Policy
                                 </button>
                                 <button onclick="syncPoliciesForClient('${id}')" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; margin-left: 8px;">
                                     <i class="fas fa-sync-alt"></i> Sync Policies
@@ -515,16 +610,64 @@ window.viewClientOriginal = async function(id) {
                             </div>
                         `}
                     </div>
+                </div>`; })()}
+            </div>
+
+            <!-- Client Notes Section -->
+            <div style="padding: 24px 24px 0;">
+                <div style="background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; overflow: hidden;">
+                    <div style="background: #3c8dbc; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="fas fa-pen" style="margin-right:7px;"></i>Notes</span>
+                    </div>
+                    <div style="padding: 14px 16px;">
+                        <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+                            <textarea id="client-note-input-${id}" placeholder="Type a note..." style="flex:1;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;resize:vertical;min-height:38px;max-height:120px;font-family:inherit;"></textarea>
+                            <input type="file" id="client-note-file-${id}" multiple style="display:none;" onchange="window._noteFileSelected('${id}')">
+                            <button onclick="document.getElementById('client-note-file-${id}').click()" style="background:#6b7280;color:white;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;font-size:13px;" title="Attach file">
+                                <i class="fas fa-paperclip"></i>
+                            </button>
+                            <button onclick="window.addClientNote && window.addClientNote('${id}')" style="background:#3b82f6;color:white;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;">
+                                <i class="fas fa-plus" style="margin-right:4px;"></i>Add
+                            </button>
+                        </div>
+                        <div id="client-note-file-preview-${id}" style="margin-bottom:8px;"></div>
+                        <div id="client-user-notes-list-${id}">
+                            ${(() => {
+                                const userNotes = Array.isArray(client.userNotes) ? client.userNotes : [];
+                                if (!userNotes.length) return '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:12px;"><i class="fas fa-pen" style="margin-right:6px;opacity:0.4;"></i>No notes yet</div>';
+                                const page = 0;
+                                const perPage = 5;
+                                const totalPages = Math.ceil(userNotes.length / perPage);
+                                const visible = userNotes.slice(0, perPage);
+                                let html = visible.map((n, i) => {
+                                    const dateStr = n.date ? new Date(n.date).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+                                    return '<div style="display:flex;justify-content:space-between;align-items:start;padding:8px 10px;border-bottom:1px solid #f3f4f6;' + (i%2===1?'background:#fafafa;':'') + '">'
+                                        + '<span style="color:#374151;font-size:13px;line-height:1.4;flex:1;">' + (n.text||'') + '</span>'
+                                        + '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px;">'
+                                        + '<span style="color:#9ca3af;font-size:11px;white-space:nowrap;">' + dateStr + '</span>'
+                                        + '<button onclick="window.deleteClientNote && window.deleteClientNote(\'' + id + '\',' + i + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:2px;" title="Delete note"><i class="fas fa-trash-alt"></i></button>'
+                                        + '</div></div>';
+                                }).join('');
+                                if (totalPages > 1) {
+                                    html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:8px 10px;">'
+                                        + '<span style="color:#9ca3af;font-size:11px;">Page 1 of ' + totalPages + '</span>'
+                                        + '<button onclick="window.paginateClientNotes && window.paginateClientNotes(\'' + id + '\',1)" style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;"><i class="fas fa-chevron-right"></i></button>'
+                                        + '</div>';
+                                }
+                                return html;
+                            })()}
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Media / Files + Notes Row -->
+            <!-- IVANS Media / Files + IVANS Notes Row -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px;">
 
-                <!-- Media / Files -->
+                <!-- IVANS Media / Files -->
                 <div style="background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; overflow: hidden;">
                     <div style="background: #3c8dbc; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="far fa-folder-open" style="margin-right:7px;"></i>Media / Files</span>
+                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="far fa-folder-open" style="margin-right:7px;"></i>IVANS Media / Files</span>
                         <button onclick="window.uploadClientDocument('${id}')" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.35); color: white; border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 13px;" title="Upload file">
                             <i class="fas fa-plus"></i>
                         </button>
@@ -546,10 +689,10 @@ window.viewClientOriginal = async function(id) {
                     </div>
                 </div>
 
-                <!-- Notes -->
+                <!-- IVANS Notes -->
                 <div style="background: white; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #e5e7eb; overflow: hidden; display: flex; flex-direction: column;">
                     <div style="background: #3c8dbc; padding: 10px 16px; display: flex; align-items: center; flex-shrink: 0;">
-                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="fas fa-sticky-note" style="margin-right:7px;"></i>Notes</span>
+                        <span style="color: white; font-weight: 600; font-size: 14px;"><i class="fas fa-sticky-note" style="margin-right:7px;"></i>IVANS Notes</span>
                     </div>
                     <div style="flex: 1; overflow-y: auto; max-height: 320px;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 13px;" id="client-notes-table">
@@ -958,24 +1101,32 @@ window.editClientPortalEmail = function(clientId, currentEmail) {
     try {
         // Update localStorage
         const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
-        const clientIndex = clients.findIndex(c => c.id === clientId);
+        const clientIndex = clients.findIndex(c => String(c.id) === String(clientId));
 
         if (clientIndex !== -1) {
             clients[clientIndex].email = newEmail;
+            // Sync: if no business email, copy portal email there
+            if (newEmail && !clients[clientIndex].businessEmail) {
+                clients[clientIndex].businessEmail = newEmail;
+            }
             localStorage.setItem('insurance_clients', JSON.stringify(clients));
             console.log('✅ Client email updated in localStorage:', newEmail);
         }
 
-        // Update database via API
+        // Also update the Business Email input if it's on the page and empty
+        const bizEmailInput = document.getElementById('biz-email');
+        if (bizEmailInput && !bizEmailInput.value && newEmail) {
+            bizEmailInput.value = newEmail;
+        }
+
+        // Update database via API — send full client object to avoid data loss
+        const payload = clientIndex !== -1 ? clients[clientIndex] : { id: clientId, email: newEmail };
         fetch('/api/clients', {
-            method: 'PUT',
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                id: clientId,
-                email: newEmail
-            })
+            body: JSON.stringify(payload)
         }).then(response => {
             if (response.ok) {
                 console.log('✅ Client email updated in database:', newEmail);
@@ -1098,6 +1249,77 @@ window.togglePasswordVisibility = function(clientId, password, buttonElement) {
     }
 };
 
+// Show expired policies history popup
+window._showExpiredPolicies = function() {
+    const policies = window._clientExpiredPolicies || [];
+    if (!policies.length) { _showInlineToast('No expired policies found', 'info'); return; }
+
+    const formatDate = d => {
+        if (!d) return 'N/A';
+        const s = String(d);
+        if (s.match(/^\d{4}-\d{2}-\d{2}/)) { const p = s.split('-'); return `${p[1]}/${p[2].substring(0,2)}/${p[0]}`; }
+        return s;
+    };
+
+    const rows = policies.map(p => {
+        const prem = p.financial?.['Annual Premium'] || p.financial?.['Premium'] || p.premium || '';
+        const fmtPrem = prem ? '$' + String(prem).replace(/[^0-9.]/g, '').replace(/(\d)(?=(\d{3})+\.)/g,'$1,') + '/yr' : 'N/A';
+        return `<tr style="border-bottom:1px solid #f3f4f6;">
+            <td style="padding:10px 12px;font-weight:600;color:#1f2937;font-size:13px;">${p.policyNumber || p.id || '—'}</td>
+            <td style="padding:10px 8px;font-size:13px;color:#374151;">${p.carrier || 'N/A'}</td>
+            <td style="padding:10px 8px;font-size:13px;color:#374151;">${p.policyType || p.type || 'N/A'}</td>
+            <td style="padding:10px 8px;font-size:13px;color:#374151;">${formatDate(p.effectiveDate)}</td>
+            <td style="padding:10px 8px;font-size:13px;color:#dc2626;font-weight:500;">${formatDate(p.expirationDate)}</td>
+            <td style="padding:10px 8px;font-size:13px;color:#059669;font-weight:600;">${fmtPrem}</td>
+            <td style="padding:10px 8px;"><button onclick="document.getElementById('expired-policies-overlay').remove();viewPolicy('${p.id}')" style="background:#3b82f6;color:white;border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px;"><i class="fas fa-eye"></i></button></td>
+        </tr>`;
+    }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'expired-policies-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+        <div style="background:white;border-radius:16px;padding:32px;max-width:820px;width:95%;max-height:80vh;overflow-y:auto;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:40px;height:40px;background:linear-gradient(135deg,#f59e0b,#d97706);border-radius:10px;display:flex;align-items:center;justify-content:center;color:white;"><i class="fas fa-history" style="font-size:18px;"></i></div>
+                    <div>
+                        <h2 style="margin:0;font-size:20px;font-weight:700;color:#1f2937;">Policy History</h2>
+                        <p style="margin:2px 0 0;font-size:13px;color:#6b7280;">${policies.length} expired ${policies.length === 1 ? 'policy' : 'policies'}</p>
+                    </div>
+                </div>
+                <button onclick="document.getElementById('expired-policies-overlay').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1;">&times;</button>
+            </div>
+            <table style="width:100%;border-collapse:collapse;">
+                <thead>
+                    <tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb;">
+                        <th style="padding:8px 12px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;">Policy #</th>
+                        <th style="padding:8px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;">Carrier</th>
+                        <th style="padding:8px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;">Type</th>
+                        <th style="padding:8px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;">Effective</th>
+                        <th style="padding:8px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;">Expired</th>
+                        <th style="padding:8px;text-align:left;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;">Premium</th>
+                        <th style="padding:8px;width:50px;"></th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+};
+
+// Inline toast that always shows (bypasses disable-popups.js)
+function _showInlineToast(msg, type) {
+    const bg = type === 'success' ? '#059669' : type === 'error' ? '#dc2626' : type === 'warning' ? '#d97706' : '#1e40af';
+    const icon = type === 'success' ? 'check-circle' : type === 'error' ? 'times-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle';
+    const t = document.createElement('div');
+    t.style.cssText = `position:fixed;top:80px;right:24px;background:${bg};color:white;padding:14px 22px;border-radius:10px;font-size:14px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.25);display:flex;align-items:center;gap:10px;max-width:420px;`;
+    t.innerHTML = `<i class="fas fa-${icon}"></i> ${msg}`;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 4000);
+}
+
 // Override the current viewClient function with the original simple design
 window.viewClient = window.viewClientOriginal;
 
@@ -1113,8 +1335,13 @@ window.syncPoliciesForClient = async function(clientId) {
     } catch(e) {}
     if (!client) { showNotification('Client not found', 'error'); return; }
 
-    // Get all policies
-    const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    // Fetch fresh policies with high limit to ensure we find all matches
+    let allPolicies = [];
+    try {
+        const polRes = await fetch('/api/policies?includeInactive=true&limit=500');
+        if (polRes.ok) allPolicies = await polRes.json();
+    } catch(e) {}
+    if (!allPolicies.length) allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
 
     // Stop words that are too common to count as meaningful matches
     const STOP_WORDS = new Set(['llc','inc','ltd','co','corp','lp','the','and','of','transport',
@@ -1147,16 +1374,49 @@ window.syncPoliciesForClient = async function(clientId) {
         return matches;
     }
 
-    // Find policies NOT already linked to this client but likely belonging to them (score >= 2)
+    // Also match by email, phone, and business-name containment
+    const _syncNormPhone = ph => (ph || '').replace(/\D/g, '');
+    const clientEmail = (client.email || '').toLowerCase().trim();
+    const clientPhone = _syncNormPhone(client.phone);
+    const clientBizStripped = (client.businessName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Find policies NOT already linked to this client but likely belonging to them
     const unlinked = allPolicies.filter(p => {
         if (p.clientId && String(p.clientId) === String(clientId)) return false; // already linked
-        const pName = p.insuredName || p.clientName || p.contact?.['Owner Name'] ||
-                      p.insured?.['Name/Business Name'] || p.insured?.['Primary Named Insured'] || '';
-        return nameScore(pName) >= 2;
+
+        // Gather all name candidates from the policy
+        const polNameCandidates = [
+            p.insuredName, p.clientName, p.contact?.['Owner Name'],
+            p.insured?.['Name/Business Name'], p.insured?.['Primary Named Insured'],
+            p.insured?.['Business Name'], p.contact?.['Business Name']
+        ].filter(Boolean);
+
+        // Name token score check (original logic)
+        for (const pName of polNameCandidates) {
+            if (nameScore(pName) >= 2) return true;
+        }
+
+        // Business name containment check
+        if (clientBizStripped && clientBizStripped.length >= 4) {
+            for (const pName of polNameCandidates) {
+                const pStripped = (pName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (pStripped && (pStripped.includes(clientBizStripped) || clientBizStripped.includes(pStripped))) return true;
+            }
+        }
+
+        // Email match
+        const polEmail = (p.contact?.['Email'] || p.contact?.['email'] || p.insured?.['Email'] || '').toLowerCase().trim();
+        if (clientEmail && polEmail && clientEmail === polEmail) return true;
+
+        // Phone match
+        const polPhone = _syncNormPhone(p.contact?.['Phone'] || p.contact?.['phone'] || p.insured?.['Phone'] || '');
+        if (clientPhone && clientPhone.length >= 10 && polPhone.length >= 10 && clientPhone === polPhone) return true;
+
+        return false;
     });
 
     if (unlinked.length === 0) {
-        showNotification('No unlinked policies found matching this client', 'info');
+        _showInlineToast('No unlinked policies found — all policies are already linked or no matches found.', 'info');
         return;
     }
 
@@ -1221,7 +1481,7 @@ window.syncPoliciesForClient = async function(clientId) {
 
 window._confirmSyncPolicies = async function(clientId) {
     const checked = [...document.querySelectorAll('.sync-pol-cb:checked')];
-    if (checked.length === 0) { showNotification('No policies selected', 'warning'); return; }
+    if (checked.length === 0) { _showInlineToast('No policies selected', 'warning'); return; }
 
     const allPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
     let linked = 0;
@@ -1244,7 +1504,7 @@ window._confirmSyncPolicies = async function(clientId) {
 
     localStorage.setItem('insurance_policies', JSON.stringify(allPolicies));
     document.getElementById('sync-policies-overlay')?.remove();
-    showNotification(`Linked ${linked} ${linked === 1 ? 'policy' : 'policies'} to client`, 'success');
+    _showInlineToast(`Linked ${linked} ${linked === 1 ? 'policy' : 'policies'} to client`, 'success');
 
     // Reload the profile to reflect changes
     if (typeof window.viewClientOriginal === 'function') window.viewClientOriginal(clientId);
@@ -1252,26 +1512,48 @@ window._confirmSyncPolicies = async function(clientId) {
 
 window.saveClientBusiness = async function(clientId) {
     const g = id => (document.getElementById('biz-' + id) || {}).value || '';
+    const bizEmail = g('email');
     const updates = {
         company: g('name'), businessName: g('name'), dba: g('dba'),
         businessType: g('type'), fein: g('fein'),
-        website: g('website'), businessEmail: g('email'),
-        glCode: g('glCode'), sicCode: g('sicCode'), naicsCode: g('naicsCode'),
+        website: g('website'), businessEmail: bizEmail,
+        dotNumber: g('dotNumber'),
     };
     // Update localStorage
     const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
     const idx = clients.findIndex(c => String(c.id) === String(clientId));
     if (idx !== -1) {
         Object.assign(clients[idx], updates);
+        // Sync: if business email set and no portal email, copy it over
+        if (bizEmail && !clients[idx].email) {
+            clients[idx].email = bizEmail;
+        }
         localStorage.setItem('insurance_clients', JSON.stringify(clients));
+    }
+    // Update Portal Email display on the page if it currently shows "No email set"
+    if (bizEmail) {
+        document.querySelectorAll('label').forEach(lbl => {
+            if (lbl.textContent.trim().toLowerCase() === 'portal email') {
+                const pEl = lbl.parentElement?.querySelector('p');
+                if (pEl && pEl.textContent.trim() === 'No email set') {
+                    pEl.textContent = bizEmail;
+                }
+                // Also update the edit button's onclick to pass the new email
+                const container = lbl.closest('[style*="padding: 16px"]') || lbl.closest('[style*="padding:16px"]');
+                const editBtn = container?.querySelector('button[onclick*="editClientPortalEmail"]');
+                if (editBtn) {
+                    editBtn.setAttribute('onclick', `window.editClientPortalEmail('${clientId}', '${bizEmail.replace(/'/g, "\\'")}')`);
+                }
+            }
+        });
     }
     // Sync to server
     try {
         const API = window.VANGUARD_API_URL || 'http://162-220-14-239.nip.io:3001';
         const jwt = sessionStorage.getItem('vanguard_jwt') || '';
         const payload = idx !== -1 ? clients[idx] : { id: clientId, ...updates };
-        const r = await fetch(`${API}/api/clients/${clientId}`, {
-            method: 'PUT',
+        const r = await fetch(`${API}/api/clients`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
             body: JSON.stringify(payload)
         });
@@ -1279,6 +1561,162 @@ window.saveClientBusiness = async function(clientId) {
     } catch(e) {
         if (typeof showNotification === 'function') showNotification('Saved locally (offline)', 'warning');
     }
+};
+
+// ── Client User Notes (manual notes with timestamps + attachments) ─────────
+window._pendingNoteFiles = {};
+
+window._noteFileSelected = function(clientId) {
+    const fileInput = document.getElementById('client-note-file-' + clientId);
+    const preview = document.getElementById('client-note-file-preview-' + clientId);
+    if (!fileInput || !preview) return;
+    const files = Array.from(fileInput.files);
+    window._pendingNoteFiles[clientId] = files;
+    if (!files.length) { preview.innerHTML = ''; return; }
+    preview.innerHTML = files.map((f, i) =>
+        '<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;padding:2px 8px;font-size:11px;color:#0369a1;margin-right:4px;">'
+        + '<i class="fas fa-file" style="font-size:10px;"></i>' + f.name
+        + '<button onclick="window._removeNoteFile(\'' + clientId + '\',' + i + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px;"><i class="fas fa-times"></i></button>'
+        + '</span>'
+    ).join('');
+};
+
+window._removeNoteFile = function(clientId, idx) {
+    const files = window._pendingNoteFiles[clientId] || [];
+    files.splice(idx, 1);
+    window._pendingNoteFiles[clientId] = files;
+    const preview = document.getElementById('client-note-file-preview-' + clientId);
+    const fileInput = document.getElementById('client-note-file-' + clientId);
+    if (fileInput) { fileInput.value = ''; }
+    if (!files.length) { if (preview) preview.innerHTML = ''; return; }
+    if (preview) {
+        preview.innerHTML = files.map((f, i) =>
+            '<span style="display:inline-flex;align-items:center;gap:4px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:4px;padding:2px 8px;font-size:11px;color:#0369a1;margin-right:4px;">'
+            + '<i class="fas fa-file" style="font-size:10px;"></i>' + f.name
+            + '<button onclick="window._removeNoteFile(\'' + clientId + '\',' + i + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:10px;padding:0 2px;"><i class="fas fa-times"></i></button>'
+            + '</span>'
+        ).join('');
+    }
+};
+
+window.addClientNote = async function(clientId) {
+    const input = document.getElementById('client-note-input-' + clientId);
+    if (!input) return;
+    const text = input.value.trim();
+    const files = window._pendingNoteFiles[clientId] || [];
+    if (!text && !files.length) return;
+
+    // Convert files to base64 for storage
+    const attachments = [];
+    for (const file of files) {
+        const dataUrl = await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(file);
+        });
+        attachments.push({ name: file.name, size: file.size, type: file.type, dataUrl: dataUrl });
+    }
+
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const idx = clients.findIndex(c => String(c.id) === String(clientId));
+    if (idx === -1) return;
+
+    if (!Array.isArray(clients[idx].userNotes)) clients[idx].userNotes = [];
+    const note = { text: text, date: new Date().toISOString() };
+    if (attachments.length) note.attachments = attachments;
+    clients[idx].userNotes.unshift(note);
+    localStorage.setItem('insurance_clients', JSON.stringify(clients));
+    input.value = '';
+    window._pendingNoteFiles[clientId] = [];
+    const preview = document.getElementById('client-note-file-preview-' + clientId);
+    if (preview) preview.innerHTML = '';
+    const fileInput = document.getElementById('client-note-file-' + clientId);
+    if (fileInput) fileInput.value = '';
+
+    // Sync to server
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+        await fetch('/api/clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+            body: JSON.stringify(clients[idx])
+        });
+    } catch(e) { /* saved locally */ }
+
+    window.renderUserNotes(clientId, 0);
+};
+
+window.deleteClientNote = async function(clientId, noteIdx) {
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const idx = clients.findIndex(c => String(c.id) === String(clientId));
+    if (idx === -1 || !Array.isArray(clients[idx].userNotes)) return;
+
+    clients[idx].userNotes.splice(noteIdx, 1);
+    localStorage.setItem('insurance_clients', JSON.stringify(clients));
+
+    try {
+        const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+        await fetch('/api/clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+            body: JSON.stringify(clients[idx])
+        });
+    } catch(e) { /* saved locally */ }
+
+    window.renderUserNotes(clientId, 0);
+};
+
+window.paginateClientNotes = function(clientId, page) {
+    window.renderUserNotes(clientId, page);
+};
+
+window.renderUserNotes = function(clientId, page) {
+    const container = document.getElementById('client-user-notes-list-' + clientId);
+    if (!container) return;
+
+    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+    const client = clients.find(c => String(c.id) === String(clientId));
+    const userNotes = (client && Array.isArray(client.userNotes)) ? client.userNotes : [];
+    const perPage = 5;
+    const totalPages = Math.max(1, Math.ceil(userNotes.length / perPage));
+    if (page >= totalPages) page = totalPages - 1;
+    if (page < 0) page = 0;
+    const start = page * perPage;
+    const visible = userNotes.slice(start, start + perPage);
+
+    if (!userNotes.length) {
+        container.innerHTML = '<div style="text-align:center;color:#9ca3af;font-size:13px;padding:12px;"><i class="fas fa-pen" style="margin-right:6px;opacity:0.4;"></i>No notes yet</div>';
+        return;
+    }
+
+    let html = visible.map((n, i) => {
+        const globalIdx = start + i;
+        const dateStr = n.date ? new Date(n.date).toLocaleString('en-US',{month:'2-digit',day:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+        const attHtml = (n.attachments && n.attachments.length) ? '<div style="margin-top:4px;">' + n.attachments.map(a =>
+            '<a href="' + a.dataUrl + '" download="' + (a.name||'file').replace(/"/g,'&quot;') + '" style="display:inline-flex;align-items:center;gap:3px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:3px;padding:1px 6px;font-size:10px;color:#0369a1;text-decoration:none;margin-right:4px;">'
+            + '<i class="fas fa-paperclip" style="font-size:9px;"></i>' + (a.name||'file') + '</a>'
+        ).join('') + '</div>' : '';
+        return '<div style="display:flex;justify-content:space-between;align-items:start;padding:8px 10px;border-bottom:1px solid #f3f4f6;' + (i%2===1?'background:#fafafa;':'') + '">'
+            + '<div style="flex:1;"><span style="color:#374151;font-size:13px;line-height:1.4;">' + (n.text||'').replace(/</g,'&lt;') + '</span>' + attHtml + '</div>'
+            + '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:10px;">'
+            + '<span style="color:#9ca3af;font-size:11px;white-space:nowrap;">' + dateStr + '</span>'
+            + '<button onclick="window.deleteClientNote(\'' + clientId + '\',' + globalIdx + ')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:2px;" title="Delete note"><i class="fas fa-trash-alt"></i></button>'
+            + '</div></div>';
+    }).join('');
+
+    if (totalPages > 1) {
+        html += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:8px 10px;">';
+        if (page > 0) {
+            html += '<button onclick="window.paginateClientNotes(\'' + clientId + '\',' + (page-1) + ')" style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;"><i class="fas fa-chevron-left"></i></button>';
+        }
+        html += '<span style="color:#9ca3af;font-size:11px;">Page ' + (page+1) + ' of ' + totalPages + '</span>';
+        if (page < totalPages - 1) {
+            html += '<button onclick="window.paginateClientNotes(\'' + clientId + '\',' + (page+1) + ')" style="background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;"><i class="fas fa-chevron-right"></i></button>';
+        }
+        html += '</div>';
+    }
+
+    container.innerHTML = html;
 };
 
 window.viewClientNote = function(clientId, idx) {

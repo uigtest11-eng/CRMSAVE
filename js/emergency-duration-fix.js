@@ -48,6 +48,7 @@ leads.forEach(lead => {
             totalCallLogs++;
 
             // Check if this call log has a problematic duration
+            if (log.duration != null && typeof log.duration !== 'string') log.duration = String(log.duration);
             const isProblem = log.duration && (
                 log.duration === '20 sec' ||
                 log.duration === 'Recording available' ||

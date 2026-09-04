@@ -8,7 +8,7 @@ window.loadClientsView = function() {
     if (!dashboardContent) return;
 
     // Force refresh policies from server to ensure we have the latest data
-    fetch('/api/policies')
+    fetch('/api/policies?includeInactive=true&limit=500')
         .then(response => response.json())
         .then(serverPolicies => {
             console.log('Loaded fresh policies from server:', serverPolicies.length);
@@ -79,6 +79,10 @@ function renderClientsViewWithFreshData(allPolicies) {
                         <option value="Hunter">Hunter</option>
                         <option value="Maureen" style="color: #2563eb;">MAUREEN</option>`}
                     </select>` : ''}
+                    <select class="filter-select" id="clientNameDisplayFilter" onchange="applyClientNameDisplay()" style="min-width:160px;">
+                        <option value="person">Person's Name</option>
+                        <option value="business" selected>Business Name</option>
+                    </select>
                     <button class="btn-filter" id="missing-data-btn" onclick="toggleMissingDataFilter()" style="transition:0.2s;">
                         <i class="fas fa-exclamation-triangle"></i> Missing Data
                     </button>
@@ -142,7 +146,8 @@ function generateClientRowsWithPremium(allPolicies) {
         try {
             const user = JSON.parse(sessionData);
             currentUser = user.username;
-            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase());
+            const userRole = (user.role || '').toLowerCase();
+            isAdmin = ['grant', 'maureen'].includes(currentUser.toLowerCase()) || userRole === 'csr' || userRole.includes('admin');
             console.log(`🔒 Client filtering - Current user: ${currentUser}, Is Admin: ${isAdmin}`);
         } catch (error) {
             console.error('Error parsing session data:', error);
@@ -219,72 +224,84 @@ function generateClientRowsWithPremium(allPolicies) {
         const nameParts = (client.name || 'Unknown').split(' ').filter(n => n);
         const initials = nameParts.map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'UN';
 
-        // Find all policies for this client - ONLY use fresh data with enhanced nested search
-        const clientPolicies = [];
+        // Find all policies for this client using broad matching
+        const _ns = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+        const _np = s => (s || '').replace(/\D/g, '');
+        const cNameN = _ns(client.name);
+        const cBizN  = _ns(client.businessName || client.companyName || '');
+        const cEmailN = (client.email || '').toLowerCase().trim();
+        const cPhoneN = _np(client.phone);
+        const cPeople = (client.people || []).map(p => _ns((p.firstName||'') + ' ' + (p.lastName||'') || p.name || '')).filter(Boolean);
+        const cDob = client.dateOfBirth || client['Date of Birth'] || '';
+        const cKey = typeof _clientIdentityKey === 'function' ? _clientIdentityKey(client.name || client.businessName || '', cDob) : null;
 
-        allPolicies.forEach(policyRecord => {
-            // Helper function to check if a policy matches this client
-            const matchesClient = (policy) => {
-                // Check by clientId
-                if (policy.clientId && String(policy.clientId) === String(client.id)) {
-                    console.log(`Policy ${policy.policyNumber || policy.id} matched by clientId for ${client.name}`);
-                    return true;
-                }
+        const matchesClient = (policy) => {
+            // 1. clientId
+            if (policy.clientId && String(policy.clientId) === String(client.id)) return true;
 
-                // Check by insured name
-                const insuredName = policy.insured?.['Name/Business Name'] ||
-                                   policy.insured?.['Primary Named Insured'] ||
-                                   policy.insuredName ||
-                                   policy.clientName;
-                if (insuredName && client.name && insuredName.toLowerCase().includes(client.name.toLowerCase())) {
-                    console.log(`Policy ${policy.policyNumber || policy.id} matched by insured name for ${client.name}`);
-                    return true;
-                }
-
-                // Check by business name variations
-                const businessNames = [
-                    client.name,
-                    client.businessName,
-                    client.companyName,
-                    client.fullName
-                ].filter(name => name);
-
-                for (const businessName of businessNames) {
-                    if (insuredName && businessName &&
-                        (insuredName.toLowerCase().includes(businessName.toLowerCase()) ||
-                         businessName.toLowerCase().includes(insuredName.toLowerCase()))) {
-                        console.log(`Policy ${policy.policyNumber || policy.id} matched by business name variation for ${client.name}`);
-                        return true;
-                    }
-                }
-
-                return false;
-            };
-
-            // Check direct policy structure
-            if (matchesClient(policyRecord)) {
-                clientPolicies.push(policyRecord);
-                return;
+            // 2. Identity key (name + DOB)
+            if (cKey && typeof _clientIdentityKey === 'function') {
+                const polOwner = policy.contact?.['Owner Name'] || policy.insuredName || '';
+                const polDob = policy.contact?.['Date of Birth'] || '';
+                const polKey = _clientIdentityKey(polOwner, polDob);
+                if (polKey && polKey === cKey) return true;
             }
 
-            // Check nested policies array (Level 1: policies[])
-            if (policyRecord.policies && Array.isArray(policyRecord.policies)) {
-                policyRecord.policies.forEach(nestedPolicy => {
-                    if (matchesClient(nestedPolicy)) {
-                        clientPolicies.push(nestedPolicy);
-                        return;
-                    }
+            // Gather policy name variants
+            const polNames = [
+                policy.insured?.['Name/Business Name'], policy.insured?.['Primary Named Insured'],
+                policy.insured?.['Business Name'], policy.insured?.['Full Name'],
+                policy.insuredName, policy.clientName,
+                policy.contact?.['Owner Name'], policy.contact?.['Business Name']
+            ].filter(Boolean);
 
-                    // Check deeper nesting (Level 2: policies[].policies[])
-                    if (nestedPolicy.policies && Array.isArray(nestedPolicy.policies)) {
-                        nestedPolicy.policies.forEach(deepNestedPolicy => {
-                            if (matchesClient(deepNestedPolicy)) {
-                                clientPolicies.push(deepNestedPolicy);
-                            }
-                        });
-                    }
-                });
+            // 3. Exact name match (person, business, people)
+            for (const pn of polNames) {
+                const pnN = _ns(pn);
+                if (pnN && cNameN && pnN === cNameN) return true;
+                if (pnN && cBizN && pnN === cBizN) return true;
+                if (pnN && cPeople.some(cn => cn === pnN)) return true;
             }
+
+            // 4. Business name containment
+            if (cBizN && cBizN.length >= 4) {
+                for (const pn of polNames) {
+                    const pnN = _ns(pn);
+                    if (pnN && (pnN.includes(cBizN) || cBizN.includes(pnN))) return true;
+                }
+            }
+
+            // 5. Email match
+            const polEmail = (policy.contact?.['Email'] || policy.contact?.['email'] || policy.contact?.['Email Address'] || policy.insured?.['Email'] || '').toLowerCase().trim();
+            if (cEmailN && polEmail && cEmailN === polEmail) return true;
+
+            // 6. Phone match
+            const polPhone = _np(policy.contact?.['Phone'] || policy.contact?.['phone'] || policy.contact?.['Phone Number'] || policy.insured?.['Phone'] || '');
+            if (cPhoneN && cPhoneN.length >= 10 && polPhone.length >= 10 && cPhoneN === polPhone) return true;
+
+            // 7. clientName field (IVANS sets this)
+            if (policy.clientName && client.name) {
+                if (_ns(policy.clientName) === cNameN) return true;
+            }
+
+            return false;
+        };
+
+        const clientPoliciesAll = allPolicies.filter(p => matchesClient(p));
+
+        // Only count active (non-expired) policies
+        const _today = new Date(); _today.setHours(0,0,0,0);
+        const _parseExp = (d) => {
+            if (!d) return null;
+            const sm = String(d).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (sm) return new Date(sm[3], sm[1]-1, sm[2]);
+            const dm = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (dm) return new Date(dm[1], dm[2]-1, dm[3]);
+            const p = new Date(d); return isNaN(p) ? null : p;
+        };
+        const clientPolicies = clientPoliciesAll.filter(p => {
+            const exp = _parseExp(p.expirationDate || p.overview?.['Expiration Date']);
+            return !exp || exp >= _today;
         });
 
         const policyCount = clientPolicies.length;
@@ -341,11 +358,14 @@ function generateClientRowsWithPremium(allPolicies) {
         // Debug client ID for viewClient functionality
         console.log(`👤 Generating button for client: ${client.name} with ID: ${client.id} (type: ${typeof client.id})`);
 
+        const personName = client.name || '';
+        const bizName = client.businessName || client.companyName || '';
+
         return `
-            <tr>
+            <tr data-person-name="${personName.replace(/"/g, '&quot;')}" data-biz-name="${bizName.replace(/"/g, '&quot;')}">
                 <td class="client-name">
                     <div class="client-avatar">${initials}</div>
-                    <span>${client.name}</span>
+                    <span class="client-display-name">${bizName || personName}</span>
                 </td>
                 <td>${client.phone || '-'}</td>
                 <td>${client.email || '-'}</td>

@@ -2,6 +2,12 @@
 (function() {
     'use strict';
 
+    // CSR users: skip entirely — CSRs use csrTodo, not callback-based reach outs
+    try {
+        var _ccmSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+        if ((_ccmSess.role || '') === 'csr') { console.log('Continuous Callback Monitor: skipped for CSR'); return; }
+    } catch(e) {}
+
     console.log('📞 Loading Continuous Callback Monitor...');
 
     // Global state tracking

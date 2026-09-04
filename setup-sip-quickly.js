@@ -5,7 +5,7 @@ console.log('🔧 Setting up SIP configuration...');
 
 const sipConfig = {
     username: 'Grant',
-    password: 'GrantCorp2006@',
+    password: 'REDACTED',
     domain: 'vanguard1.sip.twilio.com',
     proxy: 'sip.twilio.com',
     callerId: '+13306369079'

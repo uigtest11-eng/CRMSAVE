@@ -70,6 +70,10 @@
                             <option value="Carson">Carson</option>
                             <option value="Hunter">Hunter</option>`}
                         </select>` : ''}
+                        <select class="filter-select" id="clientNameDisplayFilter" onchange="applyClientNameDisplay()" style="min-width:160px;">
+                            <option value="person">Person's Name</option>
+                            <option value="business" selected>Business Name</option>
+                        </select>
                         <button class="btn-filter" id="missing-data-btn" onclick="toggleMissingDataFilter()" style="transition:0.2s;">
                             <i class="fas fa-exclamation-triangle"></i> Missing Data
                         </button>
@@ -196,15 +200,18 @@
             const status = client.status || 'Active';
             const statusColor = status === 'Active' ? 'green' : status === 'Inactive' ? 'red' : 'yellow';
             
+            const _personName = client.name || '';
+            const _bizName = client.businessName || client.companyName || '';
+
             return `
-                <tr>
+                <tr data-person-name="${_personName.replace(/"/g, '&quot;')}" data-biz-name="${_bizName.replace(/"/g, '&quot;')}">
                     <td>
                         <div class="client-name-cell">
                             <div class="avatar-small" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                                 ${initials}
                             </div>
                             <div>
-                                <div class="client-name">${client.name || 'Unknown'}</div>
+                                <div class="client-name client-display-name">${_personName || 'Unknown'}</div>
                                 ${client.company ? `<div class="client-company">${client.company}</div>` : ''}
                                 ${client.dotNumber ? `<div class="text-muted small">DOT: ${client.dotNumber}</div>` : ''}
                             </div>

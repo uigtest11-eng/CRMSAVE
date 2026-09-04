@@ -166,43 +166,88 @@ async function updateVicidialFieldComments(leadId, fieldName, newValue, lead) {
 
 // Function to build Vicidial comments in the expected format
 function buildVicidialComments(lead, selectedStage, fieldUpdates = {}) {
-    const expiry = lead.renewalDate || '';
     const fleetSize = lead.fleetSize || '';
-    const ownerName = fieldUpdates.ownerName !== undefined ? fieldUpdates.ownerName : (lead.ownerName || '');
+    const drivers = lead.drivers || fleetSize;
 
-    // Build basic info line - updated for new format
-    const drivers = lead.drivers || fleetSize; // Default drivers to fleet size if not specified
-    const basicInfo = `Dr: ${drivers} | Fl: ${fleetSize}`;
+    const headerLine = `Driver count: ${drivers || '?'} | Fleet size: ${fleetSize || '?'}`;
 
-    // Build stage selection section with X marks - updated for new format
-    const stages = [
-        { display: 'New', key: 'new' },
-        { display: 'LR Req', key: 'info_requested' },  // New format combines info_requested and loss_runs_requested
-        { display: 'LR Rec', key: 'loss_runs_received' }
-    ];
-    let stageSection = 'SELECT\n';
+    // Build dynamic DRIVERS INFO section
+    const numDrivers = Math.min(Math.max(parseInt(drivers) || 1, 1), 20);
+    const driverBlocks = [];
+    for (let d = 1; d <= numDrivers; d++) {
+        driverBlocks.push(`Driver ${d}\nName:\nDOB:\nDL#:\nCDL Length:\nHire Date: MM/YYYY`);
+    }
+    const driversInfoSection = `--DRIVERS INFO(${numDrivers})-----\n` + driverBlocks.join('\n\n');
 
-    stages.forEach(stage => {
-        const isSelected = selectedStage === stage.key ||
-                          (stage.key === 'info_requested' && selectedStage === 'loss_runs_requested'); // Handle both as same in new format
+    // Build UNITS section from lead.vehicles
+    const vehicles = Array.isArray(lead.vehicles) ? lead.vehicles : [];
+    const unitLines = vehicles.map(v =>
+        `Year: ${v.year || 'XXXX'}\nMake: ${v.make || 'Unknown'}\nModel:\nType: ${v.type || 'Unknown'}\nVIN: ${v.vin || 'XXXXXXXXXXXXXXXX'}\nValue: ${v.value || ''}`
+    );
+    // Pad to fleet size with placeholders
+    const fleetInt = parseInt(fleetSize) || 0;
+    while (unitLines.length < fleetInt) {
+        unitLines.push('Year: XXXX\nMake: Unknown\nModel:\nType: Unknown\nVIN: XXXXXXXXXXXXXXXX\nValue:');
+    }
+    const unitsCount = unitLines.length || '?';
+    const unitsBody = unitLines.join('\n\n');
 
-        stageSection += `${stage.display}: ${isSelected ? 'X' : ''}\n`;
-    });
+    // Build TRAILERS section from lead.trailers — pad to fleet size same as units
+    const trailers = Array.isArray(lead.trailers) ? lead.trailers : [];
+    const trailerLines = trailers.map(t =>
+        `Year: ${t.year || 'XXXX'}\nMake: ${t.make || 'Unknown'}\nType: ${t.type || 'Dry Van'}\nVIN: ${t.vin || 'XXXXXXXXXXXXXXXX'}\nValue: ${t.value || ''}`
+    );
+    while (trailerLines.length < fleetInt) {
+        trailerLines.push('Year: XXXX\nMake: Unknown\nType: Unknown\nVIN: XXXXXXXXXXXXXXXX\nValue:');
+    }
+    const trailersCount = trailerLines.length || '?';
+    const trailersBody = trailerLines.join('\n\n');
 
-    // Build the complete comment structure
-    const comments = `${basicInfo}
-------------Name--------------
-${ownerName}
+    // Doc status markers
+    const docStatus = {
+        coi: lead.docStatus_coi === 'received' ? 'RC' : lead.docStatus_coi === 'requested' ? 'RQ' : ' ',
+        decPage: lead.docStatus_dec_page === 'received' ? 'RC' : lead.docStatus_dec_page === 'requested' ? 'RQ' : ' ',
+        lossRuns: lead.docStatus_loss_runs === 'received' ? 'RC' : lead.docStatus_loss_runs === 'requested' ? 'RQ' : ' ',
+        iftas: lead.docStatus_iftas === 'received' ? 'RC' : lead.docStatus_iftas === 'requested' ? 'RQ' : ' '
+    };
 
-${stageSection}
-NEXT CALL
+    const commodities = lead.commodityHauled || '';
+    const mileRadius = lead.radiusOfOperation || '';
+    const mtcCoverage = lead.mtcCoverage || '$100k';
+
+    const stage = lead.stage || 'new';
+
+    const comments = `${headerLine}
+Stage: ${stage}
+
+-----NEXT CALL---------------
 Date: MM/DD/2026 Time: 00:00AM
+Callback Notes:
 
-UNITS
-[Unit information will be added here]
+---DOCUMENTATION----- Requested = RQ | Received = RC
+COI (${docStatus.coi})
+DEC PAGE (${docStatus.decPage})
+LOSS RUNS (${docStatus.lossRuns})
+IFTAS (${docStatus.iftas})
 
-TRAILERS
-[Trailer information will be added here]`;
+----OWNERS INFO-------
+Name: ${lead.ownerName || ''}
+DOB: ${lead.ownerDob || ''}
+DL#: ${lead.ownerDl || ''}
+CDL Length: ${lead.ownerCdlLength || ''}
+
+---OPERATION-------
+Mile Radius: ${mileRadius}
+Commodities: ${commodities}
+MTC: ${mtcCoverage}
+
+${driversInfoSection}
+
+-----UNITS(${unitsCount})----------
+${unitsBody}
+
+-----TRAILERS(${trailersCount})----------
+${trailersBody}`;
 
     return comments;
 }

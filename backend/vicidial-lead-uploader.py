@@ -19,30 +19,23 @@ VICIDIAL_PASS = "corp06"
 VICIDIAL_SOURCE = "vanguard_crm"
 
 def decode_vin_year(vin):
-    """Decode the model year from a VIN (10th character)"""
+    """Decode the model year from a VIN (10th character). Returns full 4-digit year."""
     if not vin or len(vin) < 10:
-        return "XX"  # Unknown year
+        return "XXXX"
 
     year_char = vin[9].upper()  # 10th character (0-indexed)
 
-    # VIN year mapping (30-year cycle)
     year_map = {
-        # Letters A-H, J-N, P-R, S-Y (excluding I, O, Q, U, Z)
         'A': '2010', 'B': '2011', 'C': '2012', 'D': '2013', 'E': '2014',
         'F': '2015', 'G': '2016', 'H': '2017', 'J': '2018', 'K': '2019',
         'L': '2020', 'M': '2021', 'N': '2022', 'P': '2023', 'R': '2024',
         'S': '2025', 'T': '2026', 'V': '2027', 'W': '2028', 'X': '2029',
         'Y': '2030',
-        # Numbers 1-9 (for 2001-2009 or 2031-2039 depending on context)
         '1': '2001', '2': '2002', '3': '2003', '4': '2004', '5': '2005',
         '6': '2006', '7': '2007', '8': '2008', '9': '2009'
     }
 
-    # Get the mapped year
-    year = year_map.get(year_char, "2023")  # Default to 2023 if unknown
-
-    # Return last 2 digits
-    return year[-2:] if len(year) == 4 else "XX"
+    return year_map.get(year_char, "XXXX")
 
 def add_lead_to_vicidial(list_id, lead_data):
     """Add a single lead to ViciDial using the non_agent_api.php endpoint"""
@@ -140,91 +133,217 @@ def add_lead_to_vicidial(list_id, lead_data):
         return {'success': False, 'error': f'Field extraction error: {str(e)}'}
 
     try:
-        # Build updated comments format with shortened labels
-        comments_parts = []
-        if drivers:
-            comments_parts.append(f"Dr: {drivers}")
-        if fleet_size:
-            comments_parts.append(f"Fl: {fleet_size}")
+        # Make code to full name mapping (FMCSA codes → full names)
+        MAKE_NAMES = {
+            # Freightliner
+            'FRHT': 'Freightliner', 'FREI': 'Freightliner',
+            # Peterbilt
+            'PETE': 'Peterbilt', 'PTRB': 'Peterbilt',
+            # Kenworth
+            'KNWT': 'Kenworth', 'KENW': 'Kenworth',
+            # Other power unit makes
+            'INTL': 'International', 'MACK': 'Mack', 'VOLV': 'Volvo',
+            'WSTR': 'Western Star', 'FORD': 'Ford', 'GMCK': 'GMC',
+            'DODG': 'Dodge', 'HINO': 'Hino', 'MITB': 'Mitsubishi Fuso',
+            'ISUZ': 'Isuzu', 'MERZ': 'Mercedes-Benz', 'NAVI': 'International',
+            'STER': 'Sterling', 'AUTO': 'Autocar',
+            # Trailer makes
+            'GDAN': 'Great Dane', 'GRTD': 'Great Dane',
+            'WABH': 'Wabash National', 'WABP': 'Wabash National',
+            'UTIL': 'Utility Trailer', 'STLT': 'Stoughton',
+            'TRLT': 'Trail King', 'HYND': 'Hyundai Translead',
+            'STRC': 'Strick', 'CRGO': 'Cargo', 'QUIC': 'Quick Draw',
+            'TRLR': 'Trailer', 'BYSU': 'Bison', 'UNPU': 'Unknown', 'UNKN': 'Unknown', 'DIAM': 'Diamond',
+            'VSCO': 'Vanguard',
+            'CIMC': 'CIMC', 'DORR': 'Dorsey', 'LUFK': 'Lufkin',
+            'POLI': 'Polar', 'WILS': 'Wilson', 'MAXO': 'Maxon',
+            'VSGM': 'Vanguard', 'SMIT': 'Smith', 'CHAP': 'Chaparral',
+            'REIT': 'Reitnouer', 'FONT': 'Fontaine',
+        }
 
-        # Create your updated format
-        basic_info = ' | '.join(comments_parts)
+        def get_trailer_type(vtype_str):
+            """Detect trailer subtype from the type field string."""
+            v = vtype_str.upper()
+            if 'REEFER' in v or 'REFRIGER' in v: return 'Reefer'
+            if 'FLATBED' in v or 'FLAT BED' in v or 'FLAT-BED' in v: return 'Flatbed'
+            if 'TANK' in v: return 'Tanker'
+            if 'LOWBOY' in v or 'LOW BOY' in v: return 'Lowboy'
+            if 'STEP DECK' in v or 'STEPDECK' in v or 'STEP-DECK' in v: return 'Step Deck'
+            if 'DRY VAN' in v or 'DRYVAN' in v or 'DRY-VAN' in v: return 'Dry Van'
+            if 'DUMP' in v: return 'Dump'
+            if 'CURTAIN' in v: return 'Curtainsider'
+            if 'LOG' in v: return 'Logging'
+            if 'AUTO CARR' in v or 'CAR CARR' in v: return 'Auto Carrier'
+            if 'POLE' in v: return 'Pole'
+            return 'Dry Van'  # Most common default for generic TRAILER type
 
-        # Build vehicle sections using actual vehicle data if available
-        units_section = ""
-        trailers_section = ""
+        def get_unit_type_label(vtype_str):
+            """Return human-readable power unit type."""
+            v = vtype_str.upper()
+            if 'TRACTOR' in v: return 'Truck Tractor'
+            if 'STRAIGHT' in v: return 'Straight Truck'
+            if 'MOTOR COACH' in v: return 'Motor Coach'
+            if 'BUS' in v: return 'Bus'
+            return vtype_str.title()
 
-        # Check if we have actual vehicle data from the new schema
+        def decode_cargo_carried(raw):
+            """Decode the positional FMCSA cargo_carried flag string into human-readable names."""
+            if not raw or not raw.strip():
+                return ''
+            cargo_types = [
+                'General Freight', 'Household Goods', 'Metal Sheets/Coils/Rolls',
+                'Motor Vehicles', 'Drive/Tow Away', 'Logs/Poles/Beams/Lumber',
+                'Building Materials', 'Mobile Homes', 'Machinery/Large Objects',
+                'Fresh Produce', 'Liquids/Gases', 'Intermodal Containers',
+                'Passengers', 'Oilfield Equipment', 'Livestock', 'Grain/Feed/Hay',
+                'Coal/Coke', 'Meat', 'Garbage/Refuse', 'US Mail',
+                'Chemicals', 'Dry Bulk', 'Refrigerated Food', 'Beverages',
+                'Paper Products', 'Utility', 'Farm Supplies', 'Construction',
+                'Water Well', 'Other'
+            ]
+            active = []
+            for i, val in enumerate(raw.split(',')):
+                if val.strip() == 'X' and i < len(cargo_types):
+                    active.append(cargo_types[i])
+            return ', '.join(active)
+
+        # Build header line
+        driver_count_val = drivers if drivers else '?'
+        fleet_size_val = fleet_size if fleet_size else '?'
+        header_line = f"Driver count: {driver_count_val} | Fleet size: {fleet_size_val}"
+
+        # Fleet size integer for unit padding
+        try:
+            fleet_size_int = int(fleet_size) if fleet_size and str(fleet_size).strip().isdigit() else 0
+        except Exception:
+            fleet_size_int = 0
+
+        # Build dynamic DRIVERS INFO section
+        try:
+            num_drivers = int(drivers) if drivers and str(drivers).strip().isdigit() else 1
+        except Exception:
+            num_drivers = 1
+        num_drivers = max(1, min(num_drivers, 20))
+
+        driver_blocks = []
+        for d in range(1, num_drivers + 1):
+            driver_blocks.append(f"Driver {d}\nName:\nDOB:\nDL#:\nCDL Length:\nHire Date: MM/YYYY")
+        drivers_info_section = f"--DRIVERS INFO({num_drivers})-----\n" + "\n\n".join(driver_blocks)
+
+        # Build vehicle sections — read vehicles and trailers separately from CRM data
         vehicles = lead_data.get('vehicles', [])
+        trailers_data = lead_data.get('trailers', [])
+        unit_lines = []
+        trailer_lines = []
+
+        def resolve_make(raw_make):
+            """Resolve raw make field (code or full name) to display name."""
+            code = str(raw_make or 'UNKN').upper()[:4]
+            return MAKE_NAMES.get(code, code)
+
+        # Process vehicles array — route trailers vs power units during the loop
         if vehicles and isinstance(vehicles, list):
             print(f"DEBUG: Found {len(vehicles)} vehicles in lead data")
-            print(f"DEBUG: Vehicle data for DOT {lead_data.get('usdot_number', 'unknown')}:")
-
-            unit_lines = []
-            trailer_lines = []
-
-            for idx, vehicle in enumerate(vehicles[:5]):  # Limit to first 5 vehicles
+            for idx, vehicle in enumerate(vehicles[:20]):
                 if isinstance(vehicle, dict):
-                    make = vehicle.get('make', 'UNKN')[:4]  # First 4 chars
-                    full_vin = vehicle.get('vin', '')
-                    vin = full_vin[-4:] if full_vin else ''  # Last 4 chars of VIN
-                    vtype = vehicle.get('type', 'STRAIGHT TRUCK')
-
-                    # Decode the actual year from VIN
-                    year = decode_vin_year(full_vin)
-
-                    print(f"DEBUG: Vehicle {idx+1}: Make={make}, VIN={vin}, Type={vtype}, Year={year}")
-
-                    # Separate units from trailers
+                    make_name = resolve_make(vehicle.get('make', 'UNKN'))
+                    full_vin = vehicle.get('vin', '') or 'XXXXXXXXXXXXXXXX'
+                    vtype = str(vehicle.get('type', 'STRAIGHT TRUCK'))
+                    year = vehicle.get('year', '') or (decode_vin_year(full_vin) if full_vin != 'XXXXXXXXXXXXXXXX' else 'XXXX')
+                    value = vehicle.get('value', '') or ''
+                    print(f"DEBUG: Vehicle {idx+1}: Make={make_name}, VIN={full_vin}, Type={vtype}, Year={year}")
                     if 'TRAILER' in vtype.upper():
-                        # This is a trailer
-                        trailer_lines.append(f"{year} {make} {vin}")
+                        trailer_type = get_trailer_type(vtype)
+                        print(f"DEBUG:   -> routed to trailers (type={vtype})")
+                        trailer_lines.append(
+                            f"Year: {year}\n"
+                            f"Make: {make_name}\n"
+                            f"Type: {trailer_type}\n"
+                            f"VIN: {full_vin}\n"
+                            f"Value: {value}"
+                        )
                     else:
-                        # This is a power unit (truck/tractor)
-                        if 'TRACTOR' in vtype.upper():
-                            abbrev = 'TRC'
-                        elif 'STRAIGHT' in vtype.upper():
-                            abbrev = 'STR'
-                        else:
-                            abbrev = 'TRC'  # Default
+                        type_label = get_unit_type_label(vtype)
+                        unit_lines.append(
+                            f"Year: {year}\n"
+                            f"Make: {make_name}\n"
+                            f"Model:\n"
+                            f"Type: {type_label}\n"
+                            f"VIN: {full_vin}\n"
+                            f"Value: {value}"
+                        )
 
-                        unit_lines.append(f"{year} {make} {vin} {abbrev}")
+        # Process CRM trailers array (separate from vehicles)
+        if trailers_data and isinstance(trailers_data, list):
+            print(f"DEBUG: Found {len(trailers_data)} trailers in lead data")
+            for idx, trailer in enumerate(trailers_data[:20]):
+                if isinstance(trailer, dict):
+                    make_name = resolve_make(trailer.get('make', 'UNKN'))
+                    full_vin = trailer.get('vin', '') or 'XXXXXXXXXXXXXXXX'
+                    vtype = trailer.get('type', 'Dry Van')
+                    year = trailer.get('year', '') or (decode_vin_year(full_vin) if full_vin != 'XXXXXXXXXXXXXXXX' else 'XXXX')
+                    value = trailer.get('value', '') or ''
+                    trailer_type = get_trailer_type(vtype)
+                    print(f"DEBUG: Trailer {idx+1}: Make={make_name}, VIN={full_vin}, Type={trailer_type}, Year={year}")
+                    trailer_lines.append(
+                        f"Year: {year}\n"
+                        f"Make: {make_name}\n"
+                        f"Type: {trailer_type}\n"
+                        f"VIN: {full_vin}\n"
+                        f"Value: {value}"
+                    )
 
-            units_section = '\n'.join(unit_lines)
-            trailers_section = '\n'.join(trailer_lines)
-        else:
-            # Fallback to sample vehicles based on fleet size
-            if fleet_size and str(fleet_size).isdigit() and int(fleet_size) > 0:
-                # Use decoded VIN years even for sample data
-                sample_vin1 = "3AKJHHDR9PSNZ5053"  # VIN with 'P' = 2023 = "23"
-                sample_vin2 = "1GR1A0627MK235747"  # VIN with 'M' = 2021 = "21"
-                year1 = decode_vin_year(sample_vin1)
-                year2 = decode_vin_year(sample_vin2)
-                vin1_short = sample_vin1[-4:]  # Last 4 characters
-                vin2_short = sample_vin2[-4:]  # Last 4 characters
-                units_section = f"{year1} FRHT {vin1_short} TRC\n{year1} FRHT {vin1_short} STR"
-                trailers_section = f"{year2} GDAN {vin2_short}"
+        # Fleet size pads both units AND trailers with unknowns up to fleet count
+        while len(unit_lines) < fleet_size_int:
+            unit_lines.append("Year: XXXX\nMake: Unknown\nModel:\nType: Unknown\nVIN: XXXXXXXXXXXXXXXX\nValue:")
+        while len(trailer_lines) < fleet_size_int:
+            trailer_lines.append("Year: XXXX\nMake: Unknown\nType: Unknown\nVIN: XXXXXXXXXXXXXXXX\nValue:")
 
-        # Add your updated comment format with new sections
-        script_addendum = f"""
+        units_count = len(unit_lines)
+        trailers_count = len(trailer_lines)
+        # Blank line between each entry for readability (Value: already included in each entry)
+        units_body = '\n\n'.join(unit_lines)
+        trailers_body = '\n\n'.join(trailer_lines)
 
-SELECT
-New:
-LR Req:
-LR Rec:
+        # Auto-fill commodities — use pre-decoded value first, then parse raw flags
+        commodities = (
+            lead_data.get('commodities_hauled') or       # already decoded by server.js
+            lead_data.get('commodity_info') or
+            lead_data.get('commodities') or
+            decode_cargo_carried(lead_data.get('cargo_carried', ''))  # parse raw X,,, flags
+        )
+        commodities_line = f"Commodities: {commodities}" if commodities else "Commodities:"
 
-NEXT CALL
+        comments = f"""{header_line}
+
+-----NEXT CALL---------------
 Date: MM/DD/2026 Time: 00:00AM
+Callback Notes:
 
-UNITS
-{units_section}
+---DOCUMENTATION----- Requested = RQ | Received = RC
+COI ( )
+DEC PAGE ( )
+LOSS RUNS ( )
+IFTAS ( )
 
-TRAILERS
-{trailers_section}
-"""
+----OWNERS INFO-------
+Name: {rep_name if rep_name not in ('Unknown Rep', '') else ''}
+DOB:
+DL#:
+CDL Length:
 
-        # Combine basic info with organized script
-        comments = basic_info + script_addendum
+---OPERATION-------
+Mile Radius:
+{commodities_line}
+MTC: $100k
+
+{drivers_info_section}
+
+-----UNITS({units_count})----------
+{units_body}
+
+-----TRAILERS({trailers_count})----------
+{trailers_body}"""
 
         print(f"DEBUG: Comments created successfully, length: {len(comments)}")
 

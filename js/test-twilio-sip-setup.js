@@ -35,7 +35,7 @@ async function testTwilioSIPSetup() {
         return false;
     }
 
-    if (config.username === 'Grant' && config.password === 'GrantCorp2006@') {
+    if (config.username === 'Grant' && config.password === 'REDACTED') {
         console.log('⚠️ Using example credentials - these may not be real');
         console.log('   For real SIP calling, you need actual Twilio SIP credentials');
     } else {

@@ -129,10 +129,13 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                         <select id="lead-stage-${lead.id}" onchange="handleStageChange('${lead.id}', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
                             <option value="new" ${lead.stage === 'new' ? 'selected' : ''}>New</option>
                             <option value="contact_attempted" ${lead.stage === 'contact_attempted' ? 'selected' : ''}>Contact Attempted</option>
-                            <option value="info_requested" ${lead.stage === 'info_requested' ? 'selected' : ''}>Info Requested</option>
-                            <option value="info_received" ${lead.stage === 'info_received' ? 'selected' : ''}>Info Received</option>
+                            <option value="info_requested" ${lead.stage === 'info_requested' ? 'selected' : ''}>Basic Info Requested</option>
+                            <option value="info_received" ${lead.stage === 'info_received' ? 'selected' : ''}>Basic Info Received</option>
+                            <option value="full_info_requested" ${lead.stage === 'full_info_requested' ? 'selected' : ''}>Full Info Requested</option>
+                            <option value="full_info_received" ${lead.stage === 'full_info_received' ? 'selected' : ''}>Full Info Received</option>
                             <option value="loss_runs_requested" ${lead.stage === 'loss_runs_requested' ? 'selected' : ''}>Loss Runs Requested</option>
                             <option value="loss_runs_received" ${lead.stage === 'loss_runs_received' ? 'selected' : ''}>Loss Runs Received</option>
+                            <option value="quote_prepared" ${lead.stage === 'quote_prepared' ? 'selected' : ''}>Quote Prepared</option>
                             <option value="app_prepared" ${lead.stage === 'app_prepared' ? 'selected' : ''}>App Prepared</option>
                             <option value="app_sent" ${lead.stage === 'app_sent' ? 'selected' : ''}>Waiting on Markets</option>
                             <option value="quote_sent" ${lead.stage === 'quote_sent' ? 'selected' : ''}>Quote Sent</option>
@@ -140,7 +143,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <option value="closed" ${lead.stage === 'closed' ? 'selected' : ''}>Closed</option>
                             ${(function() {
                                 // Check if current stage is a custom stage (not in predefined list)
-                                const predefinedStages = ['new', 'contact_attempted', 'info_requested', 'info_received', 'loss_runs_requested', 'loss_runs_received', 'app_prepared', 'app_sent', 'quote_sent', 'sale', 'closed'];
+                                const predefinedStages = ['new', 'contact_attempted', 'info_requested', 'info_received', 'full_info_requested', 'full_info_received', 'loss_runs_requested', 'loss_runs_received', 'quote_prepared', 'app_prepared', 'app_sent', 'quote_sent', 'sale', 'closed'];
                                 const isCustomStage = lead.stage && !predefinedStages.includes(lead.stage);
                                 if (isCustomStage) {
                                     return `<option value="${lead.stage}" selected>${lead.stage}</option>`;
@@ -203,7 +206,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                     }
                                     // Default: editable textarea
                                     return '<label style="font-weight: 700; font-size: 13px; color: #0284c7; display: flex; align-items: center; gap: 6px; margin-bottom: 5px;"><i class="fas fa-headset" style="font-size: 12px;"></i> CSR To Do</label>' +
-                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + (lead.csrTodo || '') + '</textarea>';
+                                        '<textarea id="csr-todo-' + lead.id + '" placeholder="CSR notes / tasks for this lead..." style="width: 100%; padding: 8px; border: 1px solid #7dd3fc; border-radius: 6px; background: #f0f9ff; resize: vertical; min-height: 50px; font-size: 13px;" onblur="saveCsrTodo(\'' + lead.id + '\', this.value)">' + (lead.csrTodo || ({'full_info_received':'Prepare App & Quotes','info_received':'Prepare Basic Quote','loss_runs_received':'Send out loss runs'})[lead.stage] || '') + '</textarea>';
                                 }
                             })()}
                         </div>
@@ -456,9 +459,14 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 </div>`}
 
 
-                <!-- Notes -->
+                <!-- Notes & Instructions -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3><i class="fas fa-sticky-note"></i> Notes</h3>
+                    <h3><i class="fas fa-sticky-note"></i> Notes &amp; Instructions</h3>
+                    <div id="lead-instructions-${lead.id}"
+                         contenteditable="true"
+                         onblur="updateLeadField('${lead.id}', 'instructions', this.innerText.trim())"
+                         style="min-height: 36px; padding: 10px 12px; margin-bottom: 10px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; color: #1d4ed8; font-weight: 700; font-size: 13px; line-height: 1.5; outline: none; white-space: pre-wrap; cursor: text;"
+                         placeholder="Instructions will load based on stage...">${lead.instructions || ''}</div>
                     <textarea onchange="updateLeadField('${lead.id}', 'notes', this.value)" style="width: 100%; min-height: 100px; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px;">${lead.notes || ''}</textarea>
                 </div>
 
@@ -535,7 +543,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 <!-- Operation Details -->
                 <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h3>Operation Details</h3>
-                    <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 15px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
                         <div>
                             <label style="font-weight: 600; font-size: 12px;">Radius of Operation:</label>
                             <input type="text" value="${lead.radiusOfOperation || ''}" placeholder="e.g., 500 miles" onchange="updateLeadField('${lead.id}', 'radiusOfOperation', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
@@ -544,6 +552,69 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <label style="font-weight: 600; font-size: 12px;">Commodity Hauled:</label>
                             <input type="text" value="${lead.commodityHauled || ''}" placeholder="Auto-populated from DOT lookup" onchange="updateLeadField('${lead.id}', 'commodityHauled', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background-color: ${lead.commodityHauled ? '#e8f5e8' : '#fff'};">
                         </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px;">MTC (Motor Truck Cargo):</label>
+                            <input type="text" value="${lead.mtcCoverage || ''}" placeholder="e.g., $100k" onchange="updateLeadField('${lead.id}', 'mtcCoverage', this.value)" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Document Status -->
+                <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3><i class="fas fa-folder-open"></i> Document Status</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
+                        ${['COI', 'Dec Page', 'Loss Runs', 'IFTAS'].map(doc => {
+                            const fieldKey = 'docStatus_' + doc.toLowerCase().replace(/\s+/g, '_');
+                            const val = (lead[fieldKey] || 'not_requested');
+                            return `<div>
+                                <label style="font-weight: 600; font-size: 12px; display: block; margin-bottom: 5px;">${doc}:</label>
+                                <select onchange="updateLeadField('${lead.id}', '${fieldKey}', this.value)"
+                                        style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white; font-size: 13px;">
+                                    <option value="not_requested" ${val === 'not_requested' ? 'selected' : ''}>Haven't Requested</option>
+                                    <option value="requested" ${val === 'requested' ? 'selected' : ''}>Requested</option>
+                                    <option value="received" ${val === 'received' ? 'selected' : ''}>Received</option>
+                                </select>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>
+
+                <!-- Owner Info -->
+                <div class="profile-section" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3><i class="fas fa-user-tie"></i> Owner Info</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px;">Owner Name:</label>
+                            <input type="text" value="${lead.ownerName || ''}" placeholder="Owner full name"
+                                   onchange="updateLeadField('${lead.id}', 'ownerName', this.value)"
+                                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px;">Owner DOB:</label>
+                            <input type="text" value="${lead.ownerDob || ''}" placeholder="MM/DD/YYYY"
+                                   onchange="updateLeadField('${lead.id}', 'ownerDob', this.value)"
+                                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px;">Owner DL#:</label>
+                            <input type="text" value="${lead.ownerDl || ''}" placeholder="Driver license number"
+                                   onchange="updateLeadField('${lead.id}', 'ownerDl', this.value)"
+                                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                        <div>
+                            <label style="font-weight: 600; font-size: 12px;">Owner CDL Length (yrs):</label>
+                            <input type="text" value="${lead.ownerCdlLength || ''}" placeholder="Years CDL held"
+                                   onchange="updateLeadField('${lead.id}', 'ownerCdlLength', this.value)"
+                                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        </div>
+                    </div>
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #374151;">
+                            <input type="checkbox" ${lead.ownerExcludeAsDriver ? 'checked' : ''}
+                                   onchange="updateLeadField('${lead.id}', 'ownerExcludeAsDriver', this.checked)"
+                                   style="width: 16px; height: 16px; accent-color: #ef4444;">
+                            Exclude Owner as Driver (owner-only, not driving)
+                        </label>
                     </div>
                 </div>
 
@@ -685,11 +756,15 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                                         </div>
                                         <div>
                                             <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Date of Birth:</label>
-                                            <input type="date" value="${driver.dob || ''}" onchange="updateDriver('${lead.id}', ${index}, 'dob', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                                            <input type="text" value="${driver.dob || ''}" placeholder="MM/DD/YYYY or YYYY-MM-DD" onchange="updateDriver('${lead.id}', ${index}, 'dob', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
                                         </div>
                                         <div>
                                             <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Hire Date:</label>
-                                            <input type="date" value="${driver.hireDate || ''}" onchange="updateDriver('${lead.id}', ${index}, 'hireDate', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                                            <input type="text" value="${driver.hireDate || ''}" placeholder="MM/YYYY" onchange="updateDriver('${lead.id}', ${index}, 'hireDate', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+                                        </div>
+                                        <div>
+                                            <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">CDL Length (yrs):</label>
+                                            <input type="text" value="${driver.cdlLength || ''}" onchange="updateDriver('${lead.id}', ${index}, 'cdlLength', this.value)" style="width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
                                         </div>
                                         <div>
                                             <label style="display: block; margin-bottom: 3px; font-weight: bold; font-size: 12px;">Years Experience:</label>
@@ -785,7 +860,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                 <!-- Loss Runs -->
                 <div class="profile-section" style="background: #fff3cd; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3><i class="fas fa-file-pdf"></i> Loss Runs and Other Documentation</h3>
+                        <h3><i class="fas fa-file-pdf"></i> Documentation</h3>
                         <div style="display: flex; gap: 10px;">
                             <button id="email-doc-btn-${lead.id}" onclick="checkFilesAndOpenEmail('${lead.id}')" style="background: rgb(0, 102, 204); color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 12px; opacity: 1;" title="Send email with attached documentation">
                                 <i class="fas fa-envelope"></i> Email Documentation
@@ -829,10 +904,21 @@ protectedFunctions.createEnhancedProfile = function(lead) {
             // Regular stage update
             updateLeadStage(leadId, value);
 
+            // Regenerate instructions for the new stage (clear saved so loadLeadInstructions regenerates)
+            const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const lIdx = leads.findIndex(l => String(l.id) === String(leadId));
+            if (lIdx !== -1) {
+                leads[lIdx].instructions = '';
+                localStorage.setItem('insurance_leads', JSON.stringify(leads));
+                fetch(`/api/leads/${leadId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({instructions: ''}) }).catch(()=>{});
+            }
+            loadLeadInstructions(leadId);
+
             // Auto-populate CSR To Do based on stage
             const csrAutoFill = {
-                'loss_runs_received': 'Prepare App',
-                'info_received': 'Prepare Quote'
+                'loss_runs_received': 'Send out loss runs',
+                'info_received': 'Prepare Basic Quote',
+                'full_info_received': 'Prepare App & Quotes'
             };
             if (csrAutoFill[value]) {
                 const csrTodoEl = document.getElementById('csr-todo-' + leadId);
@@ -1003,6 +1089,9 @@ protectedFunctions.createEnhancedProfile = function(lead) {
 
         // Load loss runs from server
         protectedFunctions.loadLossRuns(lead.id);
+
+        // Load stage-based instructions
+        loadLeadInstructions(lead.id);
     }, 100);
 
     // AUTO-CHECK REMOVED - Now only triggers from "Reach out: CALL" button click
@@ -1411,90 +1500,128 @@ protectedFunctions.checkFilesAndOpenEmail = function(leadId) {
     protectedFunctions.openEmailDocumentation(leadId);
 };
 
-// Upload loss runs function with full server integration
+// Upload loss runs function — opens file picker then shows doc type modal
 protectedFunctions.openLossRunsUpload = function(leadId) {
-    console.log('📄 Opening loss runs upload for lead:', leadId);
-
-    // Create file input
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png';
+    fileInput.accept = '.pdf,.doc,.docx,.jpg,.jpeg,.png,.xlsx,.xls';
     fileInput.multiple = true;
-
     fileInput.onchange = function(event) {
-        const files = event.target.files;
-        if (files.length > 0) {
-            protectedFunctions.uploadLossRunsFiles(leadId, files);
+        if (event.target.files.length > 0) {
+            protectedFunctions.showDocTypeModal(leadId, event.target.files);
         }
     };
-
-    // Trigger file selection
     fileInput.click();
 };
 
-// Upload files function with Base64 storage (same as working version)
-protectedFunctions.uploadLossRunsFiles = function(leadId, files) {
-    console.log('📤 Uploading loss runs files to server:', files.length, 'files for lead:', leadId);
+// Show doc type selection modal for each file before uploading
+protectedFunctions.showDocTypeModal = function(leadId, files) {
+    // Remove existing modal if any
+    const existing = document.getElementById('doc-type-modal');
+    if (existing) existing.remove();
 
-    // Show uploading message
+    const fileArray = Array.from(files);
+    const docTypeOptions = ['Loss Runs', 'Dec Page', 'IFTAS', 'COI', 'DL', 'Other'];
+    const colors = { 'Loss Runs':'#2563eb','Dec Page':'#7c3aed','IFTAS':'#d97706','COI':'#059669','DL':'#0891b2','Other':'#6b7280' };
+
+    const fileRows = fileArray.map((file, i) => `
+        <div style="padding: 12px; background: #f9fafb; border-radius: 8px; margin-bottom: 10px; border: 1px solid #e5e7eb;">
+            <div style="font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <i class="fas fa-file" style="color: #6b7280; margin-right: 6px;"></i>${file.name}
+            </div>
+            <select id="doc-type-select-${i}"
+                    onchange="handleDocTypeChange(${i})"
+                    style="width: 100%; padding: 8px 10px; border: 1.5px solid #d1d5db; border-radius: 6px; font-size: 13px; background: white; cursor: pointer;">
+                ${docTypeOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+            </select>
+            <input id="doc-type-other-${i}" type="text" placeholder="Describe document type..."
+                   style="display:none; width:100%; margin-top:6px; padding:8px 10px; border:1.5px solid #d1d5db; border-radius:6px; font-size:13px; box-sizing:border-box;" />
+        </div>
+    `).join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'doc-type-modal';
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:2000000;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:white;border-radius:14px;padding:28px;max-width:480px;width:92%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <h3 style="margin:0 0 6px;font-size:18px;color:#111827;">
+                <i class="fas fa-tags" style="color:#2563eb;margin-right:8px;"></i>Select Document Type
+            </h3>
+            <p style="margin:0 0 18px;font-size:13px;color:#6b7280;">Choose the type for each file before uploading.</p>
+            ${fileRows}
+            <div style="display:flex;gap:10px;margin-top:20px;">
+                <button onclick="confirmDocUpload('${leadId}', ${fileArray.length})"
+                        style="flex:1;padding:11px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
+                    <i class="fas fa-upload" style="margin-right:6px;"></i>Upload
+                </button>
+                <button onclick="document.getElementById('doc-type-modal').remove()"
+                        style="padding:11px 18px;background:#f3f4f6;color:#374151;border:none;border-radius:8px;font-size:14px;cursor:pointer;">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Store files on the modal element for access later
+    modal._files = fileArray;
+};
+
+// Toggle "Other" text input visibility
+protectedFunctions.handleDocTypeChange = function(index) {
+    const sel = document.getElementById(`doc-type-select-${index}`);
+    const inp = document.getElementById(`doc-type-other-${index}`);
+    if (sel && inp) inp.style.display = sel.value === 'Other' ? 'block' : 'none';
+};
+
+// Collect doc types and trigger upload
+protectedFunctions.confirmDocUpload = function(leadId, count) {
+    const modal = document.getElementById('doc-type-modal');
+    if (!modal) return;
+    const files = modal._files;
+    const docTypes = [];
+    for (let i = 0; i < count; i++) {
+        const sel = document.getElementById(`doc-type-select-${i}`);
+        const inp = document.getElementById(`doc-type-other-${i}`);
+        let type = sel ? sel.value : 'Other';
+        if (type === 'Other' && inp && inp.value.trim()) type = inp.value.trim();
+        docTypes.push(type);
+    }
+    modal.remove();
+    protectedFunctions.uploadLossRunsFiles(leadId, files, docTypes);
+};
+
+// Upload files with doc types
+protectedFunctions.uploadLossRunsFiles = function(leadId, files, docTypes) {
+    console.log('📤 Uploading', files.length, 'files for lead:', leadId, 'types:', docTypes);
+
     const container = document.getElementById(`loss-runs-container-${leadId}`);
     if (container) {
-        container.innerHTML = '<p style="color: #3b82f6; text-align: center; padding: 20px;">📤 Uploading files to server...</p>';
+        container.innerHTML = '<p style="color:#3b82f6;text-align:center;padding:20px;">📤 Uploading files...</p>';
     }
 
-    // Create FormData for file upload
     const formData = new FormData();
     formData.append('leadId', leadId);
+    formData.append('docTypes', JSON.stringify(docTypes || []));
+    Array.from(files).forEach(file => formData.append('files', file));
 
-    // Add all files to FormData
-    Array.from(files).forEach((file, index) => {
-        formData.append('files', file);
-    });
-
-    // Create abort controller for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-        controller.abort();
-        console.error('❌ Upload timed out after 30 seconds');
-    }, 30000); // 30 second timeout for file uploads
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    // Upload to server
-    fetch('/api/loss-runs-upload', {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal
-    })
-    .then(response => {
-        clearTimeout(timeoutId);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
-    })
+    fetch('/api/loss-runs-upload', { method: 'POST', body: formData, signal: controller.signal })
+    .then(response => { clearTimeout(timeoutId); if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
     .then(data => {
         if (data.success) {
-            console.log('✅ Files uploaded successfully to server:', data.count, 'files');
-            // Reload the loss runs display
-            setTimeout(() => {
-                protectedFunctions.loadLossRuns(leadId);
-            }, 300);
+            setTimeout(() => protectedFunctions.loadLossRuns(leadId), 300);
         } else {
-            console.error('❌ Upload failed:', data.error);
             alert('Upload failed: ' + data.error);
             protectedFunctions.loadLossRuns(leadId);
         }
     })
     .catch(error => {
         clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-            console.error('❌ File upload timed out');
-            alert('File upload timed out. Please try again with smaller files or check your connection.');
-            if (container) {
-                container.innerHTML = '<p style="color: #dc3545; text-align: center; padding: 20px;">Upload timed out. <button onclick="protectedFunctions.uploadLossRuns(\'' + leadId + '\')" style="background: #3b82f6; color: white; border: none; padding: 4px 8px; border-radius: 3px; cursor: pointer; margin-left: 8px;">Retry</button></p>';
-            }
-        } else {
-            console.error('❌ Upload error:', error);
-            alert('Upload error. Please try again.');
-            protectedFunctions.loadLossRuns(leadId);
-        }
+        alert(error.name === 'AbortError' ? 'Upload timed out. Please try again.' : 'Upload error. Please try again.');
+        protectedFunctions.loadLossRuns(leadId);
     });
 };
 
@@ -1512,44 +1639,117 @@ protectedFunctions.loadLossRuns = function(leadId) {
     fetch(`/api/loss-runs-upload?leadId=${encodeURIComponent(leadId)}`)
     .then(response => response.json())
     .then(data => {
+        const docTypeColors = {
+            'Loss Runs': '#2563eb', 'Dec Page': '#7c3aed', 'IFTAS': '#d97706',
+            'COI': '#059669', 'DL': '#0891b2', 'Other': '#6b7280'
+        };
+
+        const dragDropZone = `
+            <div id="drag-zone-${leadId}"
+                 style="border:2px dashed #d1d5db;border-radius:8px;padding:18px;text-align:center;color:#9ca3af;font-size:13px;cursor:pointer;transition:all 0.2s;margin-top:10px;">
+                <i class="fas fa-cloud-upload-alt" style="font-size:22px;display:block;margin-bottom:6px;color:#9ca3af;pointer-events:none;"></i>
+                <span style="pointer-events:none;">Drag &amp; drop files here, or click to browse</span>
+            </div>`;
+
+        const attachDragListeners = () => {
+            const zone = document.getElementById(`drag-zone-${leadId}`);
+            if (!zone) { console.warn('Drag zone not found for lead:', leadId); return; }
+            console.log('Attaching drag listeners to zone for lead:', leadId);
+            zone.addEventListener('dragover', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'copy';
+                zone.style.background = '#eff6ff';
+                zone.style.borderColor = '#2563eb';
+            });
+            zone.addEventListener('dragleave', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                zone.style.background = '';
+                zone.style.borderColor = '#d1d5db';
+            });
+            zone.addEventListener('drop', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('DROP event fired, files:', e.dataTransfer.files.length);
+                zone.style.background = '';
+                zone.style.borderColor = '#d1d5db';
+                const droppedFiles = e.dataTransfer.files;
+                if (droppedFiles && droppedFiles.length > 0) {
+                    console.log('Calling showDocTypeModal with', droppedFiles.length, 'file(s)');
+                    // Copy files immediately before dataTransfer clears
+                    const dt = new DataTransfer();
+                    for (let i = 0; i < droppedFiles.length; i++) {
+                        dt.items.add(droppedFiles[i]);
+                    }
+                    protectedFunctions.showDocTypeModal(leadId, dt.files);
+                }
+            });
+            zone.addEventListener('click', e => {
+                e.stopPropagation();
+                protectedFunctions.openLossRunsUpload(leadId);
+            });
+        };
+
+        // Auto-update Document Status dropdowns based on uploaded files
+        const docStatusMap = {
+            'COI': 'docStatus_coi',
+            'Dec Page': 'docStatus_dec_page',
+            'Loss Runs': 'docStatus_loss_runs',
+            'IFTAS': 'docStatus_iftas'
+        };
         if (data.success && data.files.length > 0) {
-            // Display existing loss runs from server
-            container.innerHTML = data.files.map(lossRun => {
+            // Collect which tracked doc types are present
+            const receivedTypes = new Set(data.files.map(f => f.doc_type).filter(t => docStatusMap[t]));
+            receivedTypes.forEach(docType => {
+                const fieldKey = docStatusMap[docType];
+                // Update the dropdown in the Document Status section
+                const selects = document.querySelectorAll(`select[onchange*="${fieldKey}"]`);
+                selects.forEach(sel => {
+                    if (sel.value !== 'received') {
+                        sel.value = 'received';
+                        // Persist to lead data
+                        if (typeof updateLeadField === 'function') {
+                            updateLeadField(leadId, fieldKey, 'received');
+                        }
+                    }
+                });
+            });
+
+            const fileCards = data.files.map(lossRun => {
                 const uploadDate = new Date(lossRun.uploaded_date).toLocaleDateString();
                 const fileSize = Math.round(lossRun.file_size / 1024) + ' KB';
-                const originalName = lossRun.file_name.replace(/^[a-f0-9]+_[0-9]+_/, ''); // Remove unique prefix
+                const originalName = lossRun.file_name.replace(/^[a-f0-9]+_[0-9]+_/, '');
+                const docType = lossRun.doc_type || 'Other';
+                const badgeColor = docTypeColors[docType] || '#6b7280';
 
                 return `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: white; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 8px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:white;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;">
                         <div>
-                            <div style="display: flex; align-items: center; margin-bottom: 4px;">
-                                <i class="fas fa-file-pdf" style="color: #dc3545; margin-right: 8px;"></i>
-                                <strong style="font-size: 14px;">${originalName}</strong>
-                                <span style="background: #10b981; color: white; font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 8px;">SERVER</span>
+                            <div style="display:flex;align-items:center;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
+                                <i class="fas fa-file-pdf" style="color:#dc3545;margin-right:4px;"></i>
+                                <strong style="font-size:14px;">${originalName}</strong>
+                                <span style="background:${badgeColor};color:white;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;">${docType}</span>
                             </div>
-                            <div style="font-size: 12px; color: #6b7280;">
-                                Uploaded: ${uploadDate} • Size: ${fileSize}
-                            </div>
+                            <div style="font-size:12px;color:#6b7280;">Uploaded: ${uploadDate} • ${fileSize}</div>
                         </div>
-                        <div style="display: flex; gap: 8px;">
-                            <button class="view-loss-runs-btn"
-                                    data-file-id="${lossRun.id}"
-                                    onclick="viewLossRuns('${leadId}', '${lossRun.id}', '${originalName}')"
-                                    style="background: #0066cc; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                        <div style="display:flex;gap:8px;flex-shrink:0;">
+                            <button onclick="viewLossRuns('${leadId}','${lossRun.id}','${originalName}')"
+                                    style="background:#0066cc;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;">
                                 <i class="fas fa-eye"></i> View
                             </button>
-                            <button class="remove-loss-runs-btn"
-                                    data-file-id="${lossRun.id}"
-                                    onclick="removeLossRuns('${leadId}', '${lossRun.id}')"
-                                    style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                                <i class="fas fa-trash"></i> Remove
+                            <button onclick="removeLossRuns('${leadId}','${lossRun.id}')"
+                                    style="background:#dc3545;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;">
+                                <i class="fas fa-trash"></i>
                             </button>
                         </div>
-                    </div>
-                `;
+                    </div>`;
             }).join('');
+            container.innerHTML = fileCards + dragDropZone;
+            attachDragListeners();
         } else {
-            container.innerHTML = '<p style="color: #9ca3af; text-align: center; padding: 20px;">No loss runs uploaded yet</p>';
+            container.innerHTML = '<p style="color:#9ca3af;text-align:center;padding:10px 20px;">No documents uploaded yet</p>' + dragDropZone;
+            attachDragListeners();
         }
     })
     .catch(error => {
@@ -7685,6 +7885,8 @@ protectedFunctions.addQuoteSubmission = function(leadId) {
                         <option value="Crum & Forster">Crum & Forster</option>
                         <option value="Nico">Nico</option>
                         <option value="Berkley Prime">Berkley Prime</option>
+                        <option value="Star Mutual">Star Mutual</option>
+                        <option value="Corgi">Corgi</option>
                     </select>
                 </div>
 
@@ -8129,11 +8331,20 @@ window.refreshQuotesDisplay = async function(leadId) {
     let quotesHTML = '';
     let quoteCounter = 0;
 
-    // Progressive (either real quote or placeholder)
+    // Get lead state once for all market eligibility checks
+    const _allLeadsForState = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const _thisLead = _allLeadsForState.find(l => String(l.id) === String(leadId));
+    const leadStateRaw = ((_thisLead && _thisLead.state) || '').trim().toUpperCase();
+
+    // Progressive — ineligible outside OH, NC, SC, TX, IL
     if (progressiveQuote) {
         quotesHTML += createQuoteHTML(progressiveQuote, ++quoteCounter);
     } else {
-        const progressiveStatus = placeholderStates.progressive || null;
+        let progressiveStatus = placeholderStates.progressive || null;
+        const progressiveStates = ['OH', 'OHIO', 'NC', 'SC', 'TX', 'IL'];
+        if (!progressiveStates.includes(leadStateRaw) && (!progressiveStatus || progressiveStatus.status !== 'eligible')) {
+            progressiveStatus = { status: 'ineligible', reason: 'Market Ineligible — OH, NC, SC, TX, IL only' };
+        }
         quotesHTML += createPlaceholderHTML('Progressive', progressiveStatus);
     }
 
@@ -8158,10 +8369,6 @@ window.refreshQuotesDisplay = async function(leadId) {
         quotesHTML += createQuoteHTML(starMutualQuote, ++quoteCounter);
     } else {
         let starMutualStatus = placeholderStates['star mutual'] || null;
-        // Auto-mark ineligible if state is not Ohio
-        const allLeadsForState = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
-        const thisLeadForState = allLeadsForState.find(l => String(l.id) === String(leadId));
-        const leadStateRaw = ((thisLeadForState && thisLeadForState.state) || '').trim().toUpperCase();
         const isOhio = leadStateRaw === 'OH' || leadStateRaw === 'OHIO';
         if (!isOhio && (!starMutualStatus || starMutualStatus.status !== 'eligible')) {
             starMutualStatus = { status: 'ineligible', reason: 'Market Ineligible — Ohio only' };
@@ -9010,6 +9217,79 @@ function enforceGreenHighlightRule() {
     console.log(`🧹 CLEANUP COMPLETE: Checked ${totalChecked} rows, fixed ${cleanupCount} green highlight violations`);
 }
 
+// Generate and display stage-based instructions in the Notes & Instructions section
+async function loadLeadInstructions(leadId) {
+    const div = document.getElementById('lead-instructions-' + leadId);
+    if (!div) return;
+
+    // If the user has already saved custom instructions, show those and stop
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) return;
+    if (lead.instructions && lead.instructions.trim()) {
+        div.innerText = lead.instructions.trim();
+        return;
+    }
+
+    // Fetch carrier eligibility
+    let placeholderStates = {};
+    try {
+        const response = await fetch(`/api/placeholder-status/${leadId}`);
+        if (response.ok) {
+            const data = await response.json();
+            placeholderStates = data.statuses || {};
+        }
+    } catch (e) {}
+
+    // Determine eligible carriers
+    const leadState = (lead.state || '').trim().toUpperCase();
+    const progressiveEligibleStates = ['OH', 'OHIO', 'NC', 'SC', 'TX', 'IL'];
+    const isProgressiveEligible = progressiveEligibleStates.includes(leadState);
+    const carriers = ['Progressive', 'Geico', 'Corgi', 'Star Mutual'];
+    const eligible = carriers.filter(c => {
+        const key = c.toLowerCase();
+        const status = placeholderStates[key];
+        if (status && (status.status === 'ineligible' || status.status === 'aor_required')) return false;
+        if (c === 'Progressive' && !isProgressiveEligible) return false;
+        if (c === 'Star Mutual' && leadState !== 'OH' && leadState !== 'OHIO') return false;
+        return true;
+    });
+    const eligibleList = eligible.length ? eligible.join(', ') : 'no eligible markets';
+
+    // State-specific Progressive note for quoting stages
+    let progressiveNote = '';
+    if (isProgressiveEligible) {
+        if (['TX', 'SC', 'IL'].includes(leadState)) {
+            progressiveNote = ' Quote Progressive with Unite, and all other markets through Vanguard.';
+        } else if (['OH', 'OHIO', 'NC'].includes(leadState)) {
+            progressiveNote = ' Quote all direct markets through Vanguard.';
+        }
+    }
+
+    const instructions = {
+        'info_requested':      'Reach out to lead to obtain basic information.',
+        'info_received':       `Prepare basic direct quotes with eligible markets: ${eligibleList}.${progressiveNote}`,
+        'full_info_requested': 'Reach out to lead to obtain full information.',
+        'full_info_received':  `Prepare App & Quotes with eligible markets: ${eligibleList}.${progressiveNote}`,
+        'loss_runs_requested': 'Reach out to lead to request loss runs.',
+        'loss_runs_received':  `Send out loss runs to eligible markets: ${eligibleList}.${progressiveNote}`,
+        'quote_prepared':      'Quote prepared — send to lead and follow up.',
+        'app_prepared':        'App prepared — email brokers with completed application package.',
+        'app_sent':            'Application submitted — follow up on market responses.',
+        'quote_sent':          'Quote sent — follow up with lead for any questions.',
+        'contact_attempted':   'Reach out to lead to make first contact.',
+        'sale':                'Update client information and process policy.',
+        'new':                 'Assign a stage to begin processing this lead.',
+    };
+
+    const text = instructions[lead.stage] || '';
+    if (text) {
+        div.innerText = text;
+        // Note: NOT auto-saving — user must edit + blur to save custom instructions.
+        // On next open, if lead.instructions is empty, instructions regenerate from stage.
+    }
+}
+
 // Function to load leads from server and refresh display
 async function loadLeadsFromServerAndRefresh() {
     try {
@@ -9018,8 +9298,29 @@ async function loadLeadsFromServerAndRefresh() {
         if (response.ok) {
             const serverLeads = await response.json();
 
-            // Update localStorage with fresh server data
-            localStorage.setItem('insurance_leads', JSON.stringify(serverLeads));
+            // SMART MERGE: preserve local changes (stage, notes, reachOut, etc.)
+            // instead of blindly overwriting localStorage with server data
+            const localLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const localMap = new Map(localLeads.map(l => [String(l.id), l]));
+            const now = Date.now();
+            const mergedLeads = serverLeads.map(serverLead => {
+                const localLead = localMap.get(String(serverLead.id));
+                if (!localLead) return serverLead;
+                // Preserve local if it has recent changes or a different stage/notes
+                const hasRecentChanges = localLead.lastModified &&
+                    (now - new Date(localLead.lastModified).getTime()) < 10 * 60 * 1000;
+                const hasStageChange = localLead.stage !== serverLead.stage;
+                const hasNotesChange = localLead.notes !== serverLead.notes;
+                if (hasRecentChanges || hasStageChange || hasNotesChange) {
+                    return { ...serverLead, ...localLead, lastModified: localLead.lastModified || new Date().toISOString() };
+                }
+                return { ...localLead, ...serverLead, lastModified: new Date().toISOString() };
+            });
+            // Add any local-only leads (not yet on server)
+            serverLeads.forEach(sl => localMap.delete(String(sl.id)));
+            localMap.forEach(localOnly => mergedLeads.push(localOnly));
+
+            localStorage.setItem('insurance_leads', JSON.stringify(mergedLeads));
 
             // Trigger display refresh
             if (window.displayLeads) {
@@ -9028,7 +9329,7 @@ async function loadLeadsFromServerAndRefresh() {
                 window.loadLeadsView();
             }
 
-            console.log('✅ Leads refreshed from server');
+            console.log('✅ Leads refreshed from server (smart merge applied)');
         }
     } catch (error) {
         console.error('❌ Error refreshing leads from server:', error);
@@ -9112,6 +9413,9 @@ window.removeAttachment = protectedFunctions.removeAttachment;
 window.addMoreAttachments = protectedFunctions.addMoreAttachments;
 window.sendEmail = protectedFunctions.sendEmail;
 window.openCallRecordingUpload = protectedFunctions.openCallRecordingUpload;
+window.showDocTypeModal = protectedFunctions.showDocTypeModal;
+window.handleDocTypeChange = protectedFunctions.handleDocTypeChange;
+window.confirmDocUpload = protectedFunctions.confirmDocUpload;
 
 // Handle Contact Attempted completion
 window.handleContactAttemptedCompletion = async function(leadId) {
@@ -10642,12 +10946,17 @@ window.displayScheduledCallbacks = async function(leadId) {
     // FILTER OUT COMPLETED CALLBACKS - only show active ones
     let activeCallbacks = allCallbacks.filter(callback => !callback.completed);
 
-    // SINGLE CALLBACK CONSTRAINT: Only show the most recent callback (sort by creation time or callback time)
+    // SINGLE CALLBACK CONSTRAINT: Only show the most recent callback (prefer callbacks with notes)
     if (activeCallbacks.length > 1) {
         console.log('🔧 SINGLE CALLBACK FIX: Found', activeCallbacks.length, 'active callbacks, showing only the most recent');
 
-        // Sort by dateTime (most recent callback time) and take the last one
-        activeCallbacks.sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+        // Sort by dateTime ascending; callbacks with notes rank higher than those without
+        activeCallbacks.sort((a, b) => {
+            const aNotes = !!(a.notes && a.notes.trim());
+            const bNotes = !!(b.notes && b.notes.trim());
+            if (aNotes !== bNotes) return aNotes ? 1 : -1; // notes-bearing callback wins
+            return new Date(a.dateTime) - new Date(b.dateTime);
+        });
         const mostRecentCallback = activeCallbacks[activeCallbacks.length - 1];
         const oldCallbacks = activeCallbacks.slice(0, -1); // All except the most recent
 
@@ -10736,6 +11045,60 @@ window.displayScheduledCallbacks = async function(leadId) {
 
     // Force DOM to refresh by triggering a reflow
     container.offsetHeight;
+
+    // Pre-fill the notes textarea and calendar selection with the active callback's details
+    if (activeCallbacks.length > 0) {
+        const cb = activeCallbacks[0];
+        // Pre-fill notes
+        const notesEl = document.getElementById(`callback-notes-${leadId}`);
+        if (notesEl && cb.notes) {
+            notesEl.value = cb.notes;
+        }
+        // Pre-fill hidden date/time inputs and update calendar display
+        const cbDT = new Date(cb.dateTime);
+        if (!isNaN(cbDT)) {
+            const dateStr = cbDT.toISOString().split('T')[0];
+            const h = cbDT.getHours();
+            const m = cbDT.getMinutes();
+            const timeStr = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+            const dateInput = document.getElementById(`callback-date-${leadId}`);
+            const timeInput = document.getElementById(`callback-time-${leadId}`);
+            if (dateInput) dateInput.value = dateStr;
+            if (timeInput) timeInput.value = timeStr;
+            // Update the inline selected display text
+            const selDisplay = document.getElementById(`inline-cb-selected-${leadId}`);
+            if (selDisplay) {
+                const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][cbDT.getDay()];
+                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                const ampm = h >= 12 ? 'PM' : 'AM';
+                const h12 = h % 12 || 12;
+                const mStr = String(m).padStart(2,'0');
+                selDisplay.textContent = `${dow}, ${months[cbDT.getMonth()]} ${cbDT.getDate()}, ${cbDT.getFullYear()} at ${h12}:${mStr} ${ampm}`;
+            }
+            // Visually highlight the matching time slot if it exists
+            const slotsContainer = document.getElementById(`inline-cb-timeslots-${leadId}`);
+            if (slotsContainer) {
+                slotsContainer.querySelectorAll('.icts').forEach(slot => {
+                    const sh = parseInt(slot.dataset.h);
+                    const sm = parseInt(slot.dataset.m);
+                    const isSelected = (sh === h && sm === m);
+                    const hasConflict = slot.style.background.includes('fef3c7') || slot.style.background.includes('f59e0b');
+                    if (isSelected) {
+                        slot.style.background = '#0277bd';
+                        slot.style.color = 'white';
+                        slot.style.border = '1px solid #0277bd';
+                        const labelDiv = slot.querySelector('div');
+                        if (labelDiv) labelDiv.style.fontWeight = '600';
+                        slot.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    } else if (!hasConflict) {
+                        slot.style.background = '#ffffff';
+                        slot.style.color = '#374151';
+                        slot.style.border = '1px solid #d1d5db';
+                    }
+                });
+            }
+        }
+    }
 
     console.log('✅ CALLBACK UI: Successfully refreshed callback display for lead', leadId);
 };

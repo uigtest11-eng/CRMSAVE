@@ -505,7 +505,8 @@ class AppSubmissions {
                             <strong>Dry Van:</strong> ${data.dryVanPercent || ''}% |
                             <strong>Dump Truck:</strong> ${data.dumpTruckPercent || ''}% |
                             <strong>Flat Bed:</strong> ${data.flatBedPercent || ''}% |
-                            <strong>Reefer:</strong> ${data.reeferPercent || ''}%
+                            <strong>Reefer:</strong> ${data.reeferPercent || ''}% |
+                            <strong>Hopper-Bottom Trailer:</strong> ${data.hopperBottomPercent || ''}%
                         </div>
                     </div>
                 </div>
