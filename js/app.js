@@ -14261,47 +14261,35 @@ function renderSubmissionsTab() {
     const rawPolicy = allPolicies.find(p => p.id === currentPolicyId) || {};
     const clientId = rawPolicy.clientId || rawPolicy._clientId || currentPolicyId;
 
-    // Load saved quote premiums for this policy
-    const savedQuotes = JSON.parse(localStorage.getItem(`renewalQuotes_${currentPolicyId}`) || '{}');
-    const progressivePremium = savedQuotes.progressive || '';
-    const geicoPremium = savedQuotes.geico || '';
+    const clientName = rawPolicy.clientName || rawPolicy.businessName || '';
+    const escapedClientName = clientName.replace(/'/g, "\'");
+
+    // Schedule quote placeholder refresh after DOM renders
+    setTimeout(() => {
+        if (typeof refreshQuotesDisplay === 'function') {
+            refreshQuotesDisplay(clientId);
+        }
+    }, 200);
 
     return `
         <div class="submissions-tab" style="padding: 5px 0;">
 
             <!-- Quote Submissions -->
-            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #e5e7eb;">
-                <h3 style="margin: 0 0 15px 0; color: #111827; font-size: 15px; font-weight: 600;">
-                    <i class="fas fa-file-alt" style="color: #0066cc; margin-right: 6px;"></i> Quote Submissions
-                </h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #e5e7eb;">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <div style="width: 32px; height: 32px; background: #0066cc; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                <i class="fas fa-car" style="color: white; font-size: 13px;"></i>
-                            </div>
-                            <span style="font-weight: 600; color: #111827; font-size: 14px;">Progressive</span>
-                        </div>
-                        <label style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Annual Premium</label>
-                        <input type="text" id="quote-progressive-${currentPolicyId}"
-                               value="${progressivePremium}"
-                               placeholder="$0.00"
-                               style="width: 100%; margin-top: 5px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
-                               onblur="saveRenewalQuote('${currentPolicyId}', 'progressive', this.value)">
+            <div class="profile-section" style="background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #111827; font-size: 15px; font-weight: 600;"><i class="fas fa-file-contract" style="color: #0066cc; margin-right: 6px;"></i> Quote Submissions</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="addQuoteSubmission('${clientId}')" style="background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                            <i class="fas fa-plus"></i> Add Quote
+                        </button>
+                        <button class="auto-import-market-btn" onclick="autoImportToMarket('${clientId}', '${escapedClientName}')" style="background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                            <i class="fas fa-arrow-right"></i> Auto-Import to Market
+                        </button>
                     </div>
-                    <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #e5e7eb;">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <div style="width: 32px; height: 32px; background: #00a651; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                <i class="fas fa-shield-alt" style="color: white; font-size: 13px;"></i>
-                            </div>
-                            <span style="font-weight: 600; color: #111827; font-size: 14px;">GEICO</span>
-                        </div>
-                        <label style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Annual Premium</label>
-                        <input type="text" id="quote-geico-${currentPolicyId}"
-                               value="${geicoPremium}"
-                               placeholder="$0.00"
-                               style="width: 100%; margin-top: 5px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
-                               onblur="saveRenewalQuote('${currentPolicyId}', 'geico', this.value)">
+                </div>
+                <div id="quote-submissions-container">
+                    <div id="quotes-container-${clientId}">
+                        <p style="color: #9ca3af; text-align: center; padding: 20px; margin: 0;">Loading quotes...</p>
                     </div>
                 </div>
             </div>
