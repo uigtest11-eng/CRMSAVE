@@ -14138,7 +14138,7 @@ async function showRenewalProfile(policyId) {
                             <i class="fas fa-file-alt"></i> Submissions
                         </button>
                     </div>
-                    <button onclick="viewPolicy('${policyId}')" style="background: #0066cc; color: white; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; margin-right: 8px; transition: 0.2s; white-space: nowrap;">
+                    <button onclick="window._policyNavSource='renewals'; viewPolicy('${policyId}')" style="background: #0066cc; color: white; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; margin-right: 8px; transition: 0.2s; white-space: nowrap;">
                         <i class="fas fa-external-link-alt"></i> View Policy
                     </button>
                 </div>
@@ -24442,8 +24442,8 @@ function showPolicyDetailsModal(policy) {
             <!-- Page Header -->
             <div class="pdp-header" style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
                 <div class="pdp-header-inner" style="display: flex; align-items: center; gap: 16px; height: 64px;">
-                    <button class="pdp-back-btn" onclick="${(window.currentViewingClientId || policy.clientId) ? `window.location.hash='#clients/${encodeURIComponent(window.currentViewingClientId || policy.clientId)}'` : `window.location.hash='#policies'`}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                        <i class="fas fa-arrow-left"></i> ${(window.currentViewingClientId || policy.clientId) ? 'Back to Client' : 'Back to Policies'}
+                    <button class="pdp-back-btn" onclick="if(window._policyNavSource==='renewals'){window._policyNavSource=null;window.location.hash='#renewals';}else if(window.currentViewingClientId||'${policy.clientId}'){window.location.hash='#clients/'+encodeURIComponent(window.currentViewingClientId||'${policy.clientId}');}else{window.location.hash='#policies';}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                        <i class="fas fa-arrow-left"></i> ${window._policyNavSource==='renewals' ? 'Back to Renewals' : (window.currentViewingClientId || policy.clientId) ? 'Back to Client' : 'Back to Policies'}
                     </button>
                     ${policyTypeLabel ? `<span class="pdp-type-badge" style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
                     <h1 class="pdp-policy-num" style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
