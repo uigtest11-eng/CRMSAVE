@@ -14181,6 +14181,7 @@ function renderTasksTab() {
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
@@ -14191,6 +14192,23 @@ function renderTasksTab() {
     ];
 
     let tasks = savedTasks || defaultTasks;
+
+    // Inject 'Quote Direct Market' (id=13) for existing saved tasks that predate this task
+    if (tasks && !tasks.find(t => t.id === 13)) {
+        const insertAfter = tasks.findIndex(t => t.id === 5);
+        const newTask = { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' };
+        if (insertAfter !== -1) {
+            tasks = [...tasks.slice(0, insertAfter + 1), newTask, ...tasks.slice(insertAfter + 1)];
+        } else {
+            tasks = [...tasks, newTask];
+        }
+    }
+
+    // CSR users only see their subset of tasks (producer-only tasks are hidden)
+    const _taskSessionUser = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsrTaskUser = (_taskSessionUser.role || '') === 'csr';
+    const CSR_HIDDEN_TASK_IDS = [6, 7, 8, 9, 10, 11]; // producer-only tasks
+    const visibleTasks = _isCsrTaskUser ? tasks.filter(t => !CSR_HIDDEN_TASK_IDS.includes(t.id)) : tasks;
 
     // Check if this policy is marked as completed (localStorage only — server state
     // is reflected in task 12's completed flag once tasks are loaded)
@@ -14224,7 +14242,7 @@ function renderTasksTab() {
                 </div>
             </div>
             <div class="tasks-list">
-                ${tasks.map((task, index) => `
+                ${visibleTasks.map((task, index) => `
                     <div class="task-item ${task.completed ? 'completed' : ''}" data-task-id="${task.id || index}">
                         <div class="task-checkbox">
                             <input type="checkbox"
@@ -14572,6 +14590,7 @@ function toggleTask(taskId, policyId) {
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
@@ -14815,6 +14834,7 @@ function saveTaskNote(taskId, note, policyId) {
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
