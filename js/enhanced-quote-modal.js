@@ -1085,8 +1085,16 @@ window.createQuoteApplicationSimple = function(leadId) {
                         }
                         if (inputs[2]) inputs[2].value = driver.licenseNumber || driver.dlNumber || '';
                         if (inputs[3]) inputs[3].value = driver.state || driver.licenseState || '';
-                        if (inputs[4]) inputs[4].value = driver.yearsExperience || driver.cdlExperience || '';
-                        if (inputs[5]) inputs[5].value = driver.dateOfHire || '';
+                        if (inputs[4]) inputs[4].value = driver.yearsCommercialExperience || driver.yearsExperience || driver.cdlExperience || '';
+                        if (inputs[5]) {
+                            // Convert dateOfHire to YYYY-MM-DD for date input (handles MM/DD/YYYY)
+                            let _hireDate = driver.dateOfHire || '';
+                            if (_hireDate && !_hireDate.match(/^\d{4}-/)) {
+                                const _dp = _hireDate.split('/');
+                                if (_dp.length === 3) _hireDate = (_dp[2].length === 4 ? _dp[2] : '19' + _dp[2]) + '-' + _dp[0].padStart(2,'0') + '-' + _dp[1].padStart(2,'0');
+                            }
+                            inputs[5].value = _hireDate;
+                        }
                         if (inputs[6]) inputs[6].value = driver.accidents || driver.violations || '';
                         console.log(`👥 Populated driver row ${index + 1}: ${driver.name}`);
                     } else {

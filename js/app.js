@@ -40175,10 +40175,11 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         policy.drivers.forEach((driver, index) => {
             driverData.push({
                 name: driver.name || driver['Full Name'] || '',
-                dateOfBirth: driver.dateOfBirth || driver['Date of Birth'] || '',
-                licenseNumber: driver.licenseNumber || driver['License Number'] || '',
-                state: driver.state || '',
-                yearsExperience: driver.yearsExperience || '',
+                dateOfBirth: driver.dateOfBirth || driver.dob || driver['Date of Birth'] || '',
+                licenseNumber: driver.licenseNumber || driver.license || driver['License Number'] || '',
+                state: driver.state || driver.licenseState || '',
+                yearsCommercialExperience: driver.yearsCommercialExperience || driver.yearsExperience || '',
+                cdlLength: driver.cdlLength || '',
                 dateOfHire: driver.dateOfHire || '',
                 accidents: driver.accidents || driver['# Accidents/Violations'] || ''
             });
@@ -40303,6 +40304,8 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         isPolicyQuote: true,
         agent: policy.agent || '',
         renewalDate: _renewalEffDate,
+        radiusOfOperation: policy.operatingRadius || policy.radius || '',
+        commodityHauled: policy.commoditiesHauled || policy.commodities_hauled || policy.commodity_hauled || '',
         policyVehicles: vehicleData,
         policyTrailers: trailerData,
         policyDrivers: driverData
