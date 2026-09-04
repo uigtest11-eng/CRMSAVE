@@ -25157,6 +25157,7 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Value</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25166,6 +25167,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
                                                 <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -25217,6 +25219,8 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Date of Hire</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">CDL Exp</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25226,6 +25230,8 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.dateOfHire||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.cdlExpiration||'—'}</td>
                                         <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
                                     </tr>
                                 `).join('')}
@@ -25247,6 +25253,16 @@ function generateViewTabContent(tabId, policy) {
 
                         <!-- Right: Vehicles + Trailers + Drivers -->
                         <div>
+                            <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="operationsViewSection" data-policy-id="${_eQ(_pId)}">
+                                <h3 style="margin:0 0 14px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                                    <span><i class="fas fa-route" style="margin-right:7px;color:#374151;"></i>Operations</span>
+                                    <button onclick="window.operationsSave('${_eQ(_pId)}')" style="background:#059669;color:white;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:500;"><i class="fas fa-save" style="margin-right:4px;"></i>Save</button>
+                                </h3>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Operating Radius</label><input id="ops-radius" value="${_eQ(policy.operatingRadius||policy.radius||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Commodities Hauled</label><input id="ops-commodities" value="${_eQ(policy.commoditiesHauled||policy.commodities_hauled||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                </div>
+                            </div>
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                                     <span><i class="fas fa-truck" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
@@ -26301,6 +26317,7 @@ window.showVehicleDetailModal = function(startIndex) {
                             ${_inp('year','Year', get('year','Year'))}
                             ${_inp('make','Make', get('make','Make'))}
                             ${_inp('model','Model', get('model','Model'))}
+                            ${_inp('value','Value', get('value','Value'))}
                             ${_sel('bodyType','Body Type', get('bodyType','body_type','Bodytype'), BODY_TYPES)}
                             ${_inp('territory','Territory', get('territory','Territory'))}
                             ${_inp('gvwGcw','GVW / GCW', get('gvwGcw','gvw','Gvwgcw'))}
@@ -26447,7 +26464,7 @@ window.showVehicleDetailModal = function(startIndex) {
 
         const updated = Object.assign({}, vehicles[currentIdx], {
             vin: g('vin'), vehicleType: g('vehicleType'), year: g('year'), make: g('make'),
-            model: g('model'), bodyType: g('bodyType'), territory: g('territory'),
+            model: g('model'), value: g('value'), bodyType: g('bodyType'), territory: g('territory'),
             gvwGcw: g('gvwGcw'), class: g('class'), use: g('use'), radius: g('radius'),
             symAge: g('symAge'), seatCapacity: g('seatCapacity'), costNew: g('costNew'),
             cargoLimit: g('cargoLimit'), comment: g('comment'),
@@ -26508,6 +26525,30 @@ window.showVehicleDetailModal = function(startIndex) {
     renderModal();
 };
 // ─────────────────────────────────────────────────────────────────────────────
+
+window.operationsSave = async function(policyId) {
+    const radius = (document.getElementById('ops-radius')||{}).value || '';
+    const commodities = (document.getElementById('ops-commodities')||{}).value || '';
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
+    if (idx !== -1) {
+        policies[idx].operatingRadius = radius;
+        policies[idx].commoditiesHauled = commodities;
+        localStorage.setItem('insurance_policies', JSON.stringify(policies));
+        try {
+            const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const r = await fetch(`${API}/api/policies/${policyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                body: JSON.stringify(policies[idx])
+            });
+            if(typeof showNotification==='function') showNotification(r.ok ? 'Operations saved' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
+        } catch(e) {
+            if(typeof showNotification==='function') showNotification('Saved locally (offline)', 'warning');
+        }
+    }
+};
 
 // ─── Driver Detail Modal (Editable) ──────────────────────────────────────────
 window.showDriverDetailModal = function(startIndex) {
@@ -26618,6 +26659,9 @@ window.showDriverDetailModal = function(startIndex) {
                             ${_inp('licenseNumber','License #', get('licenseNumber','License Number','license','Licensenumber'))}
                             ${_inp('stateLicenseYear','State License Year', get('stateLicenseYear','Statelicenseyear','state_license_year'))}
                             ${_inp('originalLicenseDate','Orig. License Date', get('originalLicenseDate','Originallicensedate','original_license_date'))}
+                            ${_inp('dateOfHire','Date of Hire', get('dateOfHire','date_of_hire','Dateofhire'))}
+                            ${_inp('cdlLength','CDL Length (yrs)', get('cdlLength','cdl_length','Cdllength'))}
+                            ${_inp('cdlExpiration','CDL Expiration', get('cdlExpiration','cdl_expiration','Cdlexpiration'))}
                             ${_sH('Other','16px 0')}
                             ${_inp('yearsCommercialExperience','Years Commercial Exp', get('yearsCommercialExperience','Yearscommercialexperience','years_commercial_experience'))}
                             ${_inp('percentUse','Percent Use', get('percentUse','Percentuse','percent_use'))}
@@ -26654,6 +26698,7 @@ window.showDriverDetailModal = function(startIndex) {
             vehicleId: g('vehicleId'), licenseState: g('licenseState'), licenseNumber: g('licenseNumber'),
             'License Number': g('licenseNumber'),
             stateLicenseYear: g('stateLicenseYear'), originalLicenseDate: g('originalLicenseDate'),
+            dateOfHire: g('dateOfHire'), cdlLength: g('cdlLength'), cdlExpiration: g('cdlExpiration'),
             yearsCommercialExperience: g('yearsCommercialExperience'), percentUse: g('percentUse'),
             comment: g('comment'),
             dateAdded: g('dateAdded'), effectiveDateAdded: g('effectiveDateAdded'),
