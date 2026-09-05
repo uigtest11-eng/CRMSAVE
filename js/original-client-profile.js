@@ -564,6 +564,14 @@ window.viewClientOriginal = async function(id) {
                                         <span style="background: ${isActive ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'linear-gradient(135deg, #9ca3af 0%, #6b7280 100%)'}; color: white; padding: 6px 12px; border-radius: 20px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
                                             Client Portal ${isActive ? 'Active' : 'Inactive'}
                                         </span>
+                                        ${(() => {
+                                            const _lc = currentStatus.toLowerCase().replace(/[-_]/g, ' ').trim();
+                                            const _SMAP = {'active':'Active','cancelled':'Cancelled','canceled':'Cancelled','expired':'Expired','pending cancel':'Pending Cancel','cancel pending':'Pending Cancel','pending quote':'Pending Quote','submitted quote':'Submitted Quote','quoted':'Quoted','quote declined':'Quote Declined','pending renewal':'Pending Renewal','renewal quote':'Renewal Quote','prior generation':'Prior Generation','deleted':'Deleted'};
+                                            const _label = _SMAP[_lc] || currentStatus || 'Active';
+                                            const _COLORS = {'Active':'#10b981','Cancelled':'#dc2626','Expired':'#f59e0b','Pending Cancel':'#f59e0b','Pending Renewal':'#3b82f6','Renewal Quote':'#8b5cf6','Pending Quote':'#3b82f6','Submitted Quote':'#3b82f6','Quoted':'#3b82f6','Quote Declined':'#ef4444','Prior Generation':'#6b7280','Deleted':'#6b7280'};
+                                            const _bg = _COLORS[_label] || '#6b7280';
+                                            return `<span style="background:${_bg};color:white;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">${_label}</span>`;
+                                        })()}
                                     </div>
                                 </div>
 
