@@ -1037,7 +1037,7 @@ window.createQuoteApplicationSimple = function(leadId) {
                         const inputs = truckRows[index].querySelectorAll('input');
                         if (inputs[0]) inputs[0].value = vehicle.year || '';
                         if (inputs[1]) inputs[1].value = `${vehicle.make || ''} ${vehicle.model || ''}`.trim();
-                        if (inputs[2]) inputs[2].value = vehicle.type || 'Semi Truck';
+                        if (inputs[2]) inputs[2].value = vehicle.bodyType || vehicle.type || 'Semi Truck';
                         if (inputs[3]) inputs[3].value = vehicle.vin || '';
                         if (inputs[4]) inputs[4].value = vehicle.value || '';
                         if (inputs[5]) inputs[5].value = vehicle.radius || lead.radiusOfOperation || '';
@@ -1056,7 +1056,7 @@ window.createQuoteApplicationSimple = function(leadId) {
                         const inputs = trailerRows[index].querySelectorAll('input');
                         if (inputs[0]) inputs[0].value = trailer.year || '';
                         if (inputs[1]) inputs[1].value = `${trailer.make || ''} ${trailer.model || ''}`.trim();
-                        if (inputs[2]) inputs[2].value = trailer.type || '';
+                        if (inputs[2]) inputs[2].value = trailer.bodyType || trailer.type || '';
                         if (inputs[3]) inputs[3].value = trailer.vin || '';
                         if (inputs[4]) inputs[4].value = trailer.value || '';
                         if (inputs[5]) inputs[5].value = lead.radiusOfOperation || '';
@@ -1121,12 +1121,19 @@ window.createQuoteApplicationSimple = function(leadId) {
                     }
                 });
 
-                // Auto-populate class of risk based on commodities
+                // Auto-populate class of risk based on vehicle/trailer types (and commodities as fallback)
                 setTimeout(() => {
-                    populateClassOfRisk(modal, commoditiesToPopulate);
+                    populateClassOfRisk(modal, commoditiesToPopulate, vehiclesToPopulate, trailersToPopulate);
                 }, 100);
             } else {
-                console.log('📦 No commodities found in lead data');
+                // Still try to populate class of risk from vehicle/trailer types even without commodities
+                if (vehiclesToPopulate.length > 0 || trailersToPopulate.length > 0) {
+                    setTimeout(() => {
+                        populateClassOfRisk(modal, [], vehiclesToPopulate, trailersToPopulate);
+                    }, 100);
+                } else {
+                    console.log('📦 No commodities found in lead data');
+                }
             }
 
             console.log('✅ Auto-population completed');
@@ -3840,148 +3847,127 @@ document.addEventListener('DOMContentLoaded', function() {
     observer.observe(document.body, { childList: true, subtree: true });
 });
 
-// Function to auto-populate Class of Risk based on commodity types
-function populateClassOfRisk(modal, commodities) {
-    console.log('🎯 Auto-populating Class of Risk based on commodities:', commodities);
+// Function to auto-populate Class of Risk based on vehicle/trailer types (primary) or commodities (fallback)
+function populateClassOfRisk(modal, commodities, vehicles, trailers) {
+    vehicles = vehicles || [];
+    trailers = trailers || [];
+    console.log('🎯 Auto-populating Class of Risk | vehicles:', vehicles.length, '| trailers:', trailers.length, '| commodities:', commodities.length);
 
-    // Define mapping from commodities to class of risk categories
-    const commodityToRiskMapping = {
-        // Dry Van commodities
-        'general freight': 'Dry Van',
-        'consumer goods': 'Dry Van',
-        'packaged goods': 'Dry Van',
-        'retail goods': 'Dry Van',
-        'clothing': 'Dry Van',
-        'textiles': 'Dry Van',
-        'paper products': 'Dry Van',
-        'food products': 'Dry Van',
-        'beverages': 'Dry Van',
-
-        // Flatbed commodities (matching "Flat Bed" in the form)
-        'construction materials': 'Flat Bed',
-        'building materials': 'Flat Bed',
-        'steel': 'Flat Bed',
-        'lumber': 'Flat Bed',
-        'pipes': 'Flat Bed',
-        'machinery': 'Flat Bed',
-        'equipment': 'Flat Bed',
-        'metal products': 'Flat Bed',
-        'coils': 'Flat Bed',
-        'structural steel': 'Flat Bed',
-
-        // Reefer commodities
-        'refrigerated': 'Reefer',
-        'frozen': 'Reefer',
-        'perishable': 'Reefer',
-        'dairy': 'Reefer',
-        'meat': 'Reefer',
-        'produce': 'Reefer',
-        'pharmaceuticals': 'Reefer',
-        'temperature controlled': 'Reefer',
-        'fresh produce': 'Reefer',
-
-        // Auto Hauler commodities
-        'vehicles': 'Auto Hauler',
-        'cars': 'Auto Hauler',
-        'automobiles': 'Auto Hauler',
-        'auto': 'Auto Hauler',
-
-        // Box Truck commodities
-        'local delivery': 'Box Truck',
-        'packages': 'Box Truck',
-        'small freight': 'Box Truck',
-
-        // Dump Truck commodities
-        'aggregate': 'Dump Truck',
-        'sand': 'Dump Truck',
-        'gravel': 'Dump Truck',
-        'dirt': 'Dump Truck',
-        'rock': 'Dump Truck',
-        'demolition': 'Dump Truck',
-
-        // Hopper-Bottom Trailer commodities
-        'grain': 'Hopper-Bottom Trailer',
-        'wheat': 'Hopper-Bottom Trailer',
-        'corn': 'Hopper-Bottom Trailer',
-        'soybeans': 'Hopper-Bottom Trailer',
-        'feed': 'Hopper-Bottom Trailer',
-        'seed': 'Hopper-Bottom Trailer',
-        'fertilizer': 'Hopper-Bottom Trailer',
-        'agricultural': 'Hopper-Bottom Trailer'
+    // ── Trailer bodyType → Class of Risk label (form field label must match exactly) ──
+    const trailerTypeToRisk = (bt) => {
+        const t = (bt || '').toLowerCase().trim();
+        if (t.includes('reefer') || t.includes('refrigerat')) return 'Reefer';
+        if (t.includes('flatbed') || t === 'flat bed' || t.includes('flat-bed')) return 'Flatbed';
+        if (t.includes('hopper')) return 'Hopper-Bottom Trailer';
+        if (t.includes('dump trailer') || t.includes('dump semi') || t.includes('dump s')) return 'Dump Trailer';
+        if (t.includes('car hauler') || t.includes('auto hauler')) return 'Auto Hauler';
+        if (t.includes('tanker') || t.includes('tank')) return 'Tanker';
+        if (t.includes('heavy haul')) return 'Heavy Haul';
+        // Default for dry van / semi / generic trailers
+        return 'Dry Van';
     };
 
-    // Count occurrences of each risk category
-    const riskCategoryCounts = {};
+    // ── Vehicle bodyType → Class of Risk label (only box truck & dump truck map from vehicles) ──
+    const vehicleTypeToRisk = (bt, make) => {
+        const t = (bt || '').toLowerCase().trim();
+        const m = (make || '').toLowerCase().trim();
+        if (t.includes('box truck') || t.includes('box van') || t === 'step van' || m === 'box truck') return 'Box Truck';
+        if (t.includes('dump truck') || t === 'small dump truck' || t === 'large dump truck') return 'Dumptruck';
+        return null; // tractors/trucks without specific box/dump type don't add to class of risk
+    };
 
-    commodities.forEach(commodity => {
-        const lowerCommodity = commodity.toLowerCase().trim();
+    const riskCounts = {};
 
-        // Find matching risk category
-        let matchedCategory = null;
-        for (const [key, category] of Object.entries(commodityToRiskMapping)) {
-            if (lowerCommodity.includes(key) || key.includes(lowerCommodity)) {
-                matchedCategory = category;
-                break;
+    // ── Primary: use actual vehicle/trailer types ──
+    const hasUnits = vehicles.length > 0 || trailers.length > 0;
+    if (hasUnits) {
+        // Count box trucks / dump trucks from vehicles
+        vehicles.forEach(v => {
+            const cat = vehicleTypeToRisk(v.bodyType || v.BodyType || v.body_type || v.vehicleType || v.type || '', v.make || v.Make || '');
+            if (cat) {
+                riskCounts[cat] = (riskCounts[cat] || 0) + 1;
+                console.log(`🚛 Vehicle "${v.make||''} ${v.model||''}" (${v.bodyType||'—'}) → ${cat}`);
             }
-        }
+        });
 
-        // Default to Dry Van if no specific match found
-        if (!matchedCategory) {
-            matchedCategory = 'Dry Van';
-        }
-
-        riskCategoryCounts[matchedCategory] = (riskCategoryCounts[matchedCategory] || 0) + 1;
-        console.log(`📦 Commodity "${commodity}" → ${matchedCategory}`);
-    });
-
-    // Calculate percentages for each risk category
-    const totalCommodities = commodities.length;
-    const riskPercentages = {};
-
-    Object.keys(riskCategoryCounts).forEach(category => {
-        const count = riskCategoryCounts[category];
-        const percentage = Math.floor((count / totalCommodities) * 100);
-        riskPercentages[category] = percentage;
-    });
-
-    // Distribute any remaining percentage to the most common category
-    const totalAssigned = Object.values(riskPercentages).reduce((sum, pct) => sum + pct, 0);
-    const remaining = 100 - totalAssigned;
-
-    if (remaining > 0) {
-        // Find the category with the highest count
-        const mostCommonCategory = Object.keys(riskCategoryCounts).reduce((a, b) =>
-            riskCategoryCounts[a] > riskCategoryCounts[b] ? a : b
-        );
-        riskPercentages[mostCommonCategory] += remaining;
+        // Count trailers by type
+        trailers.forEach(v => {
+            const cat = trailerTypeToRisk(v.bodyType || v.BodyType || v.body_type || v.vehicleType || v.type || '');
+            riskCounts[cat] = (riskCounts[cat] || 0) + 1;
+            console.log(`🚚 Trailer "${v.make||''} ${v.model||''}" (${v.bodyType||'—'}) → ${cat}`);
+        });
     }
+
+    // ── Fallback: commodity-based mapping (only if no units found) ──
+    if (!hasUnits && commodities.length > 0) {
+        const commodityToRisk = {
+            'general freight': 'Dry Van', 'consumer goods': 'Dry Van', 'packaged goods': 'Dry Van',
+            'retail goods': 'Dry Van', 'clothing': 'Dry Van', 'textiles': 'Dry Van',
+            'paper products': 'Dry Van', 'food products': 'Dry Van', 'beverages': 'Dry Van',
+            'construction materials': 'Flatbed', 'building materials': 'Flatbed', 'steel': 'Flatbed',
+            'lumber': 'Flatbed', 'pipes': 'Flatbed', 'machinery': 'Flatbed',
+            'equipment': 'Flatbed', 'metal products': 'Flatbed', 'coils': 'Flatbed',
+            'refrigerated': 'Reefer', 'frozen': 'Reefer', 'perishable': 'Reefer',
+            'dairy': 'Reefer', 'meat': 'Reefer', 'produce': 'Reefer',
+            'pharmaceuticals': 'Reefer', 'temperature controlled': 'Reefer',
+            'vehicles': 'Auto Hauler', 'cars': 'Auto Hauler', 'automobiles': 'Auto Hauler',
+            'local delivery': 'Box Truck', 'packages': 'Box Truck', 'small freight': 'Box Truck',
+            'aggregate': 'Dumptruck', 'sand': 'Dumptruck', 'gravel': 'Dumptruck',
+            'dirt': 'Dumptruck', 'rock': 'Dumptruck', 'demolition': 'Dumptruck',
+            'grain': 'Hopper-Bottom Trailer', 'wheat': 'Hopper-Bottom Trailer',
+            'corn': 'Hopper-Bottom Trailer', 'soybeans': 'Hopper-Bottom Trailer',
+            'feed': 'Hopper-Bottom Trailer', 'fertilizer': 'Hopper-Bottom Trailer'
+        };
+        commodities.forEach(commodity => {
+            const lc = commodity.toLowerCase().trim();
+            let cat = null;
+            for (const [key, risk] of Object.entries(commodityToRisk)) {
+                if (lc.includes(key) || key.includes(lc)) { cat = risk; break; }
+            }
+            if (!cat) cat = 'Dry Van';
+            riskCounts[cat] = (riskCounts[cat] || 0) + 1;
+            console.log(`📦 Commodity "${commodity}" → ${cat}`);
+        });
+    }
+
+    if (Object.keys(riskCounts).length === 0) {
+        console.log('🎯 No data to populate Class of Risk');
+        return;
+    }
+
+    // ── Calculate balanced percentages ──
+    const total = Object.values(riskCounts).reduce((s, n) => s + n, 0);
+    const riskPercentages = {};
+    let assigned = 0;
+    const sortedCats = Object.keys(riskCounts).sort((a, b) => riskCounts[b] - riskCounts[a]);
+    sortedCats.forEach((cat, idx) => {
+        if (idx === sortedCats.length - 1) {
+            riskPercentages[cat] = 100 - assigned; // give remainder to last category
+        } else {
+            const pct = Math.floor((riskCounts[cat] / total) * 100);
+            riskPercentages[cat] = pct;
+            assigned += pct;
+        }
+    });
 
     console.log('🎯 Calculated risk percentages:', riskPercentages);
 
-    // Now populate the Class of Risk fields
+    // ── Populate form fields ──
     setTimeout(() => {
         Object.keys(riskPercentages).forEach(category => {
             const percentage = riskPercentages[category];
-
-            // Find the input field for this risk category
             const inputs = modal.querySelectorAll('input[type="text"]');
-
             inputs.forEach(input => {
                 const parentText = input.parentElement?.textContent || '';
                 const grandparentText = input.parentElement?.parentElement?.textContent || '';
-
-                // Check if this input corresponds to our risk category
                 if (parentText.includes(category) || grandparentText.includes(category)) {
                     input.value = percentage + '%';
                     console.log(`🎯 Set ${category} to ${percentage}%`);
-
-                    // Trigger any change events
                     input.dispatchEvent(new Event('input', { bubbles: true }));
                     input.dispatchEvent(new Event('change', { bubbles: true }));
                 }
             });
         });
-
         console.log('✅ Class of Risk auto-population completed');
     }, 100);
 }

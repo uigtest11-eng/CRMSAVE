@@ -24884,6 +24884,7 @@ function generateViewTabContent(tabId, policy) {
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">Type</th>
                                         <th style="padding:7px 8px;width:36px;"></th>
                                     </tr>
                                 </thead>
@@ -24893,6 +24894,7 @@ function generateViewTabContent(tabId, policy) {
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'—'}</td>
                                             <td style="padding:4px 6px;text-align:center;">
                                                 <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View details">
                                                     <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -24953,6 +24955,7 @@ function generateViewTabContent(tabId, policy) {
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">State</th>
                                         <th style="padding:7px 8px;width:36px;"></th>
                                     </tr>
                                 </thead>
@@ -24962,6 +24965,7 @@ function generateViewTabContent(tabId, policy) {
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${d.licenseState||d['License State']||d.state||'—'}</td>
                                             <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
                                         </tr>
                                     `).join('')}
@@ -24973,6 +24977,20 @@ function generateViewTabContent(tabId, policy) {
         }
             
         case 'coverage': {
+            // Resolve ops fields: policy first, fallback to linked lead/client
+            const _opsClientId = policy.clientId || policy.leadId || '';
+            const _opsLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const _opsLead = _opsClientId ? _opsLeads.find(l => String(l.id) === String(_opsClientId)) : null;
+            const _opsCompany = policy.insuredName || policy.companyName || (_opsLead && (_opsLead.businessName || _opsLead.companyName || _opsLead.name)) || '';
+            const _opsDot = policy.dotNumber || policy.dot_number || (_opsLead && (_opsLead.dotNumber || _opsLead.dot_number || _opsLead.dot)) || '';
+            const _opsEmail = policy.email || policy.emailAddress || (_opsLead && (_opsLead.email || _opsLead.emailAddress)) || '';
+            const _opsPhone = policy.phone || policy.businessPhone || (_opsLead && (_opsLead.phone || _opsLead.phoneNumber || _opsLead.businessPhone)) || '';
+            const _opsYearsInBusiness = policy.yearsInBusiness || (_opsLead && (_opsLead.yearsInBusiness || _opsLead.years_in_business)) || '';
+            const _opsCommRaw = policy.commoditiesHauled || policy.commodities_hauled || '';
+            const _opsCommList = (() => { try { const p = JSON.parse(_opsCommRaw); if (Array.isArray(p)) return p; } catch(e) {} return _opsCommRaw.split(',').map(s => s.trim()).filter(Boolean); })();
+            const _opsCommHidden = _opsCommList.join(',');
+            const _opsEsc = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+            const _opsCommPillsHTML = _opsCommList.map(c => `<span class="ops-comm-pill" style="display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#3730a3;border-radius:20px;padding:3px 10px 3px 10px;font-size:12px;font-weight:500;"><span>${_opsEsc(c)}</span><button type="button" onclick="this.closest('.ops-comm-pill').remove();window._opsCommSync();" style="background:none;border:none;color:#6366f1;cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;">×</button></span>`).join('');
             const isCommercialAuto = policy.policyType === 'commercial-auto';
             const coverageData = policy.coverage || {};
             const alData = coverageData.automotiveLiability || {};
@@ -25177,6 +25195,7 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Type</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Value</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
@@ -25187,6 +25206,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
@@ -25207,6 +25227,7 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Type</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Value</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
@@ -25217,6 +25238,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View trailer details">
@@ -25241,6 +25263,7 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">State</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Date of Hire</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">CDL Length</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Yrs Exp</th>
@@ -25253,6 +25276,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.licenseState||d['License State']||d.state||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d.dateOfHire||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d.cdlLength||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d.yearsCommercialExperience||d.yearsExperience||'—'}</td>
@@ -25283,8 +25307,13 @@ function generateViewTabContent(tabId, policy) {
                                     <button onclick="window.operationsSave('${_eQ(_pId)}')" style="background:#059669;color:white;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:500;"><i class="fas fa-save" style="margin-right:4px;"></i>Save</button>
                                 </h3>
                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Company Name</label><input id="ops-company-name" value="${_eQ(_opsCompany)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">DOT Number</label><input id="ops-dot" value="${_eQ(_opsDot)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Email</label><input id="ops-email" value="${_eQ(_opsEmail)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Phone Number</label><input id="ops-phone" value="${_eQ(_opsPhone)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Years in Business</label><input id="ops-years-in-business" value="${_eQ(_opsYearsInBusiness)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
                                     <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Operating Radius</label><input id="ops-radius" value="${_eQ(policy.operatingRadius||policy.radius||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
-                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Commodities Hauled</label><input id="ops-commodities" value="${_eQ(policy.commoditiesHauled||policy.commodities_hauled||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div style="grid-column:1/-1;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Commodities Hauled</label><div style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;background:#fff;min-height:36px;"><div id="ops-comm-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:${_opsCommList.length?'6px':'0'}">${_opsCommPillsHTML}</div><input id="ops-comm-text" type="text" placeholder="Type commodity, press Enter to add…" onkeydown="window._opsCommAddTag(event)" style="border:none;outline:none;width:100%;font-size:13px;color:#111827;padding:0;background:transparent;"></div><input id="ops-commodities" type="hidden" value="${_eQ(_opsCommHidden)}"></div>
                                 </div>
                             </div>
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
@@ -26245,7 +26274,7 @@ window.showVehicleDetailModal = function(startIndex) {
 
     const _eH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
-    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Hopper-Bottom Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
+    const BODY_TYPES = ['','Dry Van','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Hopper-Bottom Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
     const STATES = ['','AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','INTL'];
 
     const IS = 'width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;';
@@ -26548,14 +26577,49 @@ window.showVehicleDetailModal = function(startIndex) {
 
     renderModal();
 };
+// ─── Commodity Tag Input Helpers ──────────────────────────────────────────────
+window._opsCommSync = function() {
+    const tags = document.querySelectorAll('#ops-comm-tags .ops-comm-pill span:first-child');
+    const val = Array.from(tags).map(s => s.textContent.trim()).filter(Boolean).join(',');
+    const hidden = document.getElementById('ops-commodities');
+    if (hidden) hidden.value = val;
+};
+
+window._opsCommAddTag = function(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const input = event.target;
+    const text = input.value.trim();
+    if (!text) return;
+    const container = document.getElementById('ops-comm-tags');
+    if (!container) return;
+    const pill = document.createElement('span');
+    pill.className = 'ops-comm-pill';
+    pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#3730a3;border-radius:20px;padding:3px 10px 3px 10px;font-size:12px;font-weight:500;';
+    pill.innerHTML = `<span>${text}</span><button type="button" onclick="this.closest('.ops-comm-pill').remove();window._opsCommSync();" style="background:none;border:none;color:#6366f1;cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;">×</button>`;
+    container.appendChild(pill);
+    input.value = '';
+    window._opsCommSync();
+};
 // ─────────────────────────────────────────────────────────────────────────────
 
 window.operationsSave = async function(policyId) {
+    const companyName = (document.getElementById('ops-company-name')||{}).value || '';
+    const dotNumber = (document.getElementById('ops-dot')||{}).value || '';
+    const email = (document.getElementById('ops-email')||{}).value || '';
+    const phone = (document.getElementById('ops-phone')||{}).value || '';
+    const yearsInBusiness = (document.getElementById('ops-years-in-business')||{}).value || '';
     const radius = (document.getElementById('ops-radius')||{}).value || '';
     const commodities = (document.getElementById('ops-commodities')||{}).value || '';
     const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
     const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
     if (idx !== -1) {
+        policies[idx].insuredName = companyName;
+        policies[idx].companyName = companyName;
+        policies[idx].dotNumber = dotNumber;
+        policies[idx].email = email;
+        policies[idx].phone = phone;
+        policies[idx].yearsInBusiness = yearsInBusiness;
         policies[idx].operatingRadius = radius;
         policies[idx].commoditiesHauled = commodities;
         localStorage.setItem('insurance_policies', JSON.stringify(policies));
@@ -40177,7 +40241,8 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                 make: vehicle.Make || vehicle.make || '',
                 model: vehicle.Model || vehicle.model || '',
                 vin: vehicle.VIN || vehicle.vin || '',
-                type: vehicle.Type || vehicle.type || '',
+                bodyType: vehicle.bodyType || vehicle.BodyType || vehicle.body_type || '',
+                type: vehicle.Type || vehicle.type || vehicle.bodyType || vehicle.BodyType || '',
                 value: vehicle.Value || vehicle.value || '',
                 radius: vehicle.Radius || vehicle.radius || ''
             };
@@ -40243,6 +40308,11 @@ window.createQuoteApplicationForPolicy = function(policyId) {
     const foundContacts = findContactInfo(policy, ['phone', 'email', 'address']);
     console.log('🔍 Found contact information in policy:', foundContacts);
 
+    // Look up linked lead record as fallback source for contact/DOT info
+    const _qaLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const _qaClientId = policy.clientId || policy.leadId || '';
+    const _qaLead = _qaClientId ? _qaLeads.find(l => String(l.id) === String(_qaClientId)) : null;
+
     // Extract contact information with multiple fallbacks
     const extractedPhone = policy.insured?.['Business Phone'] ||
                            policy.insured?.['Phone'] ||
@@ -40252,6 +40322,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                            policy.phone ||
                            policy.businessPhone ||
                            foundContacts.phone ||
+                           (_qaLead && (_qaLead.phone || _qaLead.phoneNumber || _qaLead.businessPhone)) ||
                            '';
 
     const extractedEmail = policy.insured?.['Email'] ||
@@ -40261,6 +40332,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                           policy.email ||
                           policy.emailAddress ||
                           foundContacts.email ||
+                          (_qaLead && (_qaLead.email || _qaLead.emailAddress)) ||
                           '';
 
     const extractedAddress = policy.insured?.['Mailing Address'] ||
@@ -40271,6 +40343,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                             policy.address ||
                             policy.mailingAddress ||
                             foundContacts.address ||
+                            (_qaLead && (_qaLead.address || _qaLead.mailingAddress)) ||
                             '';
 
     console.log('📞 Extracted contact info:', {
@@ -40285,13 +40358,20 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                               policy.insured?.['DOT Number'] ||
                               policy.dot ||
                               policy.usdot ||
+                              (_qaLead && (_qaLead.dotNumber || _qaLead.dot || _qaLead.usdot)) ||
                               '';
 
     const extractedMcNumber = policy.mcNumber ||
                              policy.insured?.['MC #'] ||
                              policy.insured?.['MC Number'] ||
                              policy.mc ||
+                             (_qaLead && (_qaLead.mcNumber || _qaLead.mc)) ||
                              '';
+
+    const extractedYearsInBusiness = policy.yearsInBusiness ||
+                                    policy.insured?.['Years in Business'] ||
+                                    (_qaLead && (_qaLead.yearsInBusiness || _qaLead.years_in_business)) ||
+                                    '';
 
     console.log('🚛 Extracted DOT/MC info:', {
         dotNumber: extractedDotNumber,
@@ -40320,12 +40400,13 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         dotNumber: extractedDotNumber,
         mcNumber: extractedMcNumber,
         usdot: extractedDotNumber, // Also set usdot for compatibility
+        yearsInBusiness: extractedYearsInBusiness,
         policyId: policyId,
         isPolicyQuote: true,
         agent: policy.agent || '',
         renewalDate: _renewalEffDate,
         radiusOfOperation: policy.operatingRadius || policy.radius || '',
-        commodityHauled: policy.commoditiesHauled || policy.commodities_hauled || policy.commodity_hauled || '',
+        commodityHauled: (() => { const _cr = policy.commoditiesHauled || policy.commodities_hauled || policy.commodity_hauled || ''; try { const _cp = JSON.parse(_cr); if (Array.isArray(_cp)) return _cp.join(','); } catch(e) {} return _cr; })(),
         policyVehicles: vehicleData,
         policyTrailers: trailerData,
         policyDrivers: driverData
