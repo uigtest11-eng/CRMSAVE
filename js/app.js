@@ -20910,6 +20910,9 @@ async function _ivansAddClientNote(clientId, noteText) {
         const ci = clients.findIndex(c => String(c.id) === String(clientId));
         if (ci < 0) return;
         if (!Array.isArray(clients[ci].notesLog)) clients[ci].notesLog = [];
+        // Deduplicate: skip if an identical note already exists (prevents duplicate notes on repeated IVANS imports)
+        const _noteExists = clients[ci].notesLog.some(n => n.text === noteText && n.source === 'ivans');
+        if (_noteExists) return;
         clients[ci].notesLog.push({ text: noteText, date: new Date().toISOString(), source: 'ivans' });
         localStorage.setItem('insurance_clients', JSON.stringify(clients));
         fetch('/api/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clients[ci]) }).catch(() => {});
@@ -22387,13 +22390,17 @@ async function viewClient(id) {
     });
     
     // Format client data for display
+    const _clientBizName = client.businessName || client.companyName || client.company || '';
+    const _clientDisplayName = _clientBizName || client.name;
+    const _clientOwnerName = _clientBizName ? client.name : '';
     const clientData = {
-        name: client.name,
+        name: _clientDisplayName,
+        ownerName: _clientOwnerName,
         type: client.type || 'Personal',
         phone: client.phone,
         email: client.email,
         address: client.address || 'No address on file',
-        company: client.company || '',
+        company: _clientOwnerName,
         accountManager: client.accountManager || 'Unassigned',
         clientSince: client.createdAt ? new Date(client.createdAt).toLocaleDateString() : 'N/A',
         totalPremium: calculatedTotalPremium > 0 ? `$${calculatedTotalPremium.toLocaleString()}/yr` : '$0/yr',
@@ -24480,7 +24487,7 @@ function showPolicyDetailsModal(policy) {
                         ${policy.policyStatus || policy.status || 'Active'}
                     </span>
                     ${policy.carrier ? `<span class="pdp-carrier" style="color: #374151; font-size: 15px; font-weight: 600;"><i class="fas fa-building" style="color:#6b7280;margin-right:6px;"></i>${policy.carrier}</span>` : ''}
-                    ${policy.clientName ? `<span class="pdp-client" style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.clientName}</span>` : ''}
+                    ${(policy.insuredName || policy.client || policy.clientName) ? `<span class="pdp-client" style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.insuredName || policy.client || policy.clientName}</span>` : ''}
                 </div>
                 <div class="pdp-actions" style="display: flex; gap: 10px;">
                     <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
@@ -24865,9 +24872,15 @@ function generateViewTabContent(tabId, policy) {
             const _vehDataAttrV = _allUnitsV.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(_allUnitsV))}"` : '';
             const _TRL_MAKES_V = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
             const _TRL_VIN_V = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+            const _decodeBodyType = (raw) => {
+                const IVANS_CODES = {'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','bk':'Bus','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};
+                const s = (raw || '').trim();
+                const lc = s.toLowerCase();
+                return IVANS_CODES[lc] || s;
+            };
             const _isTrailerV = (v) => {
                 const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
-                if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                if (bt === 'tr' || bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
                 const make = (v.make || v.Make || '').toLowerCase().trim();
                 if (_TRL_MAKES_V.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
                 if (make === 'mac') return true;
@@ -24894,7 +24907,7 @@ function generateViewTabContent(tabId, policy) {
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
-                                            <td style="padding:7px 8px;color:#374151;">${v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${_decodeBodyType(v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type)||'—'}</td>
                                             <td style="padding:4px 6px;text-align:center;">
                                                 <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View details">
                                                     <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -25173,7 +25186,7 @@ function generateViewTabContent(tabId, policy) {
                 const _TRAILER_VIN_PFX = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
                 const _isTrailerBT = (v) => {
                     const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
-                    if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                    if (bt === 'tr' || bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
                     const make = (v.make || v.Make || '').toLowerCase().trim();
                     if (_TRAILER_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
                     if (make === 'mac') return true;
@@ -25206,7 +25219,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
-                                        <td style="padding:7px 8px;color:#374151;">${v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${(()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'';return _IC[_r.toLowerCase()]||_r||'—';})()}</td>
                                         <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
@@ -25238,7 +25251,7 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
-                                        <td style="padding:7px 8px;color:#374151;">${v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${(()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'';return _IC[_r.toLowerCase()]||_r||'—';})()}</td>
                                         <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View trailer details">
@@ -40226,7 +40239,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
     const _QA_TRL_VIN = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
     const _isTrailerQA = (v) => {
         const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
-        if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+        if (bt === 'tr' || bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
         const make = (v.make || v.Make || '').toLowerCase().trim();
         if (_QA_TRL_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
         if (make === 'mac') return true;
@@ -40241,8 +40254,8 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                 make: vehicle.Make || vehicle.make || '',
                 model: vehicle.Model || vehicle.model || '',
                 vin: vehicle.VIN || vehicle.vin || '',
-                bodyType: vehicle.bodyType || vehicle.BodyType || vehicle.body_type || '',
-                type: vehicle.Type || vehicle.type || vehicle.bodyType || vehicle.BodyType || '',
+                bodyType: (()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=vehicle.bodyType||vehicle.BodyType||vehicle.body_type||'';return _IC[_r.toLowerCase()]||_r;})(),
+                type: vehicle.Type || vehicle.type || (()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=vehicle.bodyType||vehicle.BodyType||vehicle.body_type||'';return _IC[_r.toLowerCase()]||_r;})(),
                 value: vehicle.Value || vehicle.value || '',
                 radius: vehicle.Radius || vehicle.radius || ''
             };
