@@ -24741,6 +24741,13 @@ function generateViewTabContent(tabId, policy) {
             const producers = policy.producers || [];
             const prod1 = producers[0] || {}; const prod2 = producers[1] || {}; const prod3 = producers[2] || {};
             const statusOpts = ['','Pending Quote','Submitted Quote','Quoted','Quote Declined','Active','Pending Cancel','Expired','Cancelled','Pending Renewal','Renewal Quote','Prior Generation','Deleted'];
+            // Normalize stored policyStatus (may be lowercase or use different word order) to match option values
+            const _normPolStatus = (s) => {
+                if (!s) return '';
+                const lc = s.toLowerCase().replace(/[-_]/g, ' ').trim();
+                const MAP = {'active':'Active','cancelled':'Cancelled','canceled':'Cancelled','expired':'Expired','pending cancel':'Pending Cancel','cancel pending':'Pending Cancel','pending quote':'Pending Quote','submitted quote':'Submitted Quote','quoted':'Quoted','quote declined':'Quote Declined','pending renewal':'Pending Renewal','renewal quote':'Renewal Quote','prior generation':'Prior Generation','deleted':'Deleted'};
+                return MAP[lc] || statusOpts.find(o => o && o.toLowerCase() === lc) || s;
+            };
             const termOpts = ['','12 Months','6 Months','Custom'];
             const payTypeOpts = ['','Agency Bill','Company Pay Plan','Direct Bill','Mortgagee Bill','Paid In Full','Premium Finance','Other'];
             const payFreqOpts = ['','Annual','Semi-Annual','Quarterly','Bi-Monthly','Monthly'];
@@ -24773,7 +24780,7 @@ function generateViewTabContent(tabId, policy) {
                     <div class="pdp-card pdp-status-card" style="grid-column:1/-1;padding:16px 20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         ${_hOV('Status')}
                         <div class="pdp-status-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:0 16px;">
-                            <div>${_sOV('policyStatus','Policy Status', policy.policyStatus||'', statusOpts)}</div>
+                            <div>${_sOV('policyStatus','Policy Status', _normPolStatus(policy.policyStatus||policy.status||''), statusOpts)}</div>
                             <div>${_sOV('newRenewal','New / Renewal', policy.newRenewal||'', newRenewalOpts)}</div>
                             <div>${_fOV('rewrite','Rewrite Policy #', policy.rewrite||'')}</div>
                             <div>${_sOV('source','Source', policy.source||'', sourceOpts)}</div>
