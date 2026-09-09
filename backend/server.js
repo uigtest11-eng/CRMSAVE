@@ -3884,6 +3884,46 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 if (parsedTrailers.length) console.log(`🚛 Parsed ${parsedTrailers.length} trailer(s) from comments`);
             }
 
+            // ── Parse OWNERS INFO + DRIVERS INFO into drivers array ──
+            const parsedDriversList = [];
+            if (comments) {
+                // Helper: convert MM/DD/YYYY to YYYY-MM-DD for date inputs; return as-is otherwise
+                const toISODate = (raw) => {
+                    if (!raw) return '';
+                    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                    if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+                    return raw;
+                };
+                // Owner block
+                const ownerBlock = (comments.match(/OWNERS INFO[^\n]*\n([\s\S]*?)(?=---OPERATION|--DRIVERS|-----UNITS|$)/i) || [])[1] || '';
+                if (ownerBlock) {
+                    const oName = (ownerBlock.match(/Name:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                    const oDob  = (ownerBlock.match(/DOB:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                    const oDl   = (ownerBlock.match(/DL\s*#?\s*([^\n\r]+)/i) || [])[1]?.trim().replace(/^#\s*/, '') || '';
+                    const oCdl  = (ownerBlock.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                    if (oName || oDl || oCdl) {
+                        parsedDriversList.push({ name: oName, dob: toISODate(oDob), license: oDl, experience: oCdl, hireDate: '', violations: '' });
+                        console.log(`👤 Owner parsed: name="${oName}", DL="${oDl}", CDL Length="${oCdl}"`);
+                    }
+                }
+                // Additional drivers block
+                const driversBlock = (comments.match(/DRIVERS INFO\(\d+\)[^\n]*\n([\s\S]*?)(?=-----UNITS|$)/i) || [])[1] || '';
+                if (driversBlock) {
+                    const subBlocks = driversBlock.split(/Driver \d+/i).filter(b => b.trim());
+                    for (const block of subBlocks) {
+                        const dName  = (block.match(/Name:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const dDob   = (block.match(/DOB:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const dDl    = (block.match(/DL\s*#?\s*([^\n\r]+)/i) || [])[1]?.trim().replace(/^#\s*/, '') || '';
+                        const dCdl   = (block.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const dHire  = (block.match(/Hire Date:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        if (dName || dDl) {
+                            parsedDriversList.push({ name: dName, dob: toISODate(dDob), license: dDl, experience: dCdl, hireDate: toISODate(dHire), violations: '' });
+                            console.log(`🚗 Driver parsed: name="${dName}", DL="${dDl}", CDL Length="${dCdl}"`);
+                        }
+                    }
+                }
+            }
+
             // ── Stage auto-detection: full_info_received if owner + all drivers fully filled ──
             if (comments) {
                 const hasVal = (s) => s && s.trim() && s.trim() !== 'MM/YYYY' && s.trim() !== 'MM/DD/YYYY';
@@ -4031,9 +4071,10 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 })(),
                 // Owner name from ViciDial comments
                 ownerName: parsedOwnerName || (existingLead ? existingLead.ownerName : '') || lead.contact || '',
-                // Vehicles/trailers parsed from UNITS/TRAILERS sections (preserve existing if no new data)
+                // Vehicles/trailers/drivers parsed from comments (preserve existing if no new data)
                 vehicles: parsedVehicles.length > 0 ? parsedVehicles : (existingLead ? existingLead.vehicles || [] : []),
                 trailers: parsedTrailers.length > 0 ? parsedTrailers : (existingLead ? existingLead.trailers || [] : []),
+                drivers: parsedDriversList.length > 0 ? parsedDriversList : (existingLead ? existingLead.drivers || [] : []),
                 // Documentation status from DOCUMENTATION section (RQ/RC markers)
                 ...parsedDocStatus,
                 // Callback from ViciDial comments NEXT CALL section

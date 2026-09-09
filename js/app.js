@@ -13492,8 +13492,35 @@ function getRealRenewalPolicies(policies, clients) {
 
     // Ensure clients is an array to prevent .find() errors
     const clientsArray = Array.isArray(clients) ? clients : [];
-    
+
+    // Build replaced set: per client, if 2+ policies share same LOB+effective+expiration,
+    // the oldest one(s) (lower timestamp in ID) were replaced by the newer import.
+    const _normLob = lob => {
+        const l = (lob || '').toLowerCase().replace(/\s+/g, '');
+        if (l.includes('auto') || l === 'autob' || l === 'autop') return 'auto';
+        return l || 'unknown';
+    };
+    const _policyTs = p => parseInt((p.id || '').split('-')[1] || '0', 10);
+    const _isStoredActive = p => {
+        const s = (p.policyStatus || p.status || '').toLowerCase();
+        return !s || s === 'active' || s === 'in-force' || s === 'in force';
+    };
+    const _rGroups = {};
+    for (const p of policies.filter(_isStoredActive)) {
+        const key = `${p.clientId || ''}|${_normLob(p.lob || p.policyType)}|${p.effectiveDate || ''}|${p.expirationDate || ''}`;
+        if (!_rGroups[key]) _rGroups[key] = [];
+        _rGroups[key].push(p);
+    }
+    const _replacedSet = new Set();
+    for (const group of Object.values(_rGroups)) {
+        if (group.length < 2) continue;
+        group.sort((a, b) => _policyTs(a) - _policyTs(b));
+        for (let i = 0; i < group.length - 1; i++) _replacedSet.add(group[i].id);
+    }
+
     policies.forEach(policy => {
+        // Skip policies that have been replaced by a newer import for the same client/LOB/dates
+        if (_replacedSet.has(policy.id)) return;
         if (!policy.expirationDate && !policy.endDate) return;
         
         const expirationDate = new Date(policy.expirationDate || policy.endDate);
@@ -20588,7 +20615,20 @@ async function loadDownloadsView() {
                 type:       (row.fileType || '').trim(),
                 statusText: row.status || '',
                 date:       row.createdAt || '',
+                policies:   row.policies || [],
             }));
+
+            // Build most-recent-status map from ALL processed rows (Policy + EDoc + Message).
+            // Rows are newest-first from JenesisNow, so the first occurrence per policy number is the latest.
+            const latestStatusMap = {};
+            for (const row of allRows) {
+                if (row.statusText !== 'Processed') continue;
+                for (const p of row.policies) {
+                    const pNum = (p.polNo || '').replace(/\s/g, '').toLowerCase();
+                    if (!pNum || latestStatusMap[pNum]) continue;
+                    latestStatusMap[pNum] = p.purpose || '';
+                }
+            }
 
             const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
 
@@ -20637,6 +20677,12 @@ async function loadDownloadsView() {
                 return true;
             });
 
+            // Apply most-recent status from any download type (catches Message-type cancellations)
+            deduped.forEach(p => {
+                const pNum = (p.policyNumber || '').replace(/\s/g, '').toLowerCase();
+                if (pNum && latestStatusMap[pNum]) p.downloadPurpose = latestStatusMap[pNum];
+            });
+
             resetBtn();
 
             // Open IVANS review modal with JenesisNow data
@@ -20673,7 +20719,20 @@ async function loadDownloadsView() {
                 type:       (row.fileType || '').trim(),
                 statusText: row.status || '',
                 date:       row.createdAt || '',
+                policies:   row.policies || [],
             }));
+
+            // Build most-recent-status map from ALL processed rows (Policy + EDoc + Message).
+            // Rows are newest-first from JenesisNow, so the first occurrence per policy number is the latest.
+            const latestStatusMap = {};
+            for (const row of allRows) {
+                if (row.statusText !== 'Processed') continue;
+                for (const p of row.policies) {
+                    const pNum = (p.polNo || '').replace(/\s/g, '').toLowerCase();
+                    if (!pNum || latestStatusMap[pNum]) continue;
+                    latestStatusMap[pNum] = p.purpose || '';
+                }
+            }
 
             const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
 
@@ -20719,6 +20778,12 @@ async function loadDownloadsView() {
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
+            });
+
+            // Apply most-recent status from any download type (catches Message-type cancellations)
+            deduped.forEach(p => {
+                const pNum = (p.policyNumber || '').replace(/\s/g, '').toLowerCase();
+                if (pNum && latestStatusMap[pNum]) p.downloadPurpose = latestStatusMap[pNum];
             });
 
             resetBtn();
@@ -21203,6 +21268,31 @@ function generateClientPoliciesList(policies) {
         `;
     }
     
+    // Detect policies replaced by a newer policy (same LOB + dates, different carrier/ID):
+    // Among active policies, if 2+ share the same LOB+effectiveDate+expirationDate, the older one(s) were replaced.
+    const _normLob = lob => {
+        const l = (lob || '').toLowerCase().replace(/\s+/g, '');
+        if (l.includes('auto') || l === 'autob' || l === 'autop') return 'auto';
+        return l || 'unknown';
+    };
+    const _policyTs = p => parseInt((p.id || '').split('-')[1] || '0', 10);
+    const _isStoredActive = p => {
+        const s = (p.policyStatus || p.status || '').toLowerCase();
+        return !s || s === 'active' || s === 'in-force' || s === 'in force';
+    };
+    const _groups = {};
+    for (const p of policies.filter(_isStoredActive)) {
+        const key = `${_normLob(p.lob || p.policyType)}|${p.effectiveDate || ''}|${p.expirationDate || ''}`;
+        if (!_groups[key]) _groups[key] = [];
+        _groups[key].push(p);
+    }
+    const replacedSet = new Set();
+    for (const group of Object.values(_groups)) {
+        if (group.length < 2) continue;
+        group.sort((a, b) => _policyTs(a) - _policyTs(b));
+        for (let i = 0; i < group.length - 1; i++) replacedSet.add(group[i].id);
+    }
+
     return policies.map((policy, index) => {
         // Get the policy type label
         const typeLabel = getPolicyTypeLabel(policy.policyType || policy.type || 'unknown');
@@ -21242,8 +21332,8 @@ function generateClientPoliciesList(policies) {
             }
         }
 
-        // Format status
-        const status = policy.policyStatus || policy.status || 'Active';
+        // Format status — override to "Replaced" if a newer policy supersedes this one
+        const status = replacedSet.has(policy.id) ? 'Replaced' : (policy.policyStatus || policy.status || 'Active');
         const statusClass = getStatusClass(status);
 
         return `
@@ -23011,6 +23101,16 @@ function parseIvansFixed(content) {
         const trg = by['2TRG'][0];
         const lobCode    = trg.substring(24, 29).trim();
         const carrier    = trg.substring(47, 72).trim();
+        // Extract 2-char transaction code (e.g. NB, CN, XL, RI, RN) from 2TRG byte 10-11
+        const transactionCode = clean(trg.substring(10, 12));
+        // Map transaction code → human-readable download purpose (drives policyStatus logic)
+        const _TX_PURPOSE_MAP = {
+            CN:'Cancellation', XL:'Cancellation Confirmed', CX:'Cancellation Confirmed',
+            RI:'Reinstatement', NR:'Non-Renewal', EX:'Non-Renewal',
+            NB:'New Business', RN:'Renewal', EN:'Endorsement',
+            AU:'Audit', PC:'Policy Change', RW:'Rewrite',
+        };
+        const downloadPurpose = _TX_PURPOSE_MAP[transactionCode.toUpperCase()] || '';
 
         // ── 5BPI: policy number, dates, premium ─────────────────────────────
         let policyNumber = '', effectiveDate = '', expirationDate = '', premium = '';
@@ -23185,6 +23285,7 @@ function parseIvansFixed(content) {
                 address, city, state, zip,
                 effectiveDate, expirationDate, premium,
                 lob: _ivansLobLabel(lobCode), carrier,
+                transactionCode, downloadPurpose,
                 vehicles, drivers, coverages,
             });
         }
@@ -27245,7 +27346,7 @@ function getStatusClass(status) {
     if (s === 'active' || s === 'in-force' || s === 'in force') return 'active';
     if (s === 'pending') return 'pending';
     if (s === 'cancel-pending' || s === 'cancel pending') return 'pending';
-    if (s === 'expired' || s === 'cancelled' || s === 'non-renewed' || s === 'non renewed') return 'pending';
+    if (s === 'expired' || s === 'cancelled' || s === 'non-renewed' || s === 'non renewed' || s === 'replaced') return 'inactive';
     return 'active';
 }
 

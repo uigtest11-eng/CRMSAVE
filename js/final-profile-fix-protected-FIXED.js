@@ -1521,8 +1521,8 @@ protectedFunctions.showDocTypeModal = function(leadId, files) {
     if (existing) existing.remove();
 
     const fileArray = Array.from(files);
-    const docTypeOptions = ['Loss Runs', 'Dec Page', 'IFTAS', 'COI', 'DL', 'Other'];
-    const colors = { 'Loss Runs':'#2563eb','Dec Page':'#7c3aed','IFTAS':'#d97706','COI':'#059669','DL':'#0891b2','Other':'#6b7280' };
+    const docTypeOptions = ['Loss Runs', 'Dec Page', 'IFTAS', 'COI', 'DL', 'Application', 'Other'];
+    const colors = { 'Loss Runs':'#2563eb','Dec Page':'#7c3aed','IFTAS':'#d97706','COI':'#059669','DL':'#0891b2','Application':'#7c3aed','Other':'#6b7280' };
 
     const fileRows = fileArray.map((file, i) => `
         <div style="padding: 12px; background: #f9fafb; border-radius: 8px; margin-bottom: 10px; border: 1px solid #e5e7eb;">
@@ -1641,7 +1641,7 @@ protectedFunctions.loadLossRuns = function(leadId) {
     .then(data => {
         const docTypeColors = {
             'Loss Runs': '#2563eb', 'Dec Page': '#7c3aed', 'IFTAS': '#d97706',
-            'COI': '#059669', 'DL': '#0891b2', 'Other': '#6b7280'
+            'COI': '#059669', 'DL': '#0891b2', 'Application': '#7c3aed', 'Other': '#6b7280'
         };
 
         const dragDropZone = `
