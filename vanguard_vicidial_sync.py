@@ -125,6 +125,7 @@ class VanguardViciDialSync:
         params = {
             'list_id': list_id,
             'status': 'SALE',
+            'search_count': '1000',
             'DB': '',
             'submit': 'submit'
         }

@@ -1,5 +1,15 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
 
+// FMCSA Sync service
+const fmcsaSync = require('./fmcsa-sync');
+// Expose cache invalidation to the sync module (lazy — _mktIntelCache defined later)
+global._mktIntelCacheInvalidate = () => {
+    if (typeof _mktIntelCache !== 'undefined') {
+        Object.keys(_mktIntelCache).forEach(k => delete _mktIntelCache[k]);
+        console.log('[FMCSA Sync] Market intelligence cache invalidated');
+    }
+};
+
 // Keep the process alive on non-fatal errors so pm2 doesn't have to restart
 process.on('uncaughtException', (err) => {
     console.error('[uncaughtException] Non-fatal — keeping process alive:', err.message || err);
@@ -205,7 +215,8 @@ app.use('/api', (req, res, next) => {
                          '/twilio/incoming-call',
                          '/twilio/call-status', '/twilio/recording-status',
                          '/twilio/voicemail-transcription', '/twilio/recording-complete',
-                         '/twilio/conference-status', '/twilio/call-status-callback'];
+                         '/twilio/conference-status', '/twilio/call-status-callback',
+                         '/renewal-email/trigger', '/corgi/'];
     if (publicPaths.some(p => req.path.startsWith(p))) return next();
     return authenticateToken(req, res, next);
 });
@@ -289,6 +300,11 @@ const db = new sqlite3.Database('/var/www/vanguard/vanguard.db', (err) => {
                 console.error('Error creating market_quotes table:', err.message);
             } else {
                 console.log('✅ Market quotes table ready');
+                // Purge quotes older than 1 year
+                db.run("DELETE FROM market_quotes WHERE date_created < datetime('now', '-1 year')", (purgeErr) => {
+                    if (purgeErr) console.error('Error purging old market quotes:', purgeErr.message);
+                    else console.log('🧹 Purged market quotes older than 1 year');
+                });
             }
         });
 
@@ -428,6 +444,13 @@ function initializeDatabase() {
     db.run(`CREATE INDEX IF NOT EXISTS idx_documents_client_id ON documents(client_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_documents_policy_id ON documents(policy_id)`);
 
+    // Migrate existing loss_runs table to add doc_type column if missing
+    db.run(`ALTER TABLE loss_runs ADD COLUMN doc_type TEXT DEFAULT 'Other'`, err => {
+        if (err && !err.message.includes('duplicate column')) {
+            console.error('Error adding doc_type column:', err.message);
+        }
+    });
+
     // Loss runs tracking table
     db.run(`CREATE TABLE IF NOT EXISTS loss_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -435,6 +458,7 @@ function initializeDatabase() {
         file_name TEXT NOT NULL,
         file_size INTEGER,
         file_type TEXT,
+        doc_type TEXT DEFAULT 'Other',
         status TEXT DEFAULT 'uploaded',
         uploaded_date DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (lead_id) REFERENCES leads(id)
@@ -2422,6 +2446,7 @@ try:
             lead_response = session.get(lead_url, auth=(USERNAME, PASSWORD), params={
                 'list_id': list_id,
                 'status': 'SALE',
+                'search_count': '1000',
                 'DB': '',
                 'submit': 'submit'
             })
@@ -3697,7 +3722,10 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
             if (comments) {
                 // Fleet size extraction patterns - updated for new format
                 const fleetPatterns = [
-                    // NEW FORMAT: "Fl: 2" pattern (highest priority)
+                    // NEWEST FORMAT: "Driver count: X | Fleet size: X"
+                    /Fleet size:\s*(\d+)/i,
+                    /Driver count:\s*\d+\s*\|\s*Fleet size:\s*(\d+)/i,
+                    // OLD FORMAT: "Fl: 2" pattern
                     /Fl:\s*(\d+)/i,
                     /Dr:\s*\d+\s*\|\s*Fl:\s*(\d+)/i,
                     // OLD FORMAT: "Size:" patterns
@@ -3780,8 +3808,9 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                     console.log(`✅ Stage from comments: "${parsedStage}"`);
                 }
 
-                // NEXT CALL parsing
-                const cbMatch = comments.match(/NEXT CALL\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i)
+                // NEXT CALL parsing — handles new format "-----NEXT CALL---------------\nDate: MM/DD/YYYY Time: HH:MMAM\nCallback Notes: ..."
+                // and legacy formats
+                const cbMatch = comments.match(/NEXT CALL[^\n]*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i)
                              || comments.match(/--scheduled next call-+\s*\n\s*Date:\s*(\S+)\s+Time:\s*([^\n\r]+)/i);
                 if (cbMatch) {
                     parsedCallbackDate = cbMatch[1].trim();
@@ -3789,10 +3818,157 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                     console.log(`✅ Callback from comments: ${parsedCallbackDate} at ${parsedCallbackTime}`);
                 }
 
-                // Owner name
-                const nameMatch = comments.match(/------------Name--------------\s*\n\s*([^\n\r-]+)/i);
+                // Owner name — new format "----OWNERS INFO-------\nName: X", legacy "---Name---\nX"
+                const nameMatch = comments.match(/OWNERS INFO[^\n]*\n\s*Name:\s*([^\n\r]+)/i)
+                               || comments.match(/------------Name--------------\s*\n\s*([^\n\r-]+)/i);
                 if (nameMatch) {
                     parsedOwnerName = nameMatch[1].trim();
+                }
+            }
+
+            // ── Parse documentation status (RQ = requested, RC = received) ──
+            const parsedDocStatus = {
+                docStatus_coi: 'not_requested',
+                docStatus_dec_page: 'not_requested',
+                docStatus_loss_runs: 'not_requested',
+                docStatus_iftas: 'not_requested'
+            };
+            if (comments) {
+                const docMappings = [
+                    { pattern: /COI\s*\(([^)]*)\)/i,        field: 'docStatus_coi' },
+                    { pattern: /DEC\s*PAGE\s*\(([^)]*)\)/i,  field: 'docStatus_dec_page' },
+                    { pattern: /LOSS\s*RUNS\s*\(([^)]*)\)/i, field: 'docStatus_loss_runs' },
+                    { pattern: /IFTAS\s*\(([^)]*)\)/i,       field: 'docStatus_iftas' }
+                ];
+                for (const { pattern, field } of docMappings) {
+                    const m = comments.match(pattern);
+                    if (m) {
+                        const val = m[1].trim().toUpperCase();
+                        if (val === 'RQ') parsedDocStatus[field] = 'requested';
+                        else if (val === 'RC') parsedDocStatus[field] = 'received';
+                    }
+                }
+                console.log(`📋 Doc status parsed:`, parsedDocStatus);
+            }
+
+            // ── Parse OPERATION section (Mile Radius, Commodities) ──
+            let parsedMileRadius = '';
+            let parsedCommodities = '';
+            if (comments) {
+                const mileMatch = comments.match(/Mile\s*Radius:\s*([^\n\r]+)/i);
+                if (mileMatch && mileMatch[1].trim()) parsedMileRadius = mileMatch[1].trim();
+                const commMatch = comments.match(/Commodities:\s*([^\n\r]+)/i);
+                if (commMatch && commMatch[1].trim()) parsedCommodities = commMatch[1].trim();
+            }
+
+            // ── Parse UNITS and TRAILERS sections into vehicle/trailer arrays ──
+            const parsedVehicles = [];
+            const parsedTrailers = [];
+            if (comments) {
+                const isPlaceholder = (v) => !v || v === 'XXXX' || v.toLowerCase() === 'unknown' || v === 'XXXXXXXXXXXXXXXX';
+                // Units
+                const unitsMatch = comments.match(/-----UNITS\(\d+\)-+\n?([\s\S]*?)(?=-----TRAILERS|$)/i);
+                if (unitsMatch) {
+                    const blocks = unitsMatch[1].split(/\n(?=Year:)/i).filter(b => b.trim());
+                    for (const block of blocks) {
+                        const year  = (block.match(/Year:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const make  = (block.match(/Make:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const model = (block.match(/Model:\s*([^\n\r]*)/i) || [])[1]?.trim() || '';
+                        const type  = (block.match(/Type:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const vin   = (block.match(/VIN:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const value = (block.match(/Value:\s*([^\n\r]*)/i) || [])[1]?.trim() || '';
+                        if (!isPlaceholder(year) && !isPlaceholder(make)) {
+                            parsedVehicles.push({ year, make, model, type, vin, value });
+                        }
+                    }
+                }
+                // Trailers
+                const trailersMatch = comments.match(/-----TRAILERS\(\d+\)-+\n?([\s\S]*)$/i);
+                if (trailersMatch) {
+                    const blocks = trailersMatch[1].split(/\n(?=Year:)/i).filter(b => b.trim());
+                    for (const block of blocks) {
+                        const year  = (block.match(/Year:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const make  = (block.match(/Make:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const type  = (block.match(/Type:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const vin   = (block.match(/VIN:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const value = (block.match(/Value:\s*([^\n\r]*)/i) || [])[1]?.trim() || '';
+                        if (!isPlaceholder(year) && !isPlaceholder(make)) {
+                            parsedTrailers.push({ year, make, type, vin, value });
+                        }
+                    }
+                }
+                if (parsedVehicles.length) console.log(`🚛 Parsed ${parsedVehicles.length} vehicle(s) from comments`);
+                if (parsedTrailers.length) console.log(`🚛 Parsed ${parsedTrailers.length} trailer(s) from comments`);
+            }
+
+            // ── Parse OWNERS INFO + DRIVERS INFO into drivers array ──
+            const parsedDriversList = [];
+            if (comments) {
+                // Helper: convert MM/DD/YYYY to YYYY-MM-DD for date inputs; return as-is otherwise
+                const toISODate = (raw) => {
+                    if (!raw) return '';
+                    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                    if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+                    return raw;
+                };
+                // Owner block
+                const ownerBlock = (comments.match(/OWNERS INFO[^\n]*\n([\s\S]*?)(?=---OPERATION|--DRIVERS|-----UNITS|$)/i) || [])[1] || '';
+                if (ownerBlock) {
+                    const oName = (ownerBlock.match(/Name:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                    const oDob  = (ownerBlock.match(/DOB:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                    const oDl   = (ownerBlock.match(/DL\s*#?\s*([^\n\r]+)/i) || [])[1]?.trim().replace(/^#\s*/, '') || '';
+                    const oCdl  = (ownerBlock.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                    if (oName || oDl || oCdl) {
+                        parsedDriversList.push({ name: oName, dob: toISODate(oDob), license: oDl, experience: oCdl, hireDate: '', violations: '' });
+                        console.log(`👤 Owner parsed: name="${oName}", DL="${oDl}", CDL Length="${oCdl}"`);
+                    }
+                }
+                // Additional drivers block
+                const driversBlock = (comments.match(/DRIVERS INFO\(\d+\)[^\n]*\n([\s\S]*?)(?=-----UNITS|$)/i) || [])[1] || '';
+                if (driversBlock) {
+                    const subBlocks = driversBlock.split(/Driver \d+/i).filter(b => b.trim());
+                    for (const block of subBlocks) {
+                        const dName  = (block.match(/Name:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const dDob   = (block.match(/DOB:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const dDl    = (block.match(/DL\s*#?\s*([^\n\r]+)/i) || [])[1]?.trim().replace(/^#\s*/, '') || '';
+                        const dCdl   = (block.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        const dHire  = (block.match(/Hire Date:\s*([^\n\r]+)/i) || [])[1]?.trim() || '';
+                        if (dName || dDl) {
+                            parsedDriversList.push({ name: dName, dob: toISODate(dDob), license: dDl, experience: dCdl, hireDate: toISODate(dHire), violations: '' });
+                            console.log(`🚗 Driver parsed: name="${dName}", DL="${dDl}", CDL Length="${dCdl}"`);
+                        }
+                    }
+                }
+            }
+
+            // ── Stage auto-detection: full_info_received if owner + all drivers fully filled ──
+            if (comments) {
+                const hasVal = (s) => s && s.trim() && s.trim() !== 'MM/YYYY' && s.trim() !== 'MM/DD/YYYY';
+                // Owner info
+                const ownerBlock = (comments.match(/OWNERS INFO[^\n]*\n([\s\S]*?)(?=---OPERATION|--DRIVERS|-----UNITS|$)/i) || [])[1] || '';
+                const ownerFilled = ownerBlock &&
+                    hasVal((ownerBlock.match(/Name:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((ownerBlock.match(/DOB:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((ownerBlock.match(/DL[#\s]?\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((ownerBlock.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]);
+                // All drivers info
+                const driversBlock = (comments.match(/DRIVERS INFO\(\d+\)[^\n]*\n([\s\S]*?)(?=-----UNITS|$)/i) || [])[1] || '';
+                const driverSubBlocks = driversBlock.split(/Driver \d+/i).filter(b => b.trim());
+                const allDriversFilled = driverSubBlocks.length > 0 && driverSubBlocks.every(block =>
+                    hasVal((block.match(/Name:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/DOB:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/DL[#\s]?\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/CDL Length:\s*([^\n\r]+)/i) || [])[1]) &&
+                    hasVal((block.match(/Hire Date:\s*([^\n\r]+)/i) || [])[1])
+                );
+                // Units must have real (non-placeholder) entries or count is 0
+                const unitCountMatch = comments.match(/-----UNITS\((\d+)\)/i);
+                const unitCount = parseInt(unitCountMatch?.[1] || '0');
+                const unitsOk = unitCount === 0 || parsedVehicles.length > 0;
+
+                if (ownerFilled && allDriversFilled && unitsOk) {
+                    parsedStage = 'full_info_received';
+                    console.log(`✅ Stage auto-set to full_info_received (all owner/driver info populated)`);
                 }
             }
 
@@ -3839,8 +4015,8 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 city: (lead.city || '').toUpperCase(),
                 state: lead.state || 'OH',
                 zip: "",
-                radiusOfOperation: "Regional",
-                commodityHauled: "",
+                radiusOfOperation: parsedMileRadius || (existingLead ? existingLead.radiusOfOperation : '') || '',
+                commodityHauled: parsedCommodities || (existingLead ? existingLead.commodityHauled : '') || '',
                 operatingStates: [lead.state || 'OH'],
                 annualRevenue: "",
                 safetyRating: "Satisfactory",
@@ -3912,6 +4088,12 @@ app.post('/api/vicidial/sync-sales', async (req, res) => {
                 })(),
                 // Owner name from ViciDial comments
                 ownerName: parsedOwnerName || (existingLead ? existingLead.ownerName : '') || lead.contact || '',
+                // Vehicles/trailers/drivers parsed from comments (preserve existing if no new data)
+                vehicles: parsedVehicles.length > 0 ? parsedVehicles : (existingLead ? existingLead.vehicles || [] : []),
+                trailers: parsedTrailers.length > 0 ? parsedTrailers : (existingLead ? existingLead.trailers || [] : []),
+                drivers: parsedDriversList.length > 0 ? parsedDriversList : (existingLead ? existingLead.drivers || [] : []),
+                // Documentation status from DOCUMENTATION section (RQ/RC markers)
+                ...parsedDocStatus,
                 // Callback from ViciDial comments NEXT CALL section
                 ...(parsedCallbackDate && parsedCallbackTime && !parsedCallbackDate.startsWith('MM') && !existingLead ? (() => {
                     try {
@@ -6148,6 +6330,7 @@ app.post('/api/coi/send-request', (req, res, next) => {
         const info = await transporter.sendMail({
             from: `"${senderName}" <${senderEmail}>`,
             to: to,
+            cc: 'grant@vigagency.com',
             subject: subject,
             text: message,
             html: `
@@ -6520,6 +6703,307 @@ app.post('/api/renewal-completions', (req, res) => {
             });
         }
     );
+});
+
+// Send producer notification email when a renewal is finalized
+app.post('/api/renewal-finalize-notify', async (req, res) => {
+    const { policyId, policyData } = req.body;
+    if (!policyId) return res.status(400).json({ error: 'policyId required' });
+
+    const nodemailer = require('nodemailer');
+
+    // Agent name → email map
+    const AGENT_EMAILS = {
+        'grant':   'grant@vigagency.com',
+        'carson':  'carson@vigagency.com',
+        'hunter':  'hunter@vigagency.com',
+        'maureen': 'maureen.corp@uigagency.com'
+    };
+
+    try {
+        // Try to get full policy from DB first; fall back to client-supplied policyData
+        let pol = policyData || {};
+        let clientData = {};
+
+        const policyRow = await new Promise((resolve) =>
+            db.get('SELECT id, client_id, data FROM policies WHERE id = ?', [policyId], (err, row) => resolve(row || null))
+        );
+
+        if (policyRow) {
+            try {
+                const parsed = JSON.parse(policyRow.data || '{}');
+                pol = (parsed.policies || [parsed])[0] || parsed;
+                // Merge top-level fields too
+                Object.assign(pol, { id: policyRow.id, clientId: policyRow.client_id, ...pol });
+            } catch(e) {}
+
+            const clientRow = await new Promise((resolve) =>
+                db.get('SELECT data FROM clients WHERE id = ?', [policyRow.client_id], (err, r) => resolve(r || null))
+            );
+            if (clientRow) { try { clientData = JSON.parse(clientRow.data); } catch(e) {} }
+        }
+
+        const agentName  = (pol.agent || pol.assignedTo || policyData?.agent || '').trim();
+        const agentKey   = agentName.toLowerCase();
+        const producerTo = AGENT_EMAILS[agentKey];
+
+        if (!producerTo) {
+            console.warn(`renewal-finalize-notify: no email mapped for agent "${agentName}"`);
+            return res.status(200).json({ success: true, skipped: true, reason: `No email mapped for agent: ${agentName}` });
+        }
+
+        const isMaureen = agentKey === 'maureen';
+        const fromEmail = isMaureen ? 'contact@uigagency.com' : 'contact@vigagency.com';
+        const fromPass  = isMaureen ? process.env.GODADDY_UIG_PASSWORD : process.env.GODADDY_VIG_PASSWORD;
+        const agencyName = isMaureen ? 'UIG Agency' : 'VIG Agency';
+
+        const bizName    = clientData.businessName || pol.insured?.['Business Name'] || pol.insured?.['Name/Business Name'] || pol.businessName || 'Unknown Client';
+        const policyNum  = (pol.policyNumber || pol.number || '').trim();
+        const carrier    = pol.carrier || pol.insuranceCarrier || 'Unknown Carrier';
+        const expDate    = pol.expirationDate || pol.expiryDate || 'N/A';
+        const premium    = pol.premium || '';
+
+        const subject = `✅ Renewal Finalized — ${bizName}${policyNum ? ' (#' + policyNum + ')' : ''}`;
+        const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;">
+<div style="max-width:600px;margin:0 auto;background:white;border-radius:10px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+  <div style="background:linear-gradient(135deg,#10b981,#059669);padding:28px 32px;">
+    <h1 style="margin:0;color:white;font-size:22px;">✅ Renewal Finalized</h1>
+    <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">${agencyName} — Internal Notification</p>
+  </div>
+  <div style="padding:28px 32px;">
+    <p style="font-size:15px;color:#1f2937;margin:0 0 20px;">Hi <strong>${agentName}</strong>,</p>
+    <p style="font-size:15px;color:#374151;margin:0 0 24px;">The following renewal has been marked as <strong style="color:#059669;">Finalized</strong> in the CRM:</p>
+    <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px;padding:18px;margin-bottom:24px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;width:40%;">Client</td><td style="padding:5px 0;font-weight:700;color:#1f2937;font-size:14px;">${bizName}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Carrier</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${carrier}</td></tr>
+        ${policyNum ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Policy #</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${policyNum}</td></tr>` : ''}
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Expiration</td><td style="padding:5px 0;font-weight:600;color:#dc2626;font-size:14px;">${expDate}</td></tr>
+        ${premium ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Premium</td><td style="padding:5px 0;font-weight:600;color:#059669;font-size:14px;">${premium}</td></tr>` : ''}
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Finalized At</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}</td></tr>
+      </table>
+    </div>
+    <p style="font-size:13px;color:#6b7280;margin:0;">This is an automated notification from the Vanguard CRM.</p>
+  </div>
+</div>
+</body></html>`;
+
+        const transporter = nodemailer.createTransport({
+            host: 'smtpout.secureserver.net', port: 465, secure: true,
+            auth: { user: fromEmail, pass: fromPass }
+        });
+
+        const ccList = producerTo !== 'grant@vigagency.com' ? 'grant@vigagency.com' : undefined;
+
+        const info = await transporter.sendMail({
+            from: `"${agencyName}" <${fromEmail}>`,
+            to: producerTo,
+            ...(ccList && { cc: ccList }),
+            subject,
+            html
+        });
+
+        console.log(`✅ Renewal finalize notification sent to ${producerTo}${ccList ? ' cc: ' + ccList : ''} for ${bizName} (${info.messageId})`);
+        res.json({ success: true, to: producerTo, business: bizName, messageId: info.messageId });
+
+    } catch (err) {
+        console.error('Error sending renewal finalize notification:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Send producer notification email when CSR marks renewal as prepared
+app.post('/api/renewal-prepared-notify', async (req, res) => {
+    const { policyId, policyData, clientId: clientIdFromBody, quotes: quotesFromClient } = req.body;
+    if (!policyId) return res.status(400).json({ error: 'policyId required' });
+
+    const nodemailer = require('nodemailer');
+    const AGENT_EMAILS = {
+        'grant':   'grant@vigagency.com',
+        'carson':  'carson@vigagency.com',
+        'hunter':  'hunter@vigagency.com',
+        'maureen': 'maureen.corp@uigagency.com'
+    };
+
+    try {
+        let pol = policyData || {};
+        let clientData = {};
+        let clientId = null;
+
+        const policyRow = await new Promise((resolve) =>
+            db.get('SELECT id, client_id, data FROM policies WHERE id = ?', [policyId], (err, row) => resolve(row || null))
+        );
+
+        if (policyRow) {
+            clientId = policyRow.client_id;
+            try {
+                const parsed = JSON.parse(policyRow.data || '{}');
+                pol = (parsed.policies || [parsed])[0] || parsed;
+                Object.assign(pol, { id: policyRow.id, clientId: policyRow.client_id, ...pol });
+            } catch(e) {}
+
+            const clientRow = await new Promise((resolve) =>
+                db.get('SELECT data FROM clients WHERE id = ?', [policyRow.client_id], (err, r) => resolve(r || null))
+            );
+            if (clientRow) { try { clientData = JSON.parse(clientRow.data); } catch(e) {} }
+        }
+
+        const agentName  = (pol.agent || pol.assignedTo || policyData?.agent || '').trim();
+        const agentKey   = agentName.toLowerCase();
+        const producerTo = AGENT_EMAILS[agentKey];
+
+        if (!producerTo) {
+            console.warn(`renewal-prepared-notify: no email mapped for agent "${agentName}"`);
+            return res.status(200).json({ success: true, skipped: true, reason: `No email mapped for agent: ${agentName}` });
+        }
+
+        const isMaureen  = agentKey === 'maureen';
+        const fromEmail  = isMaureen ? 'contact@uigagency.com' : 'contact@vigagency.com';
+        const fromPass   = isMaureen ? process.env.GODADDY_UIG_PASSWORD : process.env.GODADDY_VIG_PASSWORD;
+        const agencyName = isMaureen ? 'UIG Agency' : 'VIG Agency';
+
+        const bizName   = clientData.businessName || pol.insured?.['Business Name'] || pol.insured?.['Name/Business Name'] || pol.businessName || 'Unknown Client';
+        const policyNum = (pol.policyNumber || pol.number || '').trim();
+        const carrier   = pol.carrier || pol.insuranceCarrier || 'Unknown Carrier';
+        const expDate   = pol.expirationDate || pol.expiryDate || 'N/A';
+        const premium   = pol.premium || '';
+
+        // Quotes: use what the client sent (stored in localStorage on the client side)
+        const quotes = Array.isArray(quotesFromClient) ? quotesFromClient : [];
+
+        // Fetch loss run / doc files from the loss_runs DB table
+        const effectiveClientId = clientIdFromBody || clientId;
+        let lossRunFiles = [];
+        if (effectiveClientId) {
+            lossRunFiles = await new Promise((resolve) =>
+                db.all('SELECT file_name, file_size, uploaded_date, doc_type FROM loss_runs WHERE lead_id = ? ORDER BY uploaded_date DESC', [effectiveClientId], (err, rows) => resolve(rows || []))
+            );
+            lossRunFiles = lossRunFiles.map(r => ({
+                filename: r.file_name,
+                size: r.file_size ? Math.round(r.file_size / 1024) + ' KB' : '',
+                uploaded: r.uploaded_date ? new Date(r.uploaded_date).toLocaleDateString('en-US') : '',
+                docType: r.doc_type || 'Other'
+            }));
+        }
+
+        // Fetch quote applications using policy-scoped lead_id
+        const quoteApps = await new Promise((resolve) =>
+            db.all('SELECT id, form_data, created_at FROM quote_submissions WHERE lead_id = ? ORDER BY created_at DESC', [`policy_${policyId}`], (err, rows) => resolve(rows || []))
+        );
+
+        // Build quotes HTML section
+        const quotesHtml = quotes.length > 0
+            ? `<h3 style="margin:20px 0 10px;color:#374151;font-size:14px;font-weight:700;">Quote Submissions (${quotes.length})</h3>
+               <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+                 <thead><tr style="background:#2563eb;color:white;">
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">#</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Carrier</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Total Premium</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Liability</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Cargo</th>
+                 </tr></thead>
+                 <tbody>${quotes.map((q, i) => {
+                     const fd = q.form_data || q;
+                     const qCarrier = fd.carrier || fd.insuranceCarrier || q.carrier || `Quote #${i+1}`;
+                     const qPremium = fd.totalPremium || fd.total_premium || fd.premium || '';
+                     const qLiab   = fd.liability || fd.liabilityCost || '';
+                     const qCargo  = fd.cargoCost || fd.cargo || '';
+                     return `<tr style="background:${i%2===0?'#f9fafb':'white'};border-bottom:1px solid #e5e7eb;">
+                       <td style="padding:8px 12px;font-size:13px;">${i+1}</td>
+                       <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#1f2937;">${qCarrier}</td>
+                       <td style="padding:8px 12px;font-size:13px;font-weight:700;color:#059669;">${qPremium ? '$'+qPremium : '—'}</td>
+                       <td style="padding:8px 12px;font-size:13px;">${qLiab ? '$'+qLiab : '—'}</td>
+                       <td style="padding:8px 12px;font-size:13px;">${qCargo ? '$'+qCargo : '—'}</td>
+                     </tr>`;
+                 }).join('')}</tbody>
+               </table>`
+            : '<p style="color:#9ca3af;font-size:13px;margin-bottom:20px;">No quotes submitted yet.</p>';
+
+        // Build documents HTML section
+        const docsHtml = lossRunFiles.length > 0
+            ? `<h3 style="margin:0 0 10px;color:#374151;font-size:14px;font-weight:700;">Documents Attached (${lossRunFiles.length})</h3>
+               <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+                 <thead><tr style="background:#6b7280;color:white;">
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">File</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Type</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Size</th>
+                   <th style="padding:8px 12px;text-align:left;font-size:12px;">Uploaded</th>
+                 </tr></thead>
+                 <tbody>${lossRunFiles.map((f, i) =>
+                   `<tr style="background:${i%2===0?'#f9fafb':'white'};border-bottom:1px solid #e5e7eb;">
+                     <td style="padding:8px 12px;font-size:13px;color:#1f2937;">${f.filename}</td>
+                     <td style="padding:8px 12px;font-size:13px;"><span style="background:#6b7280;color:white;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;">${f.docType}</span></td>
+                     <td style="padding:8px 12px;font-size:13px;color:#6b7280;">${f.size}</td>
+                     <td style="padding:8px 12px;font-size:13px;color:#6b7280;">${f.uploaded}</td>
+                   </tr>`
+                 ).join('')}</tbody>
+               </table>`
+            : '<p style="color:#9ca3af;font-size:13px;margin-bottom:20px;">No documents uploaded.</p>';
+
+        // Build apps HTML section
+        const appsHtml = quoteApps.length > 0
+            ? `<h3 style="margin:0 0 10px;color:#374151;font-size:14px;font-weight:700;">Quote Applications (${quoteApps.length})</h3>
+               <ul style="margin:0 0 20px;padding:0;list-style:none;">${quoteApps.map((a, i) => {
+                   let fd = {}; try { fd = JSON.parse(a.form_data || '{}'); } catch(e) {}
+                   const trucks = (fd.trucks || fd.vehicles || []).length;
+                   const drivers = (fd.drivers || []).length;
+                   const created = new Date(a.created_at).toLocaleDateString('en-US');
+                   return `<li style="padding:8px 12px;background:#f0f9f0;border:1px solid #d1fae5;border-radius:6px;margin-bottom:6px;font-size:13px;color:#374151;">
+                     Application #${i+1} — ${trucks} truck(s), ${drivers} driver(s) &middot; Created ${created}
+                   </li>`;
+               }).join('')}</ul>`
+            : '';
+
+        const subject = `Renewal Prepared for Review — ${bizName}${policyNum ? ' (#' + policyNum + ')' : ''}`;
+        const html = `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;">
+<div style="max-width:620px;margin:0 auto;background:white;border-radius:10px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+  <div style="background:linear-gradient(135deg,#2563eb,#1d4ed8);padding:28px 32px;">
+    <h1 style="margin:0;color:white;font-size:22px;">Renewal Prepared for Review</h1>
+    <p style="margin:6px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">${agencyName} — Internal Notification</p>
+  </div>
+  <div style="padding:28px 32px;">
+    <p style="font-size:15px;color:#1f2937;margin:0 0 20px;">Hi <strong>${agentName}</strong>,</p>
+    <p style="font-size:15px;color:#374151;margin:0 0 24px;">The following renewal has been <strong style="color:#2563eb;">prepared by the CSR</strong> and is ready for your review:</p>
+    <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:18px;margin-bottom:24px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;width:40%;">Client</td><td style="padding:5px 0;font-weight:700;color:#1f2937;font-size:14px;">${bizName}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Carrier</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${carrier}</td></tr>
+        ${policyNum ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Policy #</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${policyNum}</td></tr>` : ''}
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Expiration</td><td style="padding:5px 0;font-weight:600;color:#dc2626;font-size:14px;">${expDate}</td></tr>
+        ${premium ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Current Premium</td><td style="padding:5px 0;font-weight:600;color:#059669;font-size:14px;">${premium}</td></tr>` : ''}
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Prepared At</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}</td></tr>
+      </table>
+    </div>
+    ${quotesHtml}
+    ${docsHtml}
+    ${appsHtml}
+    <p style="font-size:13px;color:#6b7280;margin:0;">This is an automated notification from the Vanguard CRM.</p>
+  </div>
+</div>
+</body></html>`;
+
+        const transporter = nodemailer.createTransport({
+            host: 'smtpout.secureserver.net', port: 465, secure: true,
+            auth: { user: fromEmail, pass: fromPass }
+        });
+
+        const ccList = producerTo !== 'grant@vigagency.com' ? 'grant@vigagency.com' : undefined;
+
+        const info = await transporter.sendMail({
+            from: `"${agencyName}" <${fromEmail}>`,
+            to: producerTo,
+            ...(ccList && { cc: ccList }),
+            subject,
+            html
+        });
+
+        console.log(`✅ Renewal prepared notification sent to ${producerTo}${ccList ? ' cc: ' + ccList : ''} for ${bizName} (${info.messageId})`);
+        res.json({ success: true, to: producerTo, business: bizName, messageId: info.messageId });
+
+    } catch (err) {
+        console.error('Error sending renewal prepared notification:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Delete renewal completion status
@@ -8375,17 +8859,24 @@ app.post('/api/loss-runs-upload', upload.array('files'), async (req, res) => {
 
         const uploadedFiles = [];
 
+        // Parse doc types array sent from client (one per file by index)
+        let docTypes = [];
+        try {
+            docTypes = req.body.docTypes ? JSON.parse(req.body.docTypes) : [];
+        } catch(e) { docTypes = []; }
+
         // Process each uploaded file with proper async database operations
-        for (const file of req.files) {
+        for (const [fileIndex, file] of req.files.entries()) {
             const fileId = path.basename(file.filename, path.extname(file.filename));
+            const docType = docTypes[fileIndex] || 'Other';
 
             try {
                 // Insert file metadata into database using the retry operation
                 const result = await retryDatabaseOperation((callback) => {
                     db.run(`
-                        INSERT INTO loss_runs (lead_id, file_name, file_size, file_type, status)
-                        VALUES (?, ?, ?, ?, 'uploaded')
-                    `, [leadId, file.filename, file.size, file.mimetype], function(err) {
+                        INSERT INTO loss_runs (lead_id, file_name, file_size, file_type, doc_type, status)
+                        VALUES (?, ?, ?, ?, ?, 'uploaded')
+                    `, [leadId, file.filename, file.size, file.mimetype, docType], function(err) {
                         callback(err, err ? null : this.lastID);
                     });
                 });
@@ -8400,6 +8891,7 @@ app.post('/api/loss-runs-upload', upload.array('files'), async (req, res) => {
                     original_name: file.originalname,
                     file_size: file.size,
                     file_type: file.mimetype,
+                    doc_type: docType,
                     uploaded_date: new Date().toISOString()
                 });
 
@@ -8448,7 +8940,7 @@ app.get('/api/loss-runs-upload', async (req, res) => {
 
         const rows = await retryDatabaseOperation((callback) => {
             db.all(`
-                SELECT id, lead_id, file_name, file_size, file_type, uploaded_date, status
+                SELECT id, lead_id, file_name, file_size, file_type, doc_type, uploaded_date, status
                 FROM loss_runs
                 WHERE lead_id = ?
                 ORDER BY uploaded_date DESC
@@ -9469,9 +9961,12 @@ app.post('/api/vicidial/update-comments', async (req, res) => {
 
 // ==================== MARKET QUOTES API ENDPOINTS ====================
 
-// Get all market quotes
+// Get all market quotes (supports ?days=N for time-period filtering)
 app.get('/api/market-quotes', (req, res) => {
-    console.log('📊 Fetching all market quotes');
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days) || 365));
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    console.log(`📊 Fetching market quotes for last ${days} days`);
 
     db.all(`
         SELECT
@@ -9484,8 +9979,9 @@ app.get('/api/market-quotes', (req, res) => {
             created_at,
             source
         FROM market_quotes
+        WHERE date_created >= ?
         ORDER BY created_at DESC
-    `, (err, rows) => {
+    `, [cutoff.toISOString()], (err, rows) => {
         if (err) {
             console.error('Error fetching market quotes:', err);
             res.status(500).json({ error: err.message });
@@ -9723,6 +10219,283 @@ app.post('/api/market-quotes/auto-import', async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Intelligence API — FMCSA policy trend analysis
+//
+// HYBRID DATA STRATEGY (accuracy goal):
+//   • Current period (last 12 months)  — local DB (Motus c5y8-a4uz data)
+//   • Prior period   (12–N months ago) — live InsHist API (6sqe-dvqs) for state=ALL
+//     InsHist effective_date = original policy start date; complete historical record
+//     of pre-Motus carriers (e.g. Canal Insurance filed old-FMCSA style in 2025)
+//   • State-specific queries use local DB carriers JOIN for both periods
+// ─────────────────────────────────────────────────────────────────────────────
+const _mktIntelCache  = {};
+const _insHistCache   = {};   // key: 'YYYY|coverage' → { rows, ts }
+const INSTHIST_URL    = 'https://data.transportation.gov/resource/6sqe-dvqs.json';
+const INSTHIST_TTL    = 60 * 60 * 1000;   // 1-hour cache for InsHist annual snapshots
+
+// Convert InsHist MM/DD/YYYY → same YYYY-WNN format SQLite strftime('%Y-W%W') produces
+// SQLite %W: Monday = first day of week; days before first Monday are week 00
+function _ihWeekKey(mmddyyyy) {
+    const p = mmddyyyy.split('/');
+    if (p.length !== 3) return null;
+    const yr = parseInt(p[2]), mo = parseInt(p[0]) - 1, dy = parseInt(p[1]);
+    const dt = new Date(yr, mo, dy);
+    if (isNaN(dt.getTime())) return null;
+    const jan1       = new Date(yr, 0, 1);
+    const dayOfYear  = Math.round((dt - jan1) / 86400000);
+    const jan1Dow    = jan1.getDay();   // 0=Sun, 1=Mon
+    const toFirstMon = jan1Dow === 1 ? 0 : jan1Dow === 0 ? 1 : 8 - jan1Dow;
+    const wk         = dayOfYear < toFirstMon ? 0 : Math.floor((dayOfYear - toFirstMon) / 7) + 1;
+    return `${p[2]}-W${String(wk).padStart(2, '0')}`;
+}
+
+// Normalize carrier name for cross-dataset matching
+// InsHist uses "CANAL INSURANCE CO." while Motus uses "Canal Insurance Company"
+// Steps: uppercase → remove all periods → expand abbreviations → strip legal suffixes
+function _normCarrier(name) {
+    return (name || '')
+        .toUpperCase()
+        .replace(/\./g, '')                             // "INS. CO." → "INS CO"
+        .replace(/\bINS\b/g, 'INSURANCE')               // "INS" → "INSURANCE"
+        .replace(/\bMUT\b/g, 'MUTUAL')
+        .replace(/\bCAS\b/g, 'CASUALTY')
+        .replace(/\s+(COMPANY|CORPORATION|INCORPORATED|LIMITED|CO|CORP|INC|LLC|LTD)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Fetch one year of InsHist pre-aggregated by (name_company, effective_date).
+// Socrata GROUP BY gives ~37k rows/year — typically one API page; cached 1 hour.
+async function _fetchInsHistYear(ax, year, coverage) {
+    const ck = `${year}|${coverage}`;
+    if (_insHistCache[ck] && Date.now() - _insHistCache[ck].ts < INSTHIST_TTL) {
+        return _insHistCache[ck].rows;
+    }
+    const covFilter = coverage !== 'ALL'
+        ? `%20AND%20mod_col_3='${encodeURIComponent(coverage)}'` : '';
+    const allRows = [];
+    let offset = 0;
+    while (true) {
+        const url = `${INSTHIST_URL}?$select=name_company,effective_date,count(distinct%20dot_number)%20as%20cnt` +
+            `&$where=effective_date%20LIKE%20'%25${year}'${covFilter}` +
+            `&$group=name_company,effective_date` +
+            `&$limit=50000&$offset=${offset}`;
+        const { data } = await ax.get(url, { timeout: 45000 });
+        if (!Array.isArray(data) || !data.length) break;
+        allRows.push(...data);
+        if (data.length < 50000) break;
+        offset += 50000;
+    }
+    _insHistCache[ck] = { rows: allRows, ts: Date.now() };
+    console.log(`📜 InsHist ${year} ${coverage}: ${allRows.length} carrier-day rows cached`);
+    return allRows;
+}
+
+app.get('/api/market/intelligence', async (req, res) => {
+    // ── Input validation ───────────────────────────────────────────────────
+    const rawState    = String(req.query.state   || 'ALL').toUpperCase().trim();
+    const state       = /^[A-Z]{2}$/.test(rawState) ? rawState : 'ALL';
+    const months      = Math.min(Math.max(parseInt(req.query.months) || 24, 3), 48);
+    const rawCoverage = String(req.query.coverage || 'BIPD/Primary');
+    const VALID_COV   = ['BIPD/Primary', 'CARGO', 'SURETY', 'BIPD/Excess', 'ALL'];
+    const coverage    = VALID_COV.includes(rawCoverage) ? rawCoverage : 'BIPD/Primary';
+
+    const cacheKey = `${state}|${months}|${coverage}`;
+    if (_mktIntelCache[cacheKey] && Date.now() - _mktIntelCache[cacheKey].ts < 600000) {
+        console.log('📊 Market intelligence cache hit:', cacheKey);
+        return res.json(_mktIntelCache[cacheKey].data);
+    }
+
+    console.log(`📊 Market intelligence: state=${state} months=${months} coverage=${coverage}`);
+
+    // ── Date boundaries ────────────────────────────────────────────────────
+    const now         = new Date();
+    const toYYYYMM    = d => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;
+
+    // priorStart = full window start (months ago)
+    // pivot      = 12 months ago — separates prior period from current period
+    const priorStart    = new Date(now); priorStart.setMonth(priorStart.getMonth() - months);
+    const pivot         = new Date(now); pivot.setMonth(pivot.getMonth() - 12);
+    const priorStartStr = toYYYYMM(priorStart);
+    const pivotStr      = toYYYYMM(pivot);
+
+    // ── Local DB query ─────────────────────────────────────────────────────
+    // state=ALL  → DB covers current period only (pivot onwards); prior comes from InsHist
+    // state=XX   → DB covers full range (prior + current) via carriers JOIN
+    const dbCutoffStr = state === 'ALL' ? pivotStr : priorStartStr;
+
+    const conditions = [
+        `p.POLICY_EFFECTIVE_DATE IS NOT NULL`,
+        `p.POLICY_EFFECTIVE_DATE != ''`,
+        `length(p.POLICY_EFFECTIVE_DATE) = 10`,
+        `(substr(p.POLICY_EFFECTIVE_DATE,7,4) || substr(p.POLICY_EFFECTIVE_DATE,1,2)) >= ?`
+    ];
+    const params = [dbCutoffStr];
+
+    let joinClause = '';
+    if (state !== 'ALL') {
+        joinClause = 'JOIN carriers c ON c.DOT_NUMBER = p.DOT_NUMBER';
+        conditions.push(`c.PHY_STATE = ?`);
+        params.push(state);
+    }
+    if (coverage !== 'ALL') { conditions.push(`p.COVERAGE_TYPE = ?`); params.push(coverage); }
+
+    const dbQuery = `
+        SELECT
+            strftime('%Y-W%W',
+                substr(p.POLICY_EFFECTIVE_DATE,7,4) || '-' ||
+                substr(p.POLICY_EFFECTIVE_DATE,1,2) || '-' ||
+                substr(p.POLICY_EFFECTIVE_DATE,4,2)
+            ) AS week_key,
+            TRIM(p.INSURANCE_COMPANY) AS carrier,
+            COUNT(DISTINCT p.DOT_NUMBER) AS policy_count
+        FROM insurance_policies p
+        ${joinClause}
+        WHERE ${conditions.join(' AND ')}
+        GROUP BY week_key, carrier
+        ORDER BY week_key ASC, policy_count DESC
+    `;
+
+    try {
+        const axios = require('axios');
+        const ax = axios.create({ headers: { Accept: 'application/json' } });
+
+        // ── Run DB query and InsHist fetch in parallel ─────────────────────
+        const [dbRows, insHistRows] = await Promise.all([
+            new Promise((resolve, reject) => {
+                const fmcsaDb = new sqlite3.Database('/var/www/vanguard/DB-V3.db', sqlite3.OPEN_READONLY, err => {
+                    if (err) return reject(err);
+                    fmcsaDb.all(dbQuery, params, (err, rows) => {
+                        fmcsaDb.close();
+                        err ? reject(err) : resolve(rows);
+                    });
+                });
+            }),
+            // InsHist prior-period fetch — state=ALL only
+            (async () => {
+                if (state !== 'ALL') return [];
+                const yearsNeeded = new Set();
+                for (let d = new Date(priorStart); d < pivot; d.setMonth(d.getMonth() + 1)) {
+                    yearsNeeded.add(d.getFullYear());
+                }
+                const perYear = await Promise.all(
+                    [...yearsNeeded].map(yr => _fetchInsHistYear(ax, yr, coverage))
+                );
+                return perYear.flat();
+            })()
+        ]);
+
+        console.log(`✅ Market intelligence DB: ${dbRows.length} rows | InsHist: ${insHistRows.length} carrier-day rows`);
+
+        // ── Build weekMap ──────────────────────────────────────────────────
+        // normToDisplay: Motus mixed-case names take display priority over InsHist ALL-CAPS
+        const weekMap       = {};   // { weekKey: { normKey: count } }
+        const carrierVolume = {};   // { normKey: totalCount }
+        const normToDisplay = {};   // { normKey: displayName }
+
+        // 1. DB rows (current period for state=ALL; full range for state-specific)
+        dbRows.forEach(r => {
+            if (!r.week_key || !r.carrier || r.carrier.length < 2) return;
+            const norm = _normCarrier(r.carrier);
+            if (!normToDisplay[norm]) normToDisplay[norm] = r.carrier;
+            if (!weekMap[r.week_key]) weekMap[r.week_key] = {};
+            weekMap[r.week_key][norm] = (weekMap[r.week_key][norm] || 0) + r.policy_count;
+            carrierVolume[norm] = (carrierVolume[norm] || 0) + r.policy_count;
+        });
+
+        // 2. InsHist rows → prior period only; InsHist is authoritative for pre-Motus carriers
+        insHistRows.forEach(r => {
+            if (!r.effective_date || !r.name_company) return;
+            const wk = _ihWeekKey(r.effective_date);
+            if (!wk) return;
+
+            // Gate to prior period — use actual effective_date YYYYMM, not week approximation.
+            // The week approximation maps pivot-boundary weeks (e.g. W39 2025 = Sep 29–Oct 5)
+            // to "202510" which equals pivotStr, incorrectly blocking Sep 29-30 InsHist rows
+            // that belong in the prior period.
+            const edp = r.effective_date.split('/');
+            const ym  = `${edp[2]}${edp[0]}`;   // YYYYMM from MM/DD/YYYY
+            if (ym < priorStartStr || ym >= pivotStr) return;
+
+            const norm = _normCarrier(r.name_company);
+            const cnt  = parseInt(r.cnt || 0);
+            if (!cnt) return;
+
+            if (!normToDisplay[norm]) normToDisplay[norm] = r.name_company;
+            if (!weekMap[wk]) weekMap[wk] = {};
+            // Accumulate per-day InsHist counts into the weekly bucket.
+            // DB covers pivot-onwards days of split weeks; InsHist covers pre-pivot days —
+            // no overlap, so adding is correct. The old replace approach discarded all but
+            // the last effective_date for a carrier within the same week.
+            weekMap[wk][norm] = (weekMap[wk][norm] || 0) + cnt;
+            carrierVolume[norm] = (carrierVolume[norm] || 0) + cnt;
+        });
+
+        const allWeeks = Object.keys(weekMap).sort();
+
+        // ── Top 20 carriers by total volume ───────────────────────────────
+        const topNorm = Object.entries(carrierVolume)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20)
+            .map(([norm]) => norm);
+
+        const topCarriers = topNorm.map(n => normToDisplay[n] || n);
+
+        // ── YoY stats per carrier ──────────────────────────────────────────
+        const carrierStats = {};
+        topNorm.forEach(norm => {
+            const disp = normToDisplay[norm] || norm;
+            let current = 0, prior = 0;
+            allWeeks.forEach(w => {
+                const yr     = parseInt(w.slice(0, 4));
+                const wkn    = parseInt(w.slice(6));
+                // Use Monday start of week for ym — more accurate than midpoint for
+                // boundary weeks (e.g. W39 2025 = Sep 29–Oct 5: midpoint gives "202510"
+                // which equals pivotStr, wrongly bucketing it as current).
+                const jan1Dow    = new Date(yr, 0, 1).getDay();
+                const toFirstMon = jan1Dow === 1 ? 0 : jan1Dow === 0 ? 1 : 8 - jan1Dow;
+                const monDoy     = wkn === 0 ? 0 : toFirstMon + (wkn - 1) * 7;
+                const monday     = new Date(yr, 0, 1 + monDoy);
+                const ym         = `${monday.getFullYear()}${String(monday.getMonth()+1).padStart(2,'0')}`;
+                const cnt        = weekMap[w][norm] || 0;
+                if (ym >= pivotStr)                              current += cnt;
+                else if (ym >= priorStartStr && ym < pivotStr)  prior   += cnt;
+            });
+            const isNew  = prior === 0 && current > 0;
+            const change = isNew ? null
+                : prior > 0 ? Math.round((current - prior) / prior * 1000) / 10
+                : 0;
+            carrierStats[disp] = { name: disp, total: carrierVolume[norm] || 0, current, prior, change, isNew };
+        });
+
+        // Rebuild weeklyData with display names (frontend uses display names as keys)
+        const weeklyData = {};
+        allWeeks.forEach(w => {
+            weeklyData[w] = {};
+            topNorm.forEach(norm => {
+                const cnt = weekMap[w][norm] || 0;
+                if (cnt) weeklyData[w][normToDisplay[norm] || norm] = cnt;
+            });
+        });
+
+        const result = {
+            weeks:      allWeeks,
+            topCarriers,
+            weeklyData,
+            carrierStats,
+            meta: { state, coverage, months, generatedAt: new Date().toISOString(),
+                    insHistEnabled: state === 'ALL' }
+        };
+
+        _mktIntelCache[cacheKey] = { data: result, ts: Date.now() };
+        res.json(result);
+
+    } catch (err) {
+        console.error('❌ Market intelligence error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
 // Policy status update endpoint
 app.put('/api/policies', (req, res) => {
     const { id, status, policyStatus } = req.body;
@@ -9906,6 +10679,7 @@ app.post('/api/send-callback-reminder', async (req, res) => {
         const mailOptions = {
             from: 'contact@vigagency.com',
             to: to,
+            cc: 'grant@vigagency.com',
             subject: subject,
             html: html
         };
@@ -11895,6 +12669,98 @@ function cleanupOverdueCallbacks() {
 cleanupOverdueCallbacks();
 setInterval(cleanupOverdueCallbacks, 24 * 60 * 60 * 1000);
 
+// ─── 45-Day Renewal Email — Manual Trigger (Testing) ─────────────────────────
+// POST /api/renewal-email/trigger  { policyId?, clientBusinessName? }
+// Sends renewal email immediately for testing — always goes to grant@vigagency.com
+app.post('/api/renewal-email/trigger', async (req, res) => {
+    const { policyId, clientBusinessName } = req.body;
+    const nodemailer = require('nodemailer');
+    const RENEWAL_TEST_EMAIL = 'grant@vigagency.com';
+
+    function decodBodyType(code) {
+        const map = { TKTR:'Tractor', DMPT:'Dump Truck', STRK:'Straight Truck', VAN:'Van', TANK:'Tanker', TRLR:'Trailer', PICK:'Pickup', FLAT:'Flatbed', REFR:'Refrigerated', DUMP:'Dump' };
+        return map[code] || code || '';
+    }
+
+    function buildHtml(clientData, pol, agencyName) {
+        const biz = clientData.businessName || clientData.name || 'Your Business';
+        const contact = clientData.name || biz;
+        const carrier = pol.carrier || 'your carrier';
+        const policyNum = (pol.policyNumber || '').trim();
+        const expDate = pol.expirationDate || 'N/A';
+        const effDate = pol.effectiveDate || 'N/A';
+        const premium = pol.premium || 'N/A';
+        const dot = pol.dotNumber || clientData.dotNumber || '';
+        const mc = pol.mcNumber || clientData.mcNumber || '';
+        const addr = [clientData.address, clientData.city, clientData.state, clientData.zip].filter(Boolean).join(', ');
+        const brandColor = agencyName === 'UIG Agency' ? '#7c3aed' : '#1d4ed8';
+        const vehicles = pol.vehicles || [];
+        const drivers = pol.drivers || [];
+        const vehicleRows = vehicles.map((v,i) => `<tr style="background:${i%2===0?'#f9fafb':'white'}"><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.vehicleNumber||i+1}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.year||''}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.make||''}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.model||''}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:12px;font-family:monospace;">${v.vin||''}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${decodBodyType(v.bodyType)}</td></tr>`).join('');
+        const driverRows = drivers.map((d,i) => `<tr style="background:${i%2===0?'#f9fafb':'white'}"><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${d.driverNumber||i+1}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;font-weight:600;">${d.name||''}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${d.dateOfBirth||''}</td><td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;font-family:monospace;">${d.license||''}</td></tr>`).join('');
+        return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;"><div style="max-width:680px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);"><div style="background:linear-gradient(135deg,${brandColor},#3b82f6);padding:32px 36px;text-align:center;"><h1 style="margin:0;color:white;font-size:26px;font-weight:700;">${agencyName}</h1><p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:15px;">Policy Renewal Notice — 45 Days Out</p></div><div style="padding:32px 36px;"><p style="font-size:16px;color:#1f2937;margin:0 0 12px;">Hi <strong>${contact}</strong>,</p><p style="font-size:15px;color:#374151;line-height:1.6;margin:0 0 20px;">Your commercial insurance policy through <strong>${carrier}</strong> is coming up for renewal on <strong>${expDate}</strong> — that's just 45 days away. We're actively shopping the market right now to make sure you get the most competitive rates available.</p><p style="font-size:15px;color:#374151;line-height:1.6;margin:0 0 24px;">Below is what we have on file for your current operation. <strong>Please review everything and reply to let us know if anything has changed</strong> — any new or removed vehicles, driver updates, address changes, etc.</p><div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:20px;margin-bottom:28px;"><h3 style="margin:0 0 14px;color:${brandColor};font-size:16px;">Current Policy Summary</h3><table style="width:100%;border-collapse:collapse;"><tr><td style="padding:5px 0;color:#6b7280;font-size:13px;width:40%;">Carrier</td><td style="padding:5px 0;font-weight:600;color:#1f2937;font-size:14px;">${carrier}</td></tr><tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Policy Number</td><td style="padding:5px 0;font-weight:600;color:#1f2937;font-size:14px;">${policyNum}</td></tr><tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Effective Date</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${effDate}</td></tr><tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Expiration Date</td><td style="padding:5px 0;font-weight:700;color:#dc2626;font-size:14px;">${expDate}</td></tr><tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Annual Premium</td><td style="padding:5px 0;font-weight:600;color:#059669;font-size:14px;">${premium}</td></tr>${dot?`<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">USDOT</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${dot}</td></tr>`:''}</table></div><div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:18px;margin-bottom:28px;"><h3 style="margin:0 0 12px;color:#374151;font-size:15px;">Insured Information</h3><table style="width:100%;border-collapse:collapse;"><tr><td style="padding:4px 0;color:#6b7280;font-size:13px;width:40%;">Business Name</td><td style="padding:4px 0;font-weight:600;color:#1f2937;font-size:13px;">${biz}</td></tr><tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Contact Name</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${contact}</td></tr>${addr?`<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Address</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${addr}</td></tr>`:''}${clientData.phone?`<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Phone</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${clientData.phone}</td></tr>`:''}${clientData.email?`<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Email</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${clientData.email}</td></tr>`:''}</table></div>${vehicles.length>0?`<h3 style="color:#374151;font-size:15px;margin:0 0 10px;">Scheduled Vehicles (${vehicles.length})</h3><div style="overflow-x:auto;margin-bottom:28px;"><table style="width:100%;border-collapse:collapse;min-width:500px;"><thead><tr style="background:${brandColor};color:white;"><th style="padding:10px 12px;text-align:left;font-size:12px;">#</th><th style="padding:10px 12px;text-align:left;font-size:12px;">Year</th><th style="padding:10px 12px;text-align:left;font-size:12px;">Make</th><th style="padding:10px 12px;text-align:left;font-size:12px;">Model</th><th style="padding:10px 12px;text-align:left;font-size:12px;">VIN</th><th style="padding:10px 12px;text-align:left;font-size:12px;">Type</th></tr></thead><tbody>${vehicleRows}</tbody></table></div>`:''}${drivers.length>0?`<h3 style="color:#374151;font-size:15px;margin:0 0 10px;">Scheduled Drivers (${drivers.length})</h3><div style="overflow-x:auto;margin-bottom:28px;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="background:#374151;color:white;"><th style="padding:10px 12px;text-align:left;font-size:12px;">#</th><th style="padding:10px 12px;text-align:left;font-size:12px;">Name</th><th style="padding:10px 12px;text-align:left;font-size:12px;">Date of Birth</th><th style="padding:10px 12px;text-align:left;font-size:12px;">License #</th></tr></thead><tbody>${driverRows}</tbody></table></div>`:''}<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:20px;margin-bottom:24px;"><p style="margin:0;font-size:15px;color:#166534;font-weight:600;">Any changes to the above?</p><p style="margin:8px 0 0;font-size:14px;color:#15803d;line-height:1.6;">Reply to this email with any updates — new vehicles, removed vehicles, new drivers, address changes, or anything else. We'll have renewal quotes ready for you well before your expiration date.</p></div></div><div style="background:#1f2937;padding:20px 36px;text-align:center;"><p style="margin:0;color:#9ca3af;font-size:12px;">${agencyName} &nbsp;|&nbsp; contact@${agencyName==='UIG Agency'?'uig':'vig'}agency.com</p><p style="margin:6px 0 0;color:#6b7280;font-size:11px;">This is an automated renewal notice sent 45 days before policy expiration.</p></div></div></body></html>`;
+    }
+
+    try {
+        // Find the policy
+        const findPolicy = () => new Promise((resolve, reject) => {
+            if (policyId) {
+                db.get('SELECT id, client_id, data FROM policies WHERE id = ?', [policyId], (err, row) => err ? reject(err) : resolve(row));
+            } else if (clientBusinessName) {
+                // Try join with clients first, then fall back to searching insured name in policy data
+                db.get(`SELECT p.id, p.client_id, p.data FROM policies p JOIN clients c ON c.id = p.client_id WHERE json_extract(c.data, '$.businessName') LIKE ? ORDER BY p.updated_at DESC LIMIT 1`, [`%${clientBusinessName}%`], (err, row) => {
+                    if (err) return reject(err);
+                    if (row) return resolve(row);
+                    // Fallback: search insured name inside policy JSON
+                    db.get(`SELECT id, client_id, data FROM policies WHERE json_extract(data, '$.policies[0].insured."Business Name"') LIKE ? OR json_extract(data, '$.policies[0].insured."Name/Business Name"') LIKE ? ORDER BY updated_at DESC LIMIT 1`, [`%${clientBusinessName}%`, `%${clientBusinessName}%`], (err2, row2) => err2 ? reject(err2) : resolve(row2));
+                });
+            } else {
+                reject(new Error('Provide policyId or clientBusinessName'));
+            }
+        });
+
+        const policyRow = await findPolicy();
+        if (!policyRow) return res.status(404).json({ error: 'Policy not found' });
+
+        const policyData = JSON.parse(policyRow.data || '{}');
+        const pol = (policyData.policies || [policyData])[0];
+
+        const clientRow = await new Promise((resolve, reject) =>
+            db.get('SELECT id, data FROM clients WHERE id = ?', [policyRow.client_id], (err, r) => err ? reject(err) : resolve(r))
+        );
+
+        let clientData = {};
+        if (clientRow) { try { clientData = JSON.parse(clientRow.data); } catch(e) {} }
+
+        // Fallback: try to get client info from insured in policy
+        if (!clientData.businessName && pol.insured) {
+            clientData.businessName = pol.insured['Business Name'] || pol.insured['Name/Business Name'] || '';
+        }
+
+        const agent = (pol.agent || clientData.assignedTo || '').toLowerCase();
+        const isUIG = agent === 'maureen';
+        const agencyName = isUIG ? 'UIG Agency' : 'VIG Agency';
+        const fromEmail = isUIG ? 'contact@uigagency.com' : 'contact@vigagency.com';
+        const fromPass  = isUIG ? process.env.GODADDY_UIG_PASSWORD : process.env.GODADDY_VIG_PASSWORD;
+
+        const transporter = nodemailer.createTransport({
+            host: 'smtpout.secureserver.net', port: 465, secure: true,
+            auth: { user: fromEmail, pass: fromPass }
+        });
+
+        const biz = clientData.businessName || pol.insured?.['Business Name'] || 'Client';
+        const subject = `[TEST] Policy Renewal in 45 Days — ${biz} (${pol.carrier} #${(pol.policyNumber||'').trim()})`;
+        const html = buildHtml(clientData, pol, agencyName);
+
+        const info = await transporter.sendMail({ from: `"${agencyName}" <${fromEmail}>`, to: RENEWAL_TEST_EMAIL, cc: 'grant@vigagency.com', subject, html });
+        console.log(`✅ Test renewal email sent for ${biz} → ${RENEWAL_TEST_EMAIL} (${info.messageId})`);
+        res.json({ success: true, to: RENEWAL_TEST_EMAIL, business: biz, messageId: info.messageId, carrier: pol.carrier, expDate: pol.expirationDate });
+    } catch (err) {
+        console.error('Error sending test renewal email:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // State generation tracking endpoints
 app.get('/api/state-generation-status', (req, res) => {
     const now = new Date();
@@ -12148,10 +13014,101 @@ app.post('/api/commercial-leads/enrich', async (req, res) => {
 });
 // ─── End Commercial Leads API ─────────────────────────────────────────────────
 
+// ─── Corgi Prequote Proxy ─────────────────────────────────────────────────────
+app.post('/api/corgi/prequote', async (req, res) => {
+    try {
+        const axios = require('axios');
+        const CORGI_API_KEY = 'dpk_5852959849b6e380cb9cb112be283f2c3428089db76021ddb9f5a57bdfed62d1';
+        const response = await axios.post(
+            'https://api.trucking.corgi.insure/api/trucking/v2/quotes/prequote',
+            req.body,
+            {
+                headers: {
+                    'Authorization': `Bearer ${CORGI_API_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 30000
+            }
+        );
+        res.json(response.data);
+    } catch (e) {
+        const status = e.response?.status || 500;
+        const data = e.response?.data || { error: e.message };
+        res.status(status).json(data);
+    }
+});
+// ─── End Corgi Prequote Proxy ──────────────────────────────────────────────────
+
 // ─── iOS Client Portal API ────────────────────────────────────────────────────
 const portalApi = require('./portal-api');
 app.use('/api/portal', portalApi);
 // ─── End iOS Client Portal API ───────────────────────────────────────────────
+
+// ── FMCSA Sync API ───────────────────────────────────────────────────────────
+let _syncInProgress = false;
+
+// GET /api/fmcsa/sync-status — last 10 sync runs
+app.get('/api/fmcsa/sync-status', authenticateToken, async (req, res) => {
+    try {
+        const rows = await fmcsaSync.getStatus();
+        res.json({ syncs: rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/fmcsa/sync — trigger manual sync (admins only)
+app.post('/api/fmcsa/sync', authenticateToken, async (req, res) => {
+    if (_syncInProgress) {
+        return res.status(409).json({ error: 'Sync already in progress' });
+    }
+    _syncInProgress = true;
+
+    const forceFullSync = req.body && req.body.full === true;
+    const appToken = process.env.SOCRATA_APP_TOKEN || undefined;
+
+    // Respond immediately — sync runs in background
+    res.json({ message: 'Sync started', full: forceFullSync });
+
+    try {
+        await fmcsaSync.sync({
+            forceFullSync,
+            appToken,
+            onProgress: (p) => {
+                console.log(`[FMCSA Sync] page=${p.page} fetched=${p.totalFetched} inserted=${p.totalInserted} skipped=${p.totalSkipped}`);
+            }
+        });
+    } catch (err) {
+        console.error('[FMCSA Sync] Manual sync failed:', err.message);
+    } finally {
+        _syncInProgress = false;
+    }
+});
+
+// ── Daily FMCSA sync cron (3:00 AM UTC) ─────────────────────────────────────
+const cron = require('node-cron');
+cron.schedule('0 3 * * *', async () => {
+    if (_syncInProgress) {
+        console.log('[FMCSA Cron] Skipping — sync already in progress');
+        return;
+    }
+    console.log('[FMCSA Cron] Starting daily incremental sync...');
+    _syncInProgress = true;
+    try {
+        const result = await fmcsaSync.sync({
+            appToken: process.env.SOCRATA_APP_TOKEN || undefined,
+            onProgress: (p) => {
+                console.log(`[FMCSA Cron] page=${p.page} fetched=${p.totalFetched} inserted=${p.totalInserted}`);
+            }
+        });
+        console.log('[FMCSA Cron] Complete:', result);
+    } catch (err) {
+        console.error('[FMCSA Cron] Failed:', err.message);
+    } finally {
+        _syncInProgress = false;
+    }
+});
+console.log('[FMCSA Cron] Scheduled — daily at 03:00 UTC');
 
 // Export database for use in other modules
 module.exports = { db };

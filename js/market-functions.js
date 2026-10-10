@@ -532,6 +532,8 @@ function showLogQuoteModal(carrierName = null) {
                         <option value="Crum & Forster">Crum & Forster</option>
                         <option value="Nico">Nico</option>
                         <option value="Berkley Prime">Berkley Prime</option>
+                        <option value="Star Mutual">Star Mutual</option>
+                        <option value="Corgi">Corgi</option>
                     </select>
                 </div>
 
@@ -1169,6 +1171,206 @@ function selectMetric(metric) {
     }
 }
 
+// ─── Estimate Quote Modal ─────────────────────────────────────────────────────
+
+function showEstimateQuoteModal() {
+    const existing = document.getElementById('estimate-quote-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'estimate-quote-modal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;justify-content:center;align-items:center;z-index:10000;backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+        <div style="background:white;border-radius:16px;width:96%;max-width:560px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);animation:modalSlideIn 0.3s ease-out;">
+            <!-- Header -->
+            <div style="padding:22px 28px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:white;border-radius:16px 16px 0 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2 style="margin:0;font-size:22px;font-weight:700;">
+                        <i class="fas fa-calculator" style="margin-right:10px;color:#bfdbfe;"></i>Estimate Quote
+                    </h2>
+                    <button onclick="document.getElementById('estimate-quote-modal').remove()"
+                        style="background:rgba(255,255,255,0.15);border:2px solid rgba(255,255,255,0.3);color:white;font-size:18px;font-weight:bold;cursor:pointer;padding:6px 12px;border-radius:8px;">✕</button>
+                </div>
+                <div style="margin-top:6px;opacity:0.85;font-size:14px;">Market averages from logged quotes · per unit × vehicle count</div>
+            </div>
+
+            <!-- Body -->
+            <div style="padding:28px;">
+                <!-- USDOT -->
+                <div style="margin-bottom:20px;">
+                    <label style="display:block;font-weight:600;color:#374151;margin-bottom:6px;font-size:14px;">USDOT Number <span style="color:#9ca3af;font-weight:400;">(optional)</span></label>
+                    <input id="eq-usdot" type="text" placeholder="e.g. 1234567"
+                        style="width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;outline:none;"
+                        onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'">
+                </div>
+
+                <!-- Vehicles -->
+                <div style="margin-bottom:20px;">
+                    <label style="display:block;font-weight:600;color:#374151;margin-bottom:6px;font-size:14px;">Number of Vehicles</label>
+                    <input id="eq-vehicles" type="number" min="1" value="1" placeholder="1"
+                        style="width:100%;padding:10px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:15px;box-sizing:border-box;outline:none;"
+                        onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'">
+                </div>
+
+                <!-- Period -->
+                <div style="margin-bottom:28px;">
+                    <label style="display:block;font-weight:600;color:#374151;margin-bottom:10px;font-size:14px;">Market Data Period</label>
+                    <div style="display:flex;gap:8px;">
+                        <button class="eq-period-btn" data-days="30"
+                            onclick="window._eqSelectPeriod(30)"
+                            style="flex:1;padding:9px 0;border:2px solid #e5e7eb;border-radius:8px;background:white;color:#6b7280;font-weight:600;font-size:13px;cursor:pointer;">1 Month</button>
+                        <button class="eq-period-btn active" data-days="90"
+                            onclick="window._eqSelectPeriod(90)"
+                            style="flex:1;padding:9px 0;border:2px solid #1d4ed8;border-radius:8px;background:#1d4ed8;color:white;font-weight:600;font-size:13px;cursor:pointer;">3 Months</button>
+                        <button class="eq-period-btn" data-days="180"
+                            onclick="window._eqSelectPeriod(180)"
+                            style="flex:1;padding:9px 0;border:2px solid #e5e7eb;border-radius:8px;background:white;color:#6b7280;font-weight:600;font-size:13px;cursor:pointer;">6 Months</button>
+                    </div>
+                    <input type="hidden" id="eq-period" value="90">
+                </div>
+
+                <!-- Generate Button -->
+                <button onclick="window.generateEstimateQuote()"
+                    style="width:100%;padding:13px;background:linear-gradient(135deg,#1d4ed8,#3b82f6);color:white;border:none;border-radius:10px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(29,78,216,0.3);transition:opacity 0.2s;"
+                    onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                    <i class="fas fa-chart-bar" style="margin-right:8px;"></i>Generate Quote Estimate
+                </button>
+
+                <!-- Results -->
+                <div id="eq-results" style="display:none;margin-top:24px;"></div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+window._eqSelectPeriod = function(days) {
+    document.getElementById('eq-period').value = days;
+    document.querySelectorAll('.eq-period-btn').forEach(btn => {
+        const active = parseInt(btn.dataset.days) === days;
+        btn.style.background = active ? '#1d4ed8' : 'white';
+        btn.style.borderColor = active ? '#1d4ed8' : '#e5e7eb';
+        btn.style.color = active ? 'white' : '#6b7280';
+    });
+};
+
+window.generateEstimateQuote = async function() {
+    const days = parseInt(document.getElementById('eq-period').value) || 90;
+    const vehicles = Math.max(1, parseInt(document.getElementById('eq-vehicles').value) || 1);
+    const usdot = (document.getElementById('eq-usdot').value || '').trim();
+    const resultsEl = document.getElementById('eq-results');
+
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;"><i class="fas fa-spinner fa-spin" style="font-size:22px;"></i><div style="margin-top:8px;">Calculating from market data...</div></div>';
+
+    let quotes = [];
+    try {
+        const res = await fetch(`/api/market-quotes?days=${days}`);
+        if (res.ok) quotes = await res.json();
+    } catch(e) { /* fall through to empty */ }
+
+    function extractNum(text) {
+        if (!text) return null;
+        const m = text.replace(/[$,\s]/g, '').match(/(\d+(?:\.\d{1,2})?)/);
+        return m ? parseFloat(m[1]) : null;
+    }
+
+    // Build per-carrier averages for each metric
+    const byCarrier = {};
+    quotes.forEach(q => {
+        if (!byCarrier[q.carrier]) byCarrier[q.carrier] = { liab: [], phys: [], cargo: [] };
+        const liab = extractNum(q.liability_per_unit);
+        const phys = extractNum(q.physical_coverage);
+        const cargo = extractNum(q.premium_text);
+        if (liab) byCarrier[q.carrier].liab.push(liab);
+        if (phys) byCarrier[q.carrier].phys.push(phys);
+        if (cargo) byCarrier[q.carrier].cargo.push(cargo);
+    });
+
+    function avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
+    function bestFor(metric) {
+        let best = null, bestAvg = Infinity;
+        Object.entries(byCarrier).forEach(([carrier, d]) => {
+            const a = avg(d[metric]);
+            if (a !== null && a < bestAvg) { bestAvg = a; best = { carrier, avg: a }; }
+        });
+        // Market overall average across all carriers
+        const allVals = Object.values(byCarrier).flatMap(d => d[metric]);
+        const marketAvg = avg(allVals);
+        return { best, marketAvg };
+    }
+
+    const liabResult  = bestFor('liab');
+    const physResult  = bestFor('phys');
+    const cargoResult = bestFor('cargo');
+
+    const hasAny = liabResult.marketAvg || physResult.marketAvg || cargoResult.marketAvg;
+
+    if (!hasAny) {
+        resultsEl.innerHTML = `
+            <div style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:10px;padding:16px;text-align:center;color:#92400e;">
+                <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
+                No market data found for this period. Log some quotes first.
+            </div>`;
+        return;
+    }
+
+    function fmtDollar(n) { return n != null ? '$' + Math.round(n).toLocaleString() : '—'; }
+
+    function resultCard(icon, label, color, result) {
+        const perUnit = result.marketAvg;
+        const total = perUnit != null ? perUnit * vehicles : null;
+        const bestCo = result.best;
+        const bestTotal = bestCo ? bestCo.avg * vehicles : null;
+        return `
+            <div style="background:#f8fafc;border:1.5px solid #e5e7eb;border-radius:12px;padding:18px;margin-bottom:14px;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                    <div style="width:36px;height:36px;background:${color};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:16px;">
+                        <i class="fas fa-${icon}"></i>
+                    </div>
+                    <span style="font-weight:700;color:#1f2937;font-size:15px;">${label}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div style="background:white;border-radius:8px;padding:12px;border:1px solid #e5e7eb;text-align:center;">
+                        <div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Mkt Avg / Unit</div>
+                        <div style="font-size:20px;font-weight:700;color:#1f2937;">${fmtDollar(perUnit)}</div>
+                        ${vehicles > 1 ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">× ${vehicles} = <strong>${fmtDollar(total)}</strong></div>` : ''}
+                    </div>
+                    <div style="background:white;border-radius:8px;padding:12px;border:1px solid #e5e7eb;text-align:center;">
+                        <div style="font-size:11px;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Best Rate</div>
+                        ${bestCo ? `
+                            <div style="font-size:20px;font-weight:700;color:#059669;">${fmtDollar(bestCo.avg)}</div>
+                            <div style="font-size:12px;color:#059669;font-weight:600;margin-top:2px;">${bestCo.carrier}</div>
+                            ${vehicles > 1 ? `<div style="font-size:11px;color:#6b7280;">× ${vehicles} = <strong>${fmtDollar(bestTotal)}</strong></div>` : ''}
+                        ` : '<div style="color:#9ca3af;font-size:13px;margin-top:6px;">No data</div>'}
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    const periodLabel = days === 30 ? '1 Month' : days === 90 ? '3 Months' : '6 Months';
+
+    resultsEl.innerHTML = `
+        <div style="border-top:2px solid #e5e7eb;padding-top:20px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <div style="font-weight:700;color:#1f2937;font-size:15px;">
+                    <i class="fas fa-chart-bar" style="color:#3b82f6;margin-right:6px;"></i>
+                    Estimate — ${vehicles} Unit${vehicles !== 1 ? 's' : ''}${usdot ? ' · DOT ' + usdot : ''}
+                </div>
+                <div style="font-size:12px;color:#9ca3af;background:#f3f4f6;padding:4px 10px;border-radius:6px;">Last ${periodLabel}</div>
+            </div>
+            ${resultCard('shield-alt', 'Auto Liability', '#1d4ed8', liabResult)}
+            ${resultCard('car', 'Physical Damage', '#7c3aed', physResult)}
+            ${resultCard('box', 'Cargo', '#059669', cargoResult)}
+            <div style="font-size:11px;color:#9ca3af;text-align:center;margin-top:8px;">
+                <i class="fas fa-info-circle" style="margin-right:4px;"></i>
+                Estimates based on ${quotes.length} logged quote${quotes.length !== 1 ? 's' : ''} from the last ${periodLabel.toLowerCase()}. Actual rates may vary.
+            </div>
+        </div>`;
+};
+
 // Make functions globally available
 window.showCarrierDetails = showCarrierDetails;
 window.closeCarrierDetailsModal = closeCarrierDetailsModal;
@@ -1182,6 +1384,7 @@ window.deleteQuote = deleteQuote;
 window.clearAllCarrierData = clearAllCarrierData;
 window.autoImportLeadQuotes = autoImportLeadQuotes;
 window.checkAutoImportEligibility = checkAutoImportEligibility;
+window.showEstimateQuoteModal = showEstimateQuoteModal;
 
 // Auto-import quotes from lead profile to market tab
 async function autoImportLeadQuotes(leadId, leadName) {

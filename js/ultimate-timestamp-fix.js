@@ -20,6 +20,9 @@
             const cells = row.querySelectorAll('td');
             if (cells.length < 7) return;
 
+            // Skip CSR-pending blue rows — blue takes priority over all other highlights
+            if (row.classList.contains('csr-done-pending') || row.getAttribute('data-highlight') === 'blue') return;
+
             // Get TO DO text
             const todoCell = cells[7];
             const todoText = (todoCell.textContent || '').trim();

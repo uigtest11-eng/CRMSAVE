@@ -205,6 +205,9 @@ function getCompleteGenerateLeadsContent() {
                             <button type="button" class="btn-info" onclick="openSelectPresetPopup()" style="padding: 8px 16px; font-size: 0.9rem;">
                                 <i class="fas fa-list"></i> Select Preset
                             </button>
+                            <button type="button" onclick="generateWithCorgiPrequotes()" style="padding: 8px 16px; font-size: 0.9rem; background: #f97316; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s;">
+                                <i class="fas fa-bolt"></i> Generate with Corgi Prequotes
+                            </button>
                         </div>
                     </div>
                     <div class="form-grid">
@@ -2580,6 +2583,7 @@ async function generateLeadsNow() {
     // No limit - fetch all available leads
     const minFleet = document.getElementById('genMinFleet')?.value || '1';
     const maxFleet = document.getElementById('genMaxFleet')?.value || '9999';
+    const safety = document.getElementById('genSafety')?.value;
     const hazmat = document.getElementById('genHazmat')?.value;
     const commoditiesHauled = document.getElementById('commoditiesHauled')?.value;
 
@@ -2997,7 +3001,7 @@ window.exportGeneratedLeads = function(format) {
 
     if (format === 'excel') {
         // Convert to CSV for Excel
-        const headers = ['DOT Number', 'Company Name', 'City', 'State', 'Phone', 'Email', 'Fleet Size', 'Renewal Date'];
+        const headers = ['DOT Number', 'Company Name', 'City', 'State', 'Phone', 'Email', 'Fleet Size', 'Renewal Date', 'Corgi Prequote ID', 'Corgi Eligible'];
         const csvContent = [
             headers.join(','),
             ...window.generatedLeadsData.map(lead => [
@@ -3008,7 +3012,9 @@ window.exportGeneratedLeads = function(format) {
                 lead.phone || '',
                 lead.email_address || '',
                 lead.power_units || lead.vehicle_count || '',
-                lead.policy_renewal_date || ''
+                lead.policy_renewal_date || '',
+                lead.corgi_prequote?.prequote_id || '',
+                lead.corgi_prequote ? (lead.corgi_prequote.eligible ? 'Yes' : 'Not Eligible') : ''
             ].join(','))
         ].join('\n');
 
@@ -3503,6 +3509,181 @@ window.closeLeadSplitPopup = function() {
     const modal = document.getElementById('leadSplitModal');
     if (modal) {
         modal.style.display = 'none';
+    }
+};
+
+// ============================================================
+// Corgi Prequote Integration
+// ============================================================
+const CORGI_API_KEY = 'dpk_5852959849b6e380cb9cb112be283f2c3428089db76021ddb9f5a57bdfed62d1';
+const CORGI_API_BASE = 'https://api.trucking.corgi.insure/api/trucking/v2';
+
+async function fetchCorgiPrequote(lead) {
+    const dotNumber = String(lead.dot_number || '').trim();
+    if (!dotNumber) return { eligible: false, prequote_id: null, reason: 'No DOT' };
+
+    const today = new Date();
+    const effectiveDate = today.toISOString().split('T')[0];
+    const expDate = new Date(today);
+    expDate.setFullYear(expDate.getFullYear() + 1);
+    const expirationDate = expDate.toISOString().split('T')[0];
+
+    const fleetSize = parseInt(lead.power_units) || parseInt(lead.qc_power_units) || parseInt(lead.mcs150_power_units) || 1;
+
+    try {
+        const resp = await fetch('/api/corgi/prequote', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                dot_number: dotNumber,
+                effective_date: effectiveDate,
+                expiration_date: expirationDate,
+                fleet_size: fleetSize,
+                requested_coverages: { auto_liability: { subtypes: ['power_unit'] } }
+            })
+        });
+
+        if (resp.status === 429) {
+            // Retry once after a longer backoff
+            await new Promise(r => setTimeout(r, 15000));
+            const retry = await fetch('/api/corgi/prequote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    dot_number: dotNumber,
+                    effective_date: effectiveDate,
+                    expiration_date: expirationDate,
+                    fleet_size: fleetSize,
+                    requested_coverages: { auto_liability: { subtypes: ['power_unit'] } }
+                })
+            });
+            if (retry.status === 429) return { eligible: false, prequote_id: null, reason: 'rate_limited' };
+            if (!retry.ok) {
+                const err = await retry.json().catch(() => ({}));
+                return { eligible: false, prequote_id: null, reason: err.error || `Error ${retry.status}` };
+            }
+            const retryData = await retry.json();
+            const retryDeclined = retryData.declined_coverages || {};
+            const retryIsDeclined = Object.keys(retryDeclined).length > 0;
+            return {
+                eligible: !retryIsDeclined,
+                prequote_id: retryData.prequote_id || null,
+                reason: retryIsDeclined ? (Object.values(retryDeclined)[0] || 'declined') : null,
+                premium: retryData.total_premium || null
+            };
+        }
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            return { eligible: false, prequote_id: null, reason: err.error || `Error ${resp.status}` };
+        }
+
+        const data = await resp.json();
+        const declined = data.declined_coverages || {};
+        const isDeclined = Object.keys(declined).length > 0;
+
+        return {
+            eligible: !isDeclined,
+            prequote_id: data.prequote_id || null,
+            reason: isDeclined ? (Object.values(declined)[0] || 'declined') : null,
+            premium: data.total_premium || null
+        };
+    } catch (e) {
+        return { eligible: false, prequote_id: null, reason: e.message };
+    }
+}
+
+window.generateWithCorgiPrequotes = async function() {
+    const state = document.getElementById('genState')?.value;
+    if (!state) {
+        alert('Please select a state first.');
+        return;
+    }
+
+    const btn = document.querySelector('button[onclick="generateWithCorgiPrequotes()"]');
+    if (btn) {
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+        btn.disabled = true;
+    }
+
+    try {
+        await generateLeadsFromForm();
+        const leads = window.generatedLeadsData;
+
+        if (!leads || leads.length === 0) {
+            alert('No leads generated. Adjust criteria and try again.');
+            return;
+        }
+
+        const total = leads.length;
+        document.body.insertAdjacentHTML('beforeend', `
+            <div id="corgiProgressOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:20000;display:flex;align-items:center;justify-content:center;">
+                <div style="background:#fff;border-radius:14px;padding:36px 40px;max-width:480px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);text-align:center;">
+                    <div style="font-size:2.5rem;margin-bottom:12px;">🐕</div>
+                    <h3 style="margin:0 0 6px;font-size:1.25rem;font-weight:700;">Corgi Prequotes Running</h3>
+                    <p style="color:#6b7280;margin:0 0 24px;font-size:0.9rem;">Checking eligibility for each lead via Corgi API...</p>
+                    <div style="background:#f3f4f6;border-radius:999px;height:10px;overflow:hidden;margin-bottom:14px;">
+                        <div id="corgiBar" style="background:#f97316;height:100%;width:0%;transition:width 0.25s;border-radius:999px;"></div>
+                    </div>
+                    <div id="corgiProgressLabel" style="font-weight:600;color:#111827;font-size:0.95rem;">0 / ${total}</div>
+                    <div id="corgiEligibleLabel" style="color:#10b981;font-size:0.85rem;margin-top:4px;">0 eligible</div>
+                </div>
+            </div>
+        `);
+
+        const CONCURRENCY = 3;
+        const BATCH_DELAY_MS = 1200;
+        let done = 0, eligible = 0;
+
+        for (let i = 0; i < leads.length; i += CONCURRENCY) {
+            const batch = leads.slice(i, i + CONCURRENCY);
+            const results = await Promise.all(batch.map(lead => fetchCorgiPrequote(lead)));
+
+            let anyRateLimited = false;
+            let rateLimitedCount = 0;
+            results.forEach((result, idx) => {
+                batch[idx].corgi_prequote = result;
+                done++;
+                if (result.eligible) eligible++;
+                if (result.reason === 'rate_limited') { anyRateLimited = true; rateLimitedCount++; }
+            });
+
+            const pct = Math.round(done / total * 100);
+            const bar = document.getElementById('corgiBar');
+            const label = document.getElementById('corgiProgressLabel');
+            const elLabel = document.getElementById('corgiEligibleLabel');
+            if (bar) bar.style.width = pct + '%';
+            if (label) label.textContent = `${done} / ${total}`;
+            if (elLabel) elLabel.textContent = `${eligible} eligible`;
+
+            if (anyRateLimited) {
+                if (elLabel) elLabel.textContent = `${eligible} eligible — rate limited, waiting 20s...`;
+                await new Promise(r => setTimeout(r, 20000));
+            } else if (i + CONCURRENCY < leads.length) {
+                await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+            }
+        }
+
+        document.getElementById('corgiProgressOverlay')?.remove();
+
+        // Keep only eligible leads
+        const ineligible = total - eligible;
+        window.generatedLeadsData = leads.filter(l => l.corgi_prequote && l.corgi_prequote.eligible);
+        const rateLimited = leads.filter(l => l.corgi_prequote?.reason === 'rate_limited').length;
+
+        // Update the stat box to reflect filtered count
+        const countEl = document.getElementById('totalLeadsCount');
+        if (countEl) countEl.textContent = window.generatedLeadsData.length;
+
+        const rateLimitNote = rateLimited > 0 ? `\n⚠️ ${rateLimited} leads skipped due to Corgi rate limiting` : '';
+        alert(`Corgi Prequotes Complete!\n\n${eligible} eligible leads kept\n${ineligible} not eligible (removed)${rateLimitNote}`);
+
+    } finally {
+        document.getElementById('corgiProgressOverlay')?.remove();
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-bolt"></i> Generate with Corgi Prequotes';
+            btn.disabled = false;
+        }
     }
 };
 

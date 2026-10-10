@@ -569,6 +569,15 @@ async function updateLeadField(leadId, field, value) {
         localStorage.setItem('insurance_leads', JSON.stringify(leads));
         localStorage.setItem('leads', JSON.stringify(leads));
 
+        // Update the in-memory leads list and refresh the table row so the overview reflects the change immediately
+        if (window.currentActiveLeads) {
+            const memLead = window.currentActiveLeads.find(l => String(l.id) === String(leadId));
+            if (memLead) memLead[field] = value;
+        }
+        if (typeof updateLeadRowInTable === 'function') {
+            updateLeadRowInTable(leadId, lead);
+        }
+
         // Persist ALL fields to database, not just stage
         try {
             // Try the new API first - use current domain

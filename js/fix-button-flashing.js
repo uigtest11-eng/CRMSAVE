@@ -71,11 +71,6 @@
                 animation: none !important;
             }
 
-            /* Stop any blinking or flashing animations */
-            * {
-                animation-duration: 0.2s !important;
-            }
-
             @keyframes none {
                 from { opacity: 1; }
                 to { opacity: 1; }

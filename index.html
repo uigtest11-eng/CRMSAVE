@@ -21,7 +21,9 @@
     <!-- Enhanced Client Management Styles -->
     <link rel="stylesheet" href="css/enhanced-clients.css?v=2025021001">
     <!-- Market Page Styles -->
-    <link rel="stylesheet" href="css/market-styles.css?v=1">
+    <link rel="stylesheet" href="css/market-styles.css?v=2">
+    <!-- Market Intelligence Terminal -->
+    <link rel="stylesheet" href="css/market-intelligence.css?v=5">
     <!-- Sticky Table Header -->
     <link rel="stylesheet" href="css/sticky-table-header.css?v=1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1111,6 +1113,7 @@
                             <a href="javascript:void(0)" data-tooltip="Leads" onclick="toggleLeadsFolder()">
                                 <i class="fas fa-user-plus"></i>
                                 <span>Leads</span>
+                                <span id="leads-todo-badge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;margin-left:6px;"></span>
                                 <i class="fas fa-chevron-down nav-folder-arrow" style="margin-left:auto;font-size:10px;transition:transform .2s;"></i>
                             </a>
                             <ul class="nav-sub-menu" id="leads-sub-menu" style="display:none;">
@@ -1118,6 +1121,7 @@
                                     <a href="#leads" data-tooltip="Active Leads">
                                         <i class="fas fa-user-check"></i>
                                         <span>Active Leads</span>
+                                        <span id="active-leads-sub-badge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;margin-left:auto;"></span>
                                     </a>
                                 </li>
                                 <li>
@@ -1132,6 +1136,7 @@
                             <a href="javascript:void(0)" data-tooltip="Clients" onclick="toggleClientsFolder()">
                                 <i class="fas fa-users"></i>
                                 <span>Clients</span>
+                                <span id="clients-renewal-badge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;margin-left:6px;"></span>
                                 <i class="fas fa-chevron-down nav-folder-arrow" style="margin-left:auto;font-size:10px;transition:transform .2s;"></i>
                             </a>
                             <ul class="nav-sub-menu" id="clients-sub-menu" style="display:none;">
@@ -1151,6 +1156,7 @@
                                     <a href="#renewals" data-tooltip="Renewals">
                                         <i class="fas fa-sync-alt"></i>
                                         <span>Renewals</span>
+                                        <span id="renewals-sub-badge" style="display:none;background:#3b82f6;color:white;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;margin-left:auto;"></span>
                                     </a>
                                 </li>
                             </ul>
@@ -1275,49 +1281,157 @@
         <!-- Dashboard Content -->
         <section class="dashboard-content" id="dashboardContent"></section>
 
-        <!-- Market Content -->
+        <!-- Market Intelligence Terminal -->
         <section class="market-content" style="display: none;">
-            <div class="market-header">
-                <div class="market-header-content">
-                    <div class="market-header-text">
-                        <h2>Insurance Market Overview</h2>
-                        <p>Carrier ranking by average unit pricing - sorted by competitiveness</p>
+
+            <!-- Header bar -->
+            <div class="mkt-header">
+                <div class="mkt-header-left">
+                    <div class="mkt-logo">
+                        <i class="fas fa-chart-line"></i>
+                        Insurance Market Intelligence
+                        <span class="mkt-live-badge">LIVE</span>
                     </div>
-                    <div class="market-header-actions">
-                        <button class="btn-log-quote-header" onclick="showLogQuoteModal()">
-                            <i class="fas fa-plus" style="margin-right: 8px;"></i>Log Quote
-                        </button>
+                    <div class="mkt-subtitle">FMCSA Policy Trend Analysis · Real-time carrier market share</div>
+                </div>
+                <div class="mkt-header-controls">
+                    <select id="mkt-state-filter" onchange="mktIntel.applyFilters()">
+                        <option value="ALL">All States</option>
+                        <option value="OH">Ohio</option>
+                        <option value="TX">Texas</option>
+                        <option value="CA">California</option>
+                        <option value="FL">Florida</option>
+                        <option value="PA">Pennsylvania</option>
+                        <option value="IL">Illinois</option>
+                        <option value="GA">Georgia</option>
+                        <option value="NY">New York</option>
+                        <option value="NC">North Carolina</option>
+                        <option value="TN">Tennessee</option>
+                        <option value="MO">Missouri</option>
+                        <option value="IN">Indiana</option>
+                        <option value="MI">Michigan</option>
+                        <option value="KY">Kentucky</option>
+                        <option value="VA">Virginia</option>
+                        <option value="WI">Wisconsin</option>
+                        <option value="MN">Minnesota</option>
+                        <option value="CO">Colorado</option>
+                        <option value="AZ">Arizona</option>
+                        <option value="WA">Washington</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Scrolling ticker strip -->
+            <div class="mkt-ticker-wrap">
+                <div class="mkt-ticker-label"><i class="fas fa-broadcast-tower"></i>&nbsp;MKT</div>
+                <div class="mkt-ticker-track">
+                    <div class="mkt-ticker-inner" id="mkt-ticker-inner">
+                        <span class="mkt-ticker-item"><span class="mkt-ticker-abbr">Loading market data</span></span>
                     </div>
                 </div>
             </div>
 
-            <div class="market-table-container">
-                <table class="market-table">
-                    <thead>
-                        <tr>
-                            <th class="rank-col">#</th>
-                            <th class="carrier-col">Carrier</th>
-                            <th class="price-col">
-                                Avg Rate Per Unit
-                                <i class="fas fa-cog metric-selector-icon" onclick="showMetricSelector()"
-                                   style="margin-left: 8px; cursor: pointer; color: #94a3b8; font-size: 14px;"
-                                   title="Change metric calculation"></i>
-                            </th>
-                            <th class="volume-col">Quote Volume</th>
-                            <th class="action-col">Details</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <!-- Table content will be dynamically generated by market-real-data.js -->
-                        <tr>
-                            <td colspan="5" style="text-align: center; padding: 40px; color: #6b7280;">
-                                <i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 10px;"></i><br>
-                                Loading market data...
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <!-- Two-column body -->
+            <div class="mkt-body">
+
+                <!-- LEFT: Sidebar panels -->
+                <div class="mkt-sidebar">
+
+                    <!-- Market Summary -->
+                    <div class="mkt-panel">
+                        <div class="mkt-panel-title"><i class="fas fa-tachometer-alt"></i>&nbsp;Market Summary</div>
+                        <div class="mkt-summary-grid" id="mkt-summary-stats">
+                            <div class="mkt-stat-box" style="grid-column:1/-1">
+                                <div class="mkt-loading-placeholder">Loading…</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Top Movers -->
+                    <div class="mkt-panel">
+                        <div class="mkt-panel-title"><i class="fas fa-arrows-alt-v"></i>&nbsp;Top Movers</div>
+                        <div class="mkt-movers-tabs">
+                            <button class="mkt-mover-tab active gainers" data-mode="gainers" onclick="mktIntel.showMovers('gainers')">▲ Gainers</button>
+                            <button class="mkt-mover-tab losers" data-mode="losers" onclick="mktIntel.showMovers('losers')">▼ Losers</button>
+                        </div>
+                        <div id="mkt-movers-list">
+                            <div class="mkt-loading-placeholder">Loading…</div>
+                        </div>
+                    </div>
+
+                    <!-- New Market Entrants -->
+                    <div class="mkt-panel">
+                        <div class="mkt-panel-title"><i class="fas fa-star"></i>&nbsp;New Entrants</div>
+                        <div id="mkt-new-entrants">
+                            <div class="mkt-loading-placeholder">Loading…</div>
+                        </div>
+                    </div>
+
+                </div><!-- /sidebar -->
+
+                <!-- RIGHT: Chart + Watchlist -->
+                <div class="mkt-main">
+
+                    <!-- Chart controls -->
+                    <div class="mkt-chart-header">
+                        <div class="mkt-period-tabs">
+                            <button class="mkt-period-btn" data-months="1" onclick="mktIntel.setPeriod(1)">1M</button>
+                            <button class="mkt-period-btn active" data-months="2" onclick="mktIntel.setPeriod(2)">2M</button>
+                            <button class="mkt-period-btn" data-months="3" onclick="mktIntel.setPeriod(3)">3M</button>
+                            <button class="mkt-period-btn" data-months="6" onclick="mktIntel.setPeriod(6)">6M</button>
+                            <button class="mkt-period-btn" data-months="12" onclick="mktIntel.setPeriod(12)">1Y</button>
+                            <button class="mkt-period-btn" data-months="24" onclick="mktIntel.setPeriod(24)">2Y</button>
+                            <button class="mkt-period-btn" data-months="36" onclick="mktIntel.setPeriod(36)">3Y</button>
+                        </div>
+                        <div class="mkt-chart-tools">
+                            <span id="mkt-data-asof" class="mkt-data-asof"></span>
+                            <span class="mkt-compare-label">VIEW</span>
+                            <button class="mkt-icon-btn" onclick="mktIntel.toggleAllCarriers()" title="Toggle all carriers">
+                                <i class="fas fa-layer-group"></i>
+                            </button>
+                            <button class="mkt-icon-btn" onclick="mktIntel.refreshData()" title="Refresh data">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chart canvas -->
+                    <div class="mkt-chart-wrap">
+                        <div class="mkt-chart-canvas-wrap">
+                            <div class="mkt-chart-overlay" id="mkt-chart-overlay">
+                                <div class="mkt-spinner"></div>
+                                <div class="mkt-overlay-text">Fetching FMCSA market data…</div>
+                            </div>
+                            <canvas id="mkt-main-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Legend chips -->
+                    <div class="mkt-legend" id="mkt-legend"></div>
+
+                    <!-- Full watchlist -->
+                    <div class="mkt-watchlist-wrap">
+                        <div class="mkt-section-title">Carrier Watchlist — YoY Comparison</div>
+                        <table class="mkt-watchlist-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:28px">#</th>
+                                    <th>Carrier</th>
+                                    <th class="r">Current 12mo</th>
+                                    <th class="r">Prior 12mo</th>
+                                    <th class="r">YoY Δ</th>
+                                    <th class="r">Trend</th>
+                                    <th class="r">Appt</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mkt-watchlist-body">
+                                <tr><td colspan="7"><div class="mkt-loading-placeholder">Loading…</div></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                </div><!-- /main -->
+            </div><!-- /body -->
         </section>
     </main>
 
@@ -1685,7 +1799,7 @@
     <!-- DISABLED: causes race conditions on refresh — loadPoliciesView + generatePolicyRows already handle server sync -->
     <!-- <script src="js/force-policies-refresh.js?v=1"></script> -->
     <script src="js/secure-fetch.js?v=1"></script>
-    <script src="js/app.js?v=20260504e"></script>
+    <script src="js/app.js?v=20260917e"></script>
 
     <!-- Vicidial Stage Sync - Bidirectional synchronization -->
     <script src="js/vicidial-stage-sync.js?v=1"></script>
@@ -2143,10 +2257,10 @@
     <!-- <script src="js/notification-manager.js?v=CRITICAL_PRIORITY_v1"></script> -->
 
     <!-- MARKET FUNCTIONS - Load before profile to ensure auto-import functions are available -->
-    <script src="js/market-functions.js?v=AUTO_IMPORT_EMPTY_MARKET_v2"></script>
+    <script src="js/market-functions.js?v=20260910a"></script>
 
     <!-- FINAL PROFILE FIX PROTECTED - MUST BE ABSOLUTELY LAST - Cannot be overridden -->
-    <script src="js/final-profile-fix-protected-FIXED.js?v=CALLBACK_CALENDAR_v2"></script>
+    <script src="js/final-profile-fix-protected-FIXED.js?v=SERVER_WINS_FIX_v1"></script>
 
     <!-- CONTINUOUS CALLBACK MONITOR - Maintains "Reach out: CALL" buttons independently -->
     <script src="js/continuous-callback-monitor.js?v=3"></script>
@@ -2401,7 +2515,7 @@
     <!-- <script src="js/counts-only-lead-generation.js?v=3"></script> -->
 
     <!-- Complete Lead Generation with Day Skip feature -->
-    <script src="js/complete-lead-generation-restoration.js?v=21_STATE_LABELS_V3"></script>
+    <script src="js/complete-lead-generation-restoration.js?v=23_CORGI_COUNT"></script>
 
     <!-- Fix Lead Generation to use DB-V3 Database - MUST LOAD AFTER COMPLETE RESTORATION -->
     <script src="js/fix-lead-generation-matched-carriers.js?v=13_MULTI_TOKEN"></script>
@@ -2479,7 +2593,7 @@
     <script src="js/cleanup-invalid-leads.js?v=1"></script>
 
     <!-- Fix button flashing/flickering issue -->
-    <script src="js/fix-button-flashing.js?v=1"></script>
+    <script src="js/fix-button-flashing.js?v=2"></script>
 
     <!-- Fix new lead form - remove Lead Source and improve validation -->
     <script src="js/fix-new-lead-form.js?v=1"></script>
@@ -3802,6 +3916,9 @@
 
     <!-- CSR To Do Override - MUST load last to override all competing To Do scripts -->
     <script src="js/csr-todo-override.js?v=1"></script>
+
+    <!-- Market Intelligence Terminal -->
+    <script src="js/market-intelligence.js?v=24"></script>
 
 </body>
 </html>

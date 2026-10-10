@@ -216,6 +216,8 @@ class ViciDialIntegration {
     extractFleetAndPremium(comments) {
         if (!comments) return { fleetSize: 0, premium: 0 };
         const patterns = [
+            /Fleet size:\s*(\d+)/i,
+            /Driver count:\s*\d+\s*\|\s*Fleet size:\s*(\d+)/i,
             /Fl:\s*(\d+)/i,
             /Dr:\s*\d+\s*\|\s*Fl:\s*(\d+)/i,
             /Size:\s*(\d+)/i,

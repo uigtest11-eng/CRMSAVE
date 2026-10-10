@@ -426,17 +426,7 @@ function showLeadSelectionPopup(leads, data) {
                     font-size: 14px;
                     font-weight: 600;
                     margin-right: 12px;
-                ">⚡ Quick Import</button>
-                <button onclick="importSelectedLeads()" style="
-                    background: #3b82f6;
-                    color: white;
-                    border: none;
-                    padding: 12px 24px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 14px;
-                    font-weight: 600;
-                ">🚀 Import Selected Leads</button>
+                ">Import</button>
             </div>
         </div>
     `;

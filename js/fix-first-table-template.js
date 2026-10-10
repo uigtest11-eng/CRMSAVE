@@ -85,6 +85,9 @@ console.log('🔧 FIX FIRST TABLE TEMPLATE - Loading...');
             let fixedCount = 0;
 
             rows.forEach(row => {
+                // Skip CSR-pending blue rows — blue takes priority over all other highlights
+                if (row.classList.contains('csr-done-pending') || row.getAttribute('data-highlight') === 'blue') return;
+
                 const todoCell = row.querySelectorAll('td')[7]; // TODO column
                 if (!todoCell) return;
 

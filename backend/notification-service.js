@@ -837,9 +837,266 @@ const NotificationService = {
     }
 };
 
+// ─── 45-Day Renewal Email System ─────────────────────────────────────────────
+
+// TESTING: all renewal emails go to this address only — no client emails
+const RENEWAL_TEST_EMAIL = 'grant@vigagency.com';
+
+// Create tracking table so we never send the same 45-day email twice
+db.run(`CREATE TABLE IF NOT EXISTS renewal_emails_sent (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    policy_id TEXT NOT NULL,
+    client_id TEXT,
+    sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(policy_id)
+)`, (err) => {
+    if (err) console.error('Error creating renewal_emails_sent table:', err.message);
+    else console.log('✅ renewal_emails_sent table ready');
+});
+
+const nodemailer = require('nodemailer');
+
+function decodBodyType(code) {
+    const map = { TKTR:'Tractor', DMPT:'Dump Truck', STRK:'Straight Truck', VAN:'Van', TANK:'Tanker', TRLR:'Trailer', PICK:'Pickup', FLAT:'Flatbed', REFR:'Refrigerated', DUMP:'Dump' };
+    return map[code] || code || '';
+}
+
+function buildRenewalEmailHTML(clientData, policyData, agencyName) {
+    const biz = clientData.businessName || clientData.name || 'Your Business';
+    const contact = clientData.name || biz;
+    const carrier = policyData.carrier || 'your carrier';
+    const policyNum = (policyData.policyNumber || '').trim();
+    const expDate = policyData.expirationDate || 'N/A';
+    const effDate = policyData.effectiveDate || 'N/A';
+    const premium = policyData.premium || 'N/A';
+    const dot = policyData.dotNumber || clientData.dotNumber || '';
+    const mc = policyData.mcNumber || clientData.mcNumber || '';
+    const addr = [clientData.address, clientData.city, clientData.state, clientData.zip].filter(Boolean).join(', ');
+
+    const brandColor = agencyName === 'UIG Agency' ? '#7c3aed' : '#1d4ed8';
+    const brandName = agencyName || 'VIG Agency';
+
+    // Vehicles table
+    const vehicles = policyData.vehicles || [];
+    let vehicleRows = vehicles.map((v, i) => `
+        <tr style="background:${i%2===0?'#f9fafb':'white'};">
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.vehicleNumber||i+1}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.year||''}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.make||''}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${v.model||''}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;font-family:monospace;font-size:12px;">${v.vin||''}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${decodBodyType(v.bodyType)}</td>
+        </tr>`).join('');
+
+    // Drivers table
+    const drivers = policyData.drivers || [];
+    let driverRows = drivers.map((d, i) => `
+        <tr style="background:${i%2===0?'#f9fafb':'white'};">
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${d.driverNumber||i+1}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;font-weight:600;">${d.name||''}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;">${d.dateOfBirth||''}</td>
+            <td style="padding:8px 12px;border:1px solid #e5e7eb;font-size:13px;font-family:monospace;">${d.license||''}</td>
+        </tr>`).join('');
+
+    return `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif;">
+<div style="max-width:680px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08);">
+
+  <!-- Header -->
+  <div style="background:linear-gradient(135deg,${brandColor},#3b82f6);padding:32px 36px;text-align:center;">
+    <h1 style="margin:0;color:white;font-size:26px;font-weight:700;">${brandName}</h1>
+    <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:15px;">Policy Renewal Notice — 45 Days Out</p>
+  </div>
+
+  <!-- Body -->
+  <div style="padding:32px 36px;">
+    <p style="font-size:16px;color:#1f2937;margin:0 0 12px;">Hi <strong>${contact}</strong>,</p>
+    <p style="font-size:15px;color:#374151;line-height:1.6;margin:0 0 20px;">
+      Your commercial insurance policy through <strong>${carrier}</strong> is coming up for renewal on <strong>${expDate}</strong> — that's just 45 days away.
+      We're actively shopping the market right now to make sure you get the most competitive rates available.
+    </p>
+    <p style="font-size:15px;color:#374151;line-height:1.6;margin:0 0 24px;">
+      Below is what we have on file for your current operation. <strong>Please review everything and reply to let us know if anything has changed</strong> — any new or removed vehicles, driver updates, address changes, etc. The more current your info, the better rates we can get you.
+    </p>
+
+    <!-- Policy Summary -->
+    <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:20px;margin-bottom:28px;">
+      <h3 style="margin:0 0 14px;color:${brandColor};font-size:16px;">Current Policy Summary</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;width:40%;">Carrier</td><td style="padding:5px 0;font-weight:600;color:#1f2937;font-size:14px;">${carrier}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Policy Number</td><td style="padding:5px 0;font-weight:600;color:#1f2937;font-size:14px;">${policyNum}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Effective Date</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${effDate}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Expiration Date</td><td style="padding:5px 0;font-weight:700;color:#dc2626;font-size:14px;">${expDate}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">Annual Premium</td><td style="padding:5px 0;font-weight:600;color:#059669;font-size:14px;">${premium}</td></tr>
+        ${dot ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">USDOT</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${dot}</td></tr>` : ''}
+        ${mc ? `<tr><td style="padding:5px 0;color:#6b7280;font-size:13px;">MC Number</td><td style="padding:5px 0;color:#1f2937;font-size:14px;">${mc}</td></tr>` : ''}
+      </table>
+    </div>
+
+    <!-- Contact Info -->
+    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:18px;margin-bottom:28px;">
+      <h3 style="margin:0 0 12px;color:#374151;font-size:15px;">Insured Information</h3>
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="padding:4px 0;color:#6b7280;font-size:13px;width:40%;">Business Name</td><td style="padding:4px 0;font-weight:600;color:#1f2937;font-size:13px;">${biz}</td></tr>
+        <tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Contact Name</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${contact}</td></tr>
+        ${addr ? `<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Address</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${addr}</td></tr>` : ''}
+        ${clientData.phone ? `<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Phone</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${clientData.phone}</td></tr>` : ''}
+        ${clientData.email ? `<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;">Email</td><td style="padding:4px 0;color:#1f2937;font-size:13px;">${clientData.email}</td></tr>` : ''}
+      </table>
+    </div>
+
+    <!-- Vehicles -->
+    ${vehicles.length > 0 ? `
+    <h3 style="color:#374151;font-size:15px;margin:0 0 10px;">Scheduled Vehicles (${vehicles.length})</h3>
+    <div style="overflow-x:auto;margin-bottom:28px;">
+      <table style="width:100%;border-collapse:collapse;min-width:500px;">
+        <thead>
+          <tr style="background:${brandColor};color:white;">
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">#</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">Year</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">Make</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">Model</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">VIN</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">Type</th>
+          </tr>
+        </thead>
+        <tbody>${vehicleRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- Drivers -->
+    ${drivers.length > 0 ? `
+    <h3 style="color:#374151;font-size:15px;margin:0 0 10px;">Scheduled Drivers (${drivers.length})</h3>
+    <div style="overflow-x:auto;margin-bottom:28px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#374151;color:white;">
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">#</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">Name</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">Date of Birth</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;">License #</th>
+          </tr>
+        </thead>
+        <tbody>${driverRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- CTA -->
+    <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:20px;margin-bottom:24px;">
+      <p style="margin:0;font-size:15px;color:#166534;font-weight:600;">Any changes to the above?</p>
+      <p style="margin:8px 0 0;font-size:14px;color:#15803d;line-height:1.6;">
+        Reply to this email with any updates — new vehicles, removed vehicles, new drivers, address changes, or anything else. We'll have renewal quotes ready for you well before your expiration date.
+      </p>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div style="background:#1f2937;padding:20px 36px;text-align:center;">
+    <p style="margin:0;color:#9ca3af;font-size:12px;">${brandName} &nbsp;|&nbsp; contact@${agencyName === 'UIG Agency' ? 'uig' : 'vig'}agency.com</p>
+    <p style="margin:6px 0 0;color:#6b7280;font-size:11px;">This is an automated renewal notice sent 45 days before policy expiration.</p>
+  </div>
+
+</div>
+</body>
+</html>`;
+}
+
+async function sendRenewalEmailForPolicy(policyRow, clientData, forceTest) {
+    const policyData = JSON.parse(policyRow.data || '{}');
+    const policies = policyData.policies || [policyData];
+    const pol = policies[0];
+    if (!pol) return;
+
+    const agent = (pol.agent || clientData.assignedTo || '').toLowerCase();
+    const isUIG = agent === 'maureen';
+    const agencyName = isUIG ? 'UIG Agency' : 'VIG Agency';
+    const fromEmail = isUIG ? 'contact@uigagency.com' : 'contact@vigagency.com';
+    const fromPass  = isUIG ? process.env.GODADDY_UIG_PASSWORD : process.env.GODADDY_VIG_PASSWORD;
+
+    const transporter = nodemailer.createTransport({
+        host: 'smtpout.secureserver.net',
+        port: 465,
+        secure: true,
+        auth: { user: fromEmail, pass: fromPass }
+    });
+
+    const biz = clientData.businessName || clientData.name || 'Client';
+    const subject = `Policy Renewal in 45 Days — ${biz} (${pol.carrier || ''} #${(pol.policyNumber||'').trim()})`;
+    const html = buildRenewalEmailHTML(clientData, pol, agencyName);
+
+    // TESTING: Always send to grant@vigagency.com, never to client
+    const toEmail = RENEWAL_TEST_EMAIL;
+
+    try {
+        const info = await transporter.sendMail({ from: `"${agencyName}" <${fromEmail}>`, to: toEmail, subject, html });
+        console.log(`✅ 45-day renewal email sent for ${biz} → ${toEmail} (${info.messageId})`);
+
+        if (!forceTest) {
+            // Mark as sent so we don't duplicate
+            db.run(`INSERT OR IGNORE INTO renewal_emails_sent (policy_id, client_id) VALUES (?, ?)`,
+                [policyRow.id, policyRow.client_id]);
+        }
+        return { success: true, messageId: info.messageId, to: toEmail, business: biz };
+    } catch (err) {
+        console.error(`❌ Failed to send renewal email for ${biz}:`, err.message);
+        return { success: false, error: err.message };
+    }
+}
+
+let _lastRenewalCheckDate = '';
+
+async function checkUpcomingRenewals() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (_lastRenewalCheckDate === today) return; // already ran today
+    _lastRenewalCheckDate = today;
+
+    console.log('🔄 Checking for policies expiring in 45 days...');
+
+    const target = new Date();
+    target.setDate(target.getDate() + 45);
+    const mm = String(target.getMonth() + 1).padStart(2, '0');
+    const dd = String(target.getDate()).padStart(2, '0');
+    const yyyy = target.getFullYear();
+    const targetDateStr = `${mm}/${dd}/${yyyy}`; // MM/DD/YYYY format used in policy data
+
+    db.all(`SELECT p.id, p.client_id, p.data FROM policies p
+            LEFT JOIN renewal_emails_sent r ON r.policy_id = p.id
+            WHERE r.id IS NULL
+            AND json_extract(p.data, '$.policies[0].policyStatus') != 'Cancelled'
+            AND json_extract(p.data, '$.policies[0].expirationDate') = ?`,
+        [targetDateStr],
+        async (err, rows) => {
+            if (err) { console.error('Error querying renewal policies:', err.message); return; }
+            console.log(`📋 Found ${rows.length} policies expiring on ${targetDateStr} (45 days from today)`);
+
+            for (const row of rows) {
+                // Look up client
+                db.get(`SELECT id, data FROM clients WHERE id = ?`, [row.client_id], async (cerr, clientRow) => {
+                    if (cerr || !clientRow) {
+                        console.warn(`⚠️ No client found for policy ${row.id} (client_id: ${row.client_id})`);
+                        return;
+                    }
+                    let clientData = {};
+                    try { clientData = JSON.parse(clientRow.data); } catch(e) {}
+                    await sendRenewalEmailForPolicy(row, clientData, false);
+                });
+            }
+        }
+    );
+}
+
+// Export manual trigger for use by server.js API
+global._triggerRenewalEmailForPolicy = sendRenewalEmailForPolicy;
+global._getDB = () => db;
+
 // Start the monitoring service
 console.log('⏰ Starting periodic callback monitoring...');
 setInterval(checkCallbacks, CHECK_INTERVAL);
+
+// Check renewals every hour (actually sends once per day via date guard)
+setInterval(checkUpcomingRenewals, 60 * 60 * 1000);
+setTimeout(checkUpcomingRenewals, 10000); // First check 10s after startup
 
 // Cleanup old notifications every hour
 setInterval(cleanupOldNotifications, 60 * 60 * 1000);

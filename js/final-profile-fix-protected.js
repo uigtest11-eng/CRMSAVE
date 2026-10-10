@@ -6,6 +6,8 @@ let protectedFunctions = {};
 
 // Create the enhanced profile function with exact working UI
 protectedFunctions.createEnhancedProfile = function(lead) {
+    const _pfSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsr = (_pfSess.role || '') === 'csr';
     console.log('🔥 PROTECTED Enhanced Profile: Creating profile for:', lead.name);
     console.log('🔍 PROTECTED Lead ID being used:', lead.id);
     console.log('🔍 PROTECTED Lead object:', lead);
@@ -196,8 +198,8 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                     </div>
                 </div>
 
-                <!-- Callback Scheduler -->
-                <div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <!-- Callback Scheduler (hidden for CSR) -->
+                ${_isCsr ? '' : `<div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3 style="margin: 0; font-weight: bold;"><i class="fas fa-calendar-alt"></i> <span style="color: #0277bd;">Schedule Callback</span></h3>
                         <div id="callback-status-${lead.id}" style="font-weight: bold; font-size: 14px; color: #0277bd;">
@@ -240,9 +242,10 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             <!-- Scheduled callbacks will be displayed here -->
                         </div>
                     </div>
-                </div>
+                </div>`}
 
-                <!-- Reach Out Checklist -->
+                <!-- Reach Out Checklist (hidden for CSR) -->
+                ${_isCsr ? '' : `
                 <div class="profile-section" style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <!-- Header with TO DO message -->
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -313,9 +316,10 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
-                <!-- Other Lead Details -->
+                <!-- Other Lead Details (hidden for CSR) -->
+                ${_isCsr ? '' : `
                 <div class="profile-section" style="background: #e0f2fe; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                     <h3><i class="fas fa-info-circle"></i> Lead Details</h3>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
@@ -350,7 +354,7 @@ protectedFunctions.createEnhancedProfile = function(lead) {
                             </select>
                         </div>
                     </div>
-                </div>
+                </div>`}
 
                 <!-- Owner Details -->
                 <div class="profile-section" style="background: #e7f3ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">

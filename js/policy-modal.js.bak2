@@ -1,0 +1,3102 @@
+// Policy Modal Functions
+
+// Function to format date for storage without timezone issues
+function formatDateForStorage(dateValue) {
+    if (!dateValue) return '';
+    // If it's already in YYYY-MM-DD format, return as-is
+    if (typeof dateValue === 'string' && dateValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return dateValue;
+    }
+    // Convert MM/DD/YYYY to YYYY-MM-DD if needed
+    if (typeof dateValue === 'string' && dateValue.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+        const [month, day, year] = dateValue.split('/');
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+    return dateValue;
+}
+
+// Global variable to store policy data
+let currentPolicyData = {};
+
+function showPolicyModal(existingPolicy = null) {
+    const modalOverlay = document.createElement('div');
+    modalOverlay.className = 'modal-overlay active';
+    modalOverlay.id = 'policyModal';
+    
+    // If editing existing policy, skip initial form and go straight to tabbed form
+    if (existingPolicy) {
+        // Store the existing policy data globally for editing
+        window.currentPolicyData = existingPolicy;
+        window.editingPolicyId = existingPolicy.id;
+        
+        // Determine policy type label
+        const policyTypeLabel = existingPolicy.policyType === 'commercial-auto' ? 'Commercial Auto' :
+                                existingPolicy.policyType === 'personal-auto' ? 'Personal Auto' :
+                                existingPolicy.policyType ? existingPolicy.policyType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
+        
+        modalOverlay.innerHTML = `
+            <div class="modal-container large">
+                <div class="modal-header">
+                    <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                        ${policyTypeLabel ? `<span class="policy-type-badge">${policyTypeLabel}</span>` : ''}
+                        <h2 style="margin: 0;">Edit Policy - ${existingPolicy.policyNumber}</h2>
+                    </div>
+                    <button class="close-btn" onclick="closePolicyModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="policyModalBody">
+                    <!-- Will be filled with tabbed form -->
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modalOverlay);
+        
+        // Show the tabbed form directly for editing
+        setTimeout(() => {
+            showTabbedPolicyForm(true); // Pass true to indicate editing mode
+            // After form is loaded, populate with existing data
+            setTimeout(() => {
+                populatePolicyForm(existingPolicy);
+            }, 100);
+        }, 100);
+        
+        return;
+    }
+    
+    // Start with initial policy creation form
+    modalOverlay.innerHTML = `
+        <div class="modal-container large">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                    <h2 style="margin: 0;">Create New Policy</h2>
+                </div>
+                <button class="close-btn" onclick="closePolicyModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="policyModalBody">
+                <!-- Initial Policy Creation Form -->
+                <div id="initialPolicyForm">
+                    <div class="form-section">
+                        <h3>Policy Information</h3>
+                        <p class="form-description">Enter the required information to create a new policy. Additional details can be added after creation.</p>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Policy Number <span class="required">*</span></label>
+                                <input type="text" id="policyNumber" class="form-control" placeholder="POL-2024-XXXX" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Policy Type <span class="required">*</span></label>
+                                <select id="policyType" class="form-control" required onchange="updateFieldsBasedOnType()">
+                                    <option value="">Select Type</option>
+                                    <option value="personal-auto">Personal Auto</option>
+                                    <option value="commercial-auto">Commercial Auto</option>
+                                    <option value="homeowners">Homeowners</option>
+                                    <option value="commercial-property">Commercial Property</option>
+                                    <option value="general-liability">General Liability</option>
+                                    <option value="professional-liability">Professional Liability</option>
+                                    <option value="workers-comp">Workers Compensation</option>
+                                    <option value="umbrella">Umbrella</option>
+                                    <option value="life">Life</option>
+                                    <option value="health">Health</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Insurance Carrier <span class="required">*</span></label>
+                                <div style="position: relative;">
+                                    <select id="carrier" class="form-control" required onchange="handleCarrierChange(this)">
+                                        <option value="">Select Carrier</option>
+                                        <option>Progressive</option>
+                                        <option>State Farm</option>
+                                        <option>GEICO</option>
+                                        <option>Allstate</option>
+                                        <option>Liberty Mutual</option>
+                                        <option>Nationwide</option>
+                                        <option>Farmers</option>
+                                        <option>USAA</option>
+                                        <option>Travelers</option>
+                                        <option>American Family</option>
+                                        <option>Hartford</option>
+                                        <option>Chubb</option>
+                                        <option>MetLife</option>
+                                        <option>Canal</option>
+                                        <option>Northland</option>
+                                        <option>NICO</option>
+                                        <option>Coverwhale</option>
+                                        <option>Occidental</option>
+                                        <option>Other</option>
+                                    </select>
+                                    <input type="text" id="carrier-text" class="form-control" style="display: none;" placeholder="Enter carrier name" required>
+                                    <button type="button" id="carrier-arrow" onclick="switchBackToDropdown('carrier')" style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px;">▼</button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Policy Status <span class="required">*</span></label>
+                                <select id="policyStatus" class="form-control" required>
+                                    <option value="">Select Status</option>
+                                    <option value="active">Active</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="in-force">In Force</option>
+                                    <option value="cancelled">Cancelled</option>
+                                    <option value="cancel-pending">Cancel Pending</option>
+                                    <option value="non-renewed">Non-Renewed</option>
+                                    <option value="expired">Expired</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Effective Date <span class="required">*</span></label>
+                                <input type="date" id="effectiveDate" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Expiration Date <span class="required">*</span></label>
+                                <input type="date" id="expirationDate" class="form-control" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" onclick="closePolicyModal()">Cancel</button>
+                        <button type="button" class="btn-primary" onclick="createInitialPolicy()">
+                            <i class="fas fa-plus"></i> Create Policy
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modalOverlay);
+}
+
+function createInitialPolicy() {
+    // Validate required fields
+    const policyNumber = document.getElementById('policyNumber').value;
+    const policyType = document.getElementById('policyType').value;
+    const carrier = document.getElementById('carrier').value;
+    const policyStatus = document.getElementById('policyStatus').value;
+    const effectiveDate = document.getElementById('effectiveDate').value;
+    const expirationDate = document.getElementById('expirationDate').value;
+    
+    if (!policyNumber || !policyType || !carrier || !policyStatus || !effectiveDate || !expirationDate) {
+        showNotification('Please fill in all required fields', 'error');
+        return;
+    }
+    
+    // Store initial policy data
+    currentPolicyData = {
+        policyNumber,
+        policyType,
+        carrier,
+        policyStatus,
+        effectiveDate,
+        expirationDate
+    };
+
+    // Add client info if creating from client profile
+    if (window.currentClientId) {
+        currentPolicyData.clientId = window.currentClientId;
+        console.log('Adding clientId to initial data:', window.currentClientId);
+    }
+    if (window.currentClientInfo) {
+        currentPolicyData.clientName = window.currentClientInfo.name || window.currentClientInfo.companyName || window.currentClientInfo.businessName || 'N/A';
+        console.log('Adding clientName to initial data:', currentPolicyData.clientName);
+    }
+
+    // Also make it available globally
+    window.currentPolicyData = currentPolicyData;
+    console.log('Initial policy data stored:', currentPolicyData);
+    
+    // Show the tabbed interface
+    showTabbedPolicyForm();
+
+    // Wire up United toggle visual (for new policies; edit mode uses populatePolicyForm)
+    setTimeout(() => {
+        const cb = document.getElementById('overview-united');
+        if (cb && !cb._unitedWired) {
+            cb._unitedWired = true;
+            cb.addEventListener('change', function() {
+                const t = document.getElementById('overview-united-track');
+                const th = document.getElementById('overview-united-thumb');
+                if (t) t.style.background = this.checked ? '#3b82f6' : '#cbd5e0';
+                if (th) th.style.left = this.checked ? '25px' : '3px';
+            });
+        }
+    }, 200);
+}
+
+function showTabbedPolicyForm(isEditing = false) {
+    const modalBody = document.getElementById('policyModalBody');
+    
+    // Get the policy data from either the global or window scope
+    const policyData = window.currentPolicyData || currentPolicyData;
+    const policyType = policyData.policyType;
+    
+    console.log('showTabbedPolicyForm - Policy Type:', policyType, 'Is Editing:', isEditing);
+    
+    // Generate tabs based on policy type
+    const tabs = generateTabsForPolicyType(policyType);
+    
+    modalBody.innerHTML = `
+        ${!isEditing ? `
+        <!-- Success Message -->
+        <div class="success-banner">
+            <i class="fas fa-check-circle"></i>
+            Policy ${policyData.policyNumber} created successfully! Add additional details below.
+        </div>` : ''}
+        
+        <!-- Tab Navigation -->
+        <div class="policy-tabs">
+            ${tabs.map((tab, index) => `
+                <button class="tab-btn ${index === 0 ? 'active' : ''}" data-tab="${tab.id}" onclick="switchTab('${tab.id}')">
+                    <i class="${tab.icon}"></i> ${tab.name}
+                </button>
+            `).join('')}
+        </div>
+        
+        <!-- Tab Contents -->
+        <div class="tab-contents">
+            ${tabs.map((tab, index) => `
+                <div id="${tab.id}-content" class="tab-content ${index === 0 ? 'active' : ''}">
+                    ${generateTabContent(tab.id, policyType)}
+                </div>
+            `).join('')}
+        </div>
+        
+        <!-- Form Actions -->
+        <div class="form-actions">
+            <button type="button" class="btn-secondary" onclick="savePolicyDraft()">Save as Draft</button>
+            <button type="button" class="btn-primary" onclick="savePolicy().catch(console.error)">
+                <i class="fas fa-save"></i> Save Policy
+            </button>
+        </div>
+    `;
+
+    // Populate the overview fields with initial data after a short delay to ensure DOM is ready
+    setTimeout(() => {
+        if (!isEditing && policyData) {
+            console.log('Populating overview fields with:', policyData);
+            // Populate the overview tab with the initial policy data
+            if (document.getElementById('overview-policy-number')) {
+                document.getElementById('overview-policy-number').value = policyData.policyNumber || '';
+            }
+            if (document.getElementById('overview-carrier')) {
+                console.log('Setting carrier to:', policyData.carrier);
+                const _cs = document.getElementById('overview-carrier');
+                const _cv = policyData.carrier || '';
+                _cs.value = _cv;
+                if (_cv && _cs.value !== _cv) {
+                    // Case-insensitive match against existing options
+                    const _lc = _cv.toLowerCase();
+                    const _m = Array.from(_cs.options).find(o => o.value.toLowerCase() === _lc || o.text.toLowerCase() === _lc);
+                    if (_m) { _cs.value = _m.value; }
+                }
+            }
+            if (document.getElementById('overview-status')) {
+                // Handle case-insensitive status matching
+                const statusValue = policyData.policyStatus || 'Active';
+                const statusElement = document.getElementById('overview-status');
+
+                // Try exact match first, then try capitalized version
+                statusElement.value = statusValue;
+                if (!statusElement.value && statusValue.toLowerCase() === 'active') {
+                    statusElement.value = 'Active';
+                }
+
+                console.log('✅ Setting status to:', statusElement.value);
+            }
+            if (document.getElementById('overview-effective-date')) {
+                document.getElementById('overview-effective-date').value = policyData.effectiveDate || '';
+            }
+            if (document.getElementById('overview-expiration-date')) {
+                document.getElementById('overview-expiration-date').value = policyData.expirationDate || '';
+            }
+            if (document.getElementById('overview-policy-type')) {
+                const typeLabel = policyData.policyType === 'commercial-auto' ? 'Commercial Auto' :
+                                 policyData.policyType === 'personal-auto' ? 'Personal Auto' :
+                                 policyData.policyType ? policyData.policyType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
+                document.getElementById('overview-policy-type').value = typeLabel;
+            }
+
+            // Prefill client contact information if available
+            if (window.currentClientInfo) {
+                const client = window.currentClientInfo;
+                console.log('🔍 PREFILL CLIENT DATA:', client);
+
+                // Prefill contact information
+                if (document.getElementById('contact-phone') && client.phone) {
+                    document.getElementById('contact-phone').value = client.phone;
+                    console.log('✅ Prefilled phone:', client.phone);
+                }
+                if (document.getElementById('contact-email') && client.email) {
+                    document.getElementById('contact-email').value = client.email;
+                    console.log('✅ Prefilled email:', client.email);
+                }
+                if (document.getElementById('contact-address') && client.address) {
+                    document.getElementById('contact-address').value = client.address;
+                    console.log('✅ Prefilled address:', client.address);
+                }
+                if (document.getElementById('contact-city') && client.city) {
+                    document.getElementById('contact-city').value = client.city;
+                    console.log('✅ Prefilled city:', client.city);
+                }
+                if (document.getElementById('contact-state') && client.state) {
+                    document.getElementById('contact-state').value = client.state;
+                    console.log('✅ Prefilled state:', client.state);
+                }
+                if (document.getElementById('contact-zip') && client.zip) {
+                    document.getElementById('contact-zip').value = client.zip;
+                    console.log('✅ Prefilled zip:', client.zip);
+                }
+
+                // Prefill assigned agent
+                if (document.getElementById('overview-agent') && client.assignedTo) {
+                    document.getElementById('overview-agent').value = client.assignedTo;
+                    console.log('✅ Prefilled agent:', client.assignedTo);
+                }
+
+                // Prefill insured name/business name
+                if (document.getElementById('insured-name')) {
+                    const insuredName = client.businessName || client.name || client.fullName || '';
+                    if (insuredName) {
+                        document.getElementById('insured-name').value = insuredName;
+                        console.log('✅ Prefilled insured name:', insuredName);
+                    }
+                }
+
+                console.log('🎯 CLIENT DATA PREFILL COMPLETE');
+            }
+        }
+    }, 100);
+
+    // Update modal header
+    if (!isEditing) {
+        const header = document.querySelector('.modal-header');
+        const policyTypeLabel = policyData.policyType === 'commercial-auto' ? 'Commercial Auto' :
+                                policyData.policyType === 'personal-auto' ? 'Personal Auto' :
+                                policyData.policyType ? policyData.policyType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
+
+        // Update the header content while preserving the close button and QuickFill button
+        const closeBtn = header.querySelector('.close-btn');
+        const existingQuickFillBtn = header.querySelector('.quickfill-btn');
+
+        header.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                ${policyTypeLabel ? `<span class="policy-type-badge">${policyTypeLabel}</span>` : ''}
+                <h2 style="margin: 0;">Policy Details - ${policyData.policyNumber}</h2>
+            </div>
+        `;
+
+        // Re-add the close button
+        header.appendChild(closeBtn);
+
+        // Re-add the QuickFill button if it existed, or trigger QuickFill initialization
+        if (existingQuickFillBtn) {
+            const headerContent = header.querySelector('div[style*="display: flex"]');
+            if (headerContent) {
+                headerContent.appendChild(existingQuickFillBtn);
+            }
+        }
+
+        // Always trigger QuickFill initialization after header updates
+        setTimeout(() => {
+            if (window.initQuickFill && typeof window.initQuickFill === 'function') {
+                window.initQuickFill();
+            }
+
+            // Initialize coverage mode to dropdown (default)
+            if (window.toggleCoverageMode && typeof window.toggleCoverageMode === 'function') {
+                window.toggleCoverageMode('dropdown');
+            }
+        }, 200);
+    }
+}
+
+function generateTabsForPolicyType(policyType) {
+    const baseTabs = [
+        { id: 'overview', name: 'Overview', icon: 'fas fa-info-circle' },
+        { id: 'insured', name: 'Named Insured', icon: 'fas fa-user' },
+        { id: 'contact', name: 'Contact Info', icon: 'fas fa-address-book' },
+        { id: 'coverage', name: 'Coverage', icon: 'fas fa-shield-alt' },
+        { id: 'financial', name: 'Financial', icon: 'fas fa-dollar-sign' },
+        { id: 'documents', name: 'Documents', icon: 'fas fa-file-alt' },
+        { id: 'notes', name: 'Notes', icon: 'fas fa-sticky-note' }
+    ];
+    
+    // Add type-specific tabs
+    if (policyType === 'personal-auto' || policyType === 'commercial-auto') {
+        baseTabs.splice(4, 0, 
+            { id: 'vehicles', name: 'Vehicles', icon: 'fas fa-car' },
+            { id: 'drivers', name: 'Drivers', icon: 'fas fa-id-card' }
+        );
+    } else if (policyType === 'homeowners' || policyType === 'commercial-property') {
+        baseTabs.splice(4, 0, 
+            { id: 'property', name: 'Property', icon: 'fas fa-home' },
+            { id: 'mortgagee', name: 'Mortgagee', icon: 'fas fa-bank' }
+        );
+    } else if (policyType === 'general-liability' || policyType === 'professional-liability') {
+        baseTabs.splice(4, 0, 
+            { id: 'operations', name: 'Operations', icon: 'fas fa-industry' },
+            { id: 'locations', name: 'Locations', icon: 'fas fa-map-marker-alt' }
+        );
+    }
+    
+    return baseTabs;
+}
+
+function generateTabContent(tabId, policyType) {
+    switch(tabId) {
+        case 'overview':
+            return `
+                <div class="form-section">
+                    <h3>Policy Overview</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Policy Number</label>
+                            <input type="text" class="form-control" id="overview-policy-number">
+                        </div>
+                        <div class="form-group">
+                            <label>Policy Type</label>
+                            <select class="form-control" id="overview-policy-type">
+                                <option value="">Select Type</option>
+                                <option value="Personal Auto">Personal Auto</option>
+                                <option value="Commercial Auto">Commercial Auto</option>
+                                <option value="Homeowners">Homeowners</option>
+                                <option value="Commercial Property">Commercial Property</option>
+                                <option value="General Liability">General Liability</option>
+                                <option value="Professional">Professional Liability</option>
+                                <option value="Workers Comp">Workers Comp</option>
+                                <option value="Umbrella">Umbrella</option>
+                                <option value="Life">Life</option>
+                                <option value="Health">Health</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Carrier</label>
+                            <div style="position: relative;">
+                                <select class="form-control" id="overview-carrier" onchange="handleCarrierChange(this)">
+                                    <option value="">Select Carrier</option>
+                                    <option>Progressive</option>
+                                    <option>State Farm</option>
+                                    <option>GEICO</option>
+                                    <option>Allstate</option>
+                                    <option>Liberty Mutual</option>
+                                    <option>Nationwide</option>
+                                    <option>Farmers</option>
+                                    <option>USAA</option>
+                                    <option>Travelers</option>
+                                    <option>American Family</option>
+                                    <option>Hartford</option>
+                                    <option>Chubb</option>
+                                    <option>MetLife</option>
+                                    <option>Canal</option>
+                                    <option>Northland</option>
+                                    <option>NICO</option>
+                                    <option>Coverwhale</option>
+                                    <option>Occidental</option>
+                                    <option>Other</option>
+                                </select>
+                                <input type="text" id="overview-carrier-text" class="form-control" style="display: none;" placeholder="Enter carrier name">
+                                <button type="button" id="overview-carrier-arrow" onclick="switchBackToDropdown('overview-carrier')" style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px;">▼</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select class="form-control" id="overview-status">
+                                <option value="">Select Status</option>
+                                <option value="Active">Active</option>
+                                <option value="Pending">Pending</option>
+                                <option value="In Force">In Force</option>
+                                <option value="Cancelled">Cancelled</option>
+                                <option value="Cancel Pending">Cancel Pending</option>
+                                <option value="Non-Renewed">Non-Renewed</option>
+                                <option value="Expired">Expired</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Effective Date</label>
+                            <input type="date" class="form-control" id="overview-effective-date">
+                        </div>
+                        <div class="form-group">
+                            <label>Expiration Date</label>
+                            <input type="date" class="form-control" id="overview-expiration-date">
+                        </div>
+                        <div class="form-group">
+                            <label>Premium</label>
+                            <input type="text" class="form-control" id="overview-premium" onchange="handlePremiumChange(this)" oninput="handlePremiumChange(this)">
+                        </div>
+                        <div class="form-group">
+                            <label>Agent</label>
+                            <select class="form-control" id="overview-agent">
+                                <option value="">Select Agent</option>
+                                <option value="Grant">Grant</option>
+                                <option value="Hunter">Hunter</option>
+                                <option value="Carson">Carson</option>
+                                <option value="Maureen">Maureen</option>
+                            </select>
+                        </div>
+                        ${(() => {
+                            try {
+                                const u = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+                                if ((u.username || '').toLowerCase() === 'grant') {
+                                    return `<div class="form-group" id="united-toggle-group" style="display: flex; align-items: center; gap: 12px;">
+                                        <label style="margin: 0; font-weight: 600;">United</label>
+                                        <label style="position: relative; display: inline-block; width: 48px; height: 26px; cursor: pointer; margin: 0;">
+                                            <input type="checkbox" id="overview-united" style="opacity: 0; width: 0; height: 0;">
+                                            <span id="overview-united-track" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #cbd5e0; border-radius: 26px; transition: .3s;">
+                                                <span id="overview-united-thumb" style="position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .3s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);"></span>
+                                            </span>
+                                        </label>
+                                    </div>`;
+                                }
+                            } catch(e) {}
+                            return '';
+                        })()}
+                    </div>
+                    ${policyType === 'commercial-auto' ? `
+                    <h3 style="margin-top: 30px;">Commercial Auto Details</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>DOT Number</label>
+                            <input type="text" class="form-control" id="overview-dot-number">
+                        </div>
+                        <div class="form-group">
+                            <label>MC Number</label>
+                            <input type="text" class="form-control" id="overview-mc-number">
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+        case 'insured':
+            return `
+                <div class="form-section">
+                    <h3>Named Insured Information</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Name/Business Name <span class="required">*</span></label>
+                            <input type="text" class="form-control" id="insured-name">
+                        </div>
+                        <div class="form-group">
+                            <label>DBA</label>
+                            <input type="text" class="form-control" id="insured-dba">
+                        </div>
+                        <div class="form-group">
+                            <label>Tax ID/SSN</label>
+                            <input type="text" class="form-control" id="insured-taxid">
+                        </div>
+                        <div class="form-group">
+                            <label>Date of Birth/Inception</label>
+                            <input type="date" class="form-control" id="insured-dob">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-section">
+                    <h3>Additional Insured</h3>
+                    <div id="additionalInsuredList"></div>
+                    <button type="button" class="btn-secondary" onclick="addAdditionalInsured()">
+                        <i class="fas fa-plus"></i> Add Additional Insured
+                    </button>
+                </div>
+            `;
+            
+        case 'contact':
+            return `
+                <div class="form-section">
+                    <h3>Primary Contact</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Owner Name</label>
+                            <input type="text" class="form-control" id="contact-owner-name" placeholder="Named Insured / Owner">
+                        </div>
+                        <div class="form-group">
+                            <label>Date of Birth</label>
+                            <input type="date" class="form-control" id="contact-dob">
+                        </div>
+                        <div class="form-group">
+                            <label>Phone Number <span class="required">*</span></label>
+                            <input type="tel" class="form-control" id="contact-phone">
+                        </div>
+                        <div class="form-group">
+                            <label>Email Address <span class="required">*</span></label>
+                            <input type="email" class="form-control" id="contact-email">
+                        </div>
+                        <div class="form-group">
+                            <label>Mailing Address</label>
+                            <input type="text" class="form-control" placeholder="Street Address" id="contact-address">
+                        </div>
+                        <div class="form-group">
+                            <label>City</label>
+                            <input type="text" class="form-control" id="contact-city">
+                        </div>
+                        <div class="form-group">
+                            <label>State</label>
+                            <select class="form-control" id="contact-state">
+                                <option value="">Select State</option>
+                                <option>AL</option><option>AK</option><option>AZ</option><option>AR</option>
+                                <option>CA</option><option>CO</option><option>CT</option><option>DE</option>
+                                <option>FL</option><option>GA</option><option>HI</option><option>ID</option>
+                                <option>IL</option><option>IN</option><option>IA</option><option>KS</option>
+                                <option>KY</option><option>LA</option><option>ME</option><option>MD</option>
+                                <option>MA</option><option>MI</option><option>MN</option><option>MS</option>
+                                <option>MO</option><option>MT</option><option>NE</option><option>NV</option>
+                                <option>NH</option><option>NJ</option><option>NM</option><option>NY</option>
+                                <option>NC</option><option>ND</option><option>OH</option><option>OK</option>
+                                <option>OR</option><option>PA</option><option>RI</option><option>SC</option>
+                                <option>SD</option><option>TN</option><option>TX</option><option>UT</option>
+                                <option>VT</option><option>VA</option><option>WA</option><option>WV</option>
+                                <option>WI</option><option>WY</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>ZIP Code</label>
+                            <input type="text" class="form-control" id="contact-zip">
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+        case 'coverage':
+            if (policyType === 'commercial-auto') {
+                return `
+                    <div class="form-section">
+                        <!-- Coverage Input Mode Toggle -->
+                        <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                            <h3 style="margin-bottom: 16px; color: #495057;">Coverage Input Mode</h3>
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
+                                    <input type="radio" name="coverage-input-mode" value="text" onchange="toggleCoverageMode(this.value)" style="margin: 0;">
+                                    <span>Text Input</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 500;">
+                                    <input type="radio" name="coverage-input-mode" value="dropdown" checked onchange="toggleCoverageMode(this.value)" style="margin: 0;">
+                                    <span>Dropdown Selection (Default)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <h3>Primary Liability Coverage</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Liability Limits</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-liability-limits-text" placeholder="e.g. $1,000,000 CSL" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-liability-limits" style="display: block;">
+                                    <option value="">Select Liability Limits</option>
+                                    <option value="750000">$750,000 CSL</option>
+                                    <option value="1000000">$1,000,000 CSL</option>
+                                    <option value="1500000">$1,500,000 CSL</option>
+                                    <option value="2000000">$2,000,000 CSL</option>
+                                    <option value="5000000">$5,000,000 CSL</option>
+                                    <option value="100/300/100">$100K/$300K/$100K Split Limit</option>
+                                    <option value="250/500/250">$250K/$500K/$250K Split Limit</option>
+                                    <option value="500/1000/500">$500K/$1M/$500K Split Limit</option>
+                                    <option value="1000/2000/1000">$1M/$2M/$1M Split Limit</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>General Liability</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-general-aggregate-text" placeholder="e.g. $1,000,000/$2,000,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-general-aggregate" style="display: block;">
+                                    <option value="">Select General Liability Limit</option>
+                                    <option value="excluded">No Coverage</option>
+                                    <option value="1000/2000">$1,000/$2,000</option>
+                                    <option value="500000/1000000">$500,000/$1,000,000</option>
+                                    <option value="1000000/1000000">$1,000,000/$1,000,000</option>
+                                    <option value="1000000/2000000">$1,000,000/$2,000,000</option>
+                                    <option value="1000000">$1,000,000</option>
+                                    <option value="2000000">$2,000,000</option>
+                                    <option value="3000000">$3,000,000</option>
+                                    <option value="4000000">$4,000,000</option>
+                                    <option value="5000000">$5,000,000</option>
+                                    <option value="10000000">$10,000,000</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <h3>Physical Damage Coverage</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Comprehensive Deductible</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-comp-deduct-text" placeholder="e.g. $1,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-comp-deduct" style="display: block;">
+                                    <option value="">Select Deductible</option>
+                                    <option value="0">$0</option>
+                                    <option value="250">$250</option>
+                                    <option value="500">$500</option>
+                                    <option value="1000">$1,000</option>
+                                    <option value="2500">$2,500</option>
+                                    <option value="5000">$5,000</option>
+                                    <option value="7500">$7,500</option>
+                                    <option value="10000">$10,000</option>
+                                    <option value="15000">$15,000</option>
+                                    <option value="25000">$25,000</option>
+                                    <option value="50000">$50,000</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Collision Deductible</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-coll-deduct-text" placeholder="e.g. $1,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-coll-deduct" style="display: block;">
+                                    <option value="">Select Deductible</option>
+                                    <option value="0">$0</option>
+                                    <option value="500">$500</option>
+                                    <option value="1000">$1,000</option>
+                                    <option value="2500">$2,500</option>
+                                    <option value="5000">$5,000</option>
+                                    <option value="10000">$10,000</option>
+                                    <option value="15000">$15,000</option>
+                                    <option value="25000">$25,000</option>
+                                    <option value="50000">$50,000</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <h3>Cargo Coverage</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Cargo Limit</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-cargo-limit-text" placeholder="e.g. $100,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-cargo-limit" style="display: block;" onchange="handleCargoLimitChange(this)">
+                                    <option value="">Select Cargo Limit</option>
+                                    <option value="0">No Cargo Coverage</option>
+                                    <option value="10000">$10,000</option>
+                                    <option value="25000">$25,000</option>
+                                    <option value="50000">$50,000</option>
+                                    <option value="100000">$100,000</option>
+                                    <option value="150000">$150,000</option>
+                                    <option value="200000">$200,000</option>
+                                    <option value="250000">$250,000</option>
+                                    <option value="500000">$500,000</option>
+                                    <option value="1000000">$1,000,000</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Cargo Deductible</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-cargo-deduct-text" placeholder="e.g. $2,500" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-cargo-deduct" style="display: block;">
+                                    <option value="">Select Deductible</option>
+                                    <option value="0">$0</option>
+                                    <option value="1000">$1,000</option>
+                                    <option value="2500">$2,500</option>
+                                    <option value="5000">$5,000</option>
+                                    <option value="7500">$7,500</option>
+                                    <option value="10000">$10,000</option>
+                                    <option value="15000">$15,000</option>
+                                    <option value="20000">$20,000</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <h3>Other Coverages</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Medical Payments</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-medical-text" placeholder="e.g. $5,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-medical" style="display: block;">
+                                    <option value="">Select Limit</option>
+                                    <option value="0">No Coverage</option>
+                                    <option value="1000">$1,000</option>
+                                    <option value="2500">$2,500</option>
+                                    <option value="5000">$5,000</option>
+                                    <option value="10000">$10,000</option>
+                                    <option value="25000">$25,000</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Uninsured/Underinsured Motorist</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-um-uim-text" placeholder="e.g. $75,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-um-uim" style="display: block;">
+                                    <option value="">Select Limit</option>
+                                    <option value="0">Rejected</option>
+                                    <option value="25/50">$25K/$50K</option>
+                                    <option value="50/100">$50K/$100K</option>
+                                    <option value="100/300">$100K/$300K</option>
+                                    <option value="75000">$75,000 CSL</option>
+                                    <option value="100000">$100,000 CSL</option>
+                                    <option value="250/500">$250K/$500K</option>
+                                    <option value="300000">$300,000 CSL</option>
+                                    <option value="500/1000">$500K/$1M</option>
+                                    <option value="500000">$500,000 CSL</option>
+                                    <option value="750000">$750,000 CSL</option>
+                                    <option value="1000000">$1,000,000 CSL</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Trailer Interchange Limit</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-trailer-interchange-text" placeholder="e.g. $50,000" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-trailer-interchange" style="display: block;">
+                                    <option value="">Select Limit</option>
+                                    <option value="0">No Coverage</option>
+                                    <option value="20000">$20,000</option>
+                                    <option value="25000">$25,000</option>
+                                    <option value="50000">$50,000</option>
+                                    <option value="60000/2000ded">$60,000/$2,000 Ded.</option>
+                                    <option value="75000">$75,000</option>
+                                    <option value="100000">$100,000</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Non-Trucking Liability</label>
+                                <!-- Text input (hidden by default) -->
+                                <input type="text" class="form-control coverage-text-input" id="coverage-non-trucking-text" placeholder="e.g. $1,000,000 CSL" style="display: none;">
+                                <!-- Dropdown (default) -->
+                                <select class="form-control coverage-dropdown" id="coverage-non-trucking" style="display: block;">
+                                    <option value="">Select Limit</option>
+                                    <option value="0">No Coverage</option>
+                                    <option value="30/60/25">$30K/$60K/$25K</option>
+                                    <option value="100/300/100">$100K/$300K/$100K</option>
+                                    <option value="300000">$300,000 CSL</option>
+                                    <option value="500000">$500,000 CSL</option>
+                                    <option value="750000">$750,000 CSL</option>
+                                    <option value="1000000">$1,000,000 CSL</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Reefer Breakdown</label>
+                                <select class="form-control coverage-dropdown" id="coverage-reefer" style="display: block;">
+                                    <option value="">Select Deductible</option>
+                                    <option value="0">No Coverage</option>
+                                    <option value="included">Included / No Deductible</option>
+                                    <option value="500">$500 Deductible</option>
+                                    <option value="1000">$1,000 Deductible</option>
+                                    <option value="2500">$2,500 Deductible</option>
+                                    <option value="5000">$5,000 Deductible</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <h3>Additional Coverages</h3>
+                        <div class="checkbox-group">
+                            <label><input type="checkbox" id="coverage-hired"> Hired Auto Physical Damage</label>
+                            <label><input type="checkbox" id="coverage-non-owned"> Non-Owned Auto Liability</label>
+                            <label><input type="checkbox" id="coverage-towing"> Towing & Labor</label>
+                            <label><input type="checkbox" id="coverage-rental"> Rental Reimbursement</label>
+                            <label><input type="checkbox" id="coverage-general-liability"> General Liability</label>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="form-section">
+                        <h3>Coverage Limits</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Liability Limits</label>
+                                <select class="form-control" id="coverage-liability">
+                                    <option value="">Select Limits</option>
+                                    <option value="25/50/25">$25K/$50K/$25K (State Minimum)</option>
+                                    <option value="50/100/50">$50K/$100K/$50K</option>
+                                    <option value="100/300/100">$100K/$300K/$100K</option>
+                                    <option value="250/500/250">$250K/$500K/$250K</option>
+                                    <option value="500/1000/500">$500K/$1M/$500K</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Comprehensive Deductible</label>
+                                <select class="form-control" id="coverage-comp-deduct-personal">
+                                    <option value="">Select Deductible</option>
+                                    <option value="0">$0</option>
+                                    <option value="250">$250</option>
+                                    <option value="500">$500</option>
+                                    <option value="1000">$1,000</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Collision Deductible</label>
+                                <select class="form-control" id="coverage-coll-deduct-personal">
+                                    <option value="">Select Deductible</option>
+                                    <option value="250">$250</option>
+                                    <option value="500">$500</option>
+                                    <option value="1000">$1,000</option>
+                                    <option value="2500">$2,500</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Uninsured/Underinsured Motorist</label>
+                                <select class="form-control" id="coverage-um-uim-personal">
+                                    <option value="">Select Limit</option>
+                                    <option value="0">Rejected</option>
+                                    <option value="25/50">$25K/$50K</option>
+                                    <option value="50/100">$50K/$100K</option>
+                                    <option value="100/300">$100K/$300K</option>
+                                    <option value="75000">$75,000</option>
+                                    <option value="100000">$100,000</option>
+                                    <option value="250/500">$250K/$500K</option>
+                                    <option value="500/1000">$500K/$1M</option>
+                                    <option value="750000">$750,000</option>
+                                    <option value="1000000">$1,000,000</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+        case 'vehicles':
+            return `
+                <div class="form-section">
+                    <h3>Insured Vehicles</h3>
+                    <div id="vehiclesList"></div>
+                    <button type="button" class="btn-secondary" onclick="addVehicle()">
+                        <i class="fas fa-plus"></i> Add Vehicle
+                    </button>
+                </div>
+                ${policyType === 'commercial-auto' ? `
+                <div class="form-section">
+                    <h3>Trailers</h3>
+                    <div id="trailersList"></div>
+                    <button type="button" class="btn-secondary" onclick="addTrailer()">
+                        <i class="fas fa-plus"></i> Add Trailer
+                    </button>
+                </div>
+                ` : ''}
+            `;
+            
+        case 'drivers':
+            return `
+                <div class="form-section">
+                    <h3>Listed Drivers</h3>
+                    <div id="driversList"></div>
+                    <button type="button" class="btn-secondary" onclick="addDriver()">
+                        <i class="fas fa-plus"></i> Add Driver
+                    </button>
+                </div>
+                ${policyType === 'commercial-auto' ? `
+                <div class="form-section">
+                    <h3>CDL Driver Information</h3>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" id="drivers-hazmat"> Hazmat Endorsement</label>
+                        <label><input type="checkbox" id="drivers-tanker"> Tanker Endorsement</label>
+                        <label><input type="checkbox" id="drivers-doubles"> Doubles/Triples Endorsement</label>
+                        <label><input type="checkbox" id="drivers-passenger"> Passenger Endorsement</label>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+            
+        case 'financial':
+            return `
+                <div class="form-section">
+                    <h3>Premium & Payment</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Annual Premium <span class="required">*</span></label>
+                            <input type="text" class="form-control" id="financial-annual-premium" onchange="handleAnnualPremiumChange(this)" oninput="handleAnnualPremiumChange(this)">
+                        </div>
+                        <div class="form-group">
+                            <label>Payment Plan</label>
+                            <select class="form-control" id="financial-payment-plan">
+                                <option>Annual</option>
+                                <option>Semi-Annual</option>
+                                <option>Quarterly</option>
+                                <option>Monthly</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Down Payment</label>
+                            <input type="text" class="form-control" id="financial-down-payment">
+                        </div>
+                        <div class="form-group">
+                            <label>Monthly Payment</label>
+                            <input type="text" class="form-control" id="financial-monthly-payment">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-section">
+                    <h3>Billing Information</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Billing Method</label>
+                            <select class="form-control" id="financial-billing-method">
+                                <option>Direct Bill</option>
+                                <option>Agency Bill</option>
+                                <option>Mortgagee Bill</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Payment Method</label>
+                            <select class="form-control" id="financial-payment-method">
+                                <option>Check</option>
+                                <option>Credit Card</option>
+                                <option>ACH/EFT</option>
+                                <option>Cash</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+        case 'documents':
+            return `
+                <div class="form-section">
+                    <h3>Policy Documents</h3>
+                    <div class="document-upload">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p>Drag and drop files here or click to browse</p>
+                        <input type="file" multiple style="display: none;">
+                    </div>
+                    <div id="documentsList"></div>
+                </div>
+            `;
+            
+        case 'notes':
+            return `
+                <div class="form-section">
+                    <h3>Internal Notes</h3>
+                    <textarea class="form-control" rows="6" placeholder="Add internal notes about this policy..." id="notes-internal"></textarea>
+                </div>
+                <div class="form-section">
+                    <h3>Client Notes</h3>
+                    <textarea class="form-control" rows="6" placeholder="Add notes visible to client..." id="notes-client"></textarea>
+                </div>
+            `;
+            
+        default:
+            return `<p>Content for ${tabId} tab</p>`;
+    }
+}
+
+function switchTab(tabId) {
+    // Remove active class from all tabs and contents
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+
+    // Add active class to selected tab and content
+    document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+    document.getElementById(`${tabId}-content`).classList.add('active');
+}
+
+// Make switchTab globally available
+window.switchTab = switchTab;
+
+function addVehicle(leadId) {
+    // Check if we're in a policy modal context
+    const isPolicyModal = document.getElementById('policyModal') !== null;
+
+    if (isPolicyModal) {
+        // Policy context - add vehicle to policy form
+        addPolicyVehicle();
+    } else if (leadId) {
+        // Lead context - use the lead function
+        if (window.addVehicleToLead) {
+            window.addVehicleToLead(leadId);
+        }
+    } else {
+        // Default to policy context if no leadId provided
+        addPolicyVehicle();
+    }
+}
+
+function addPolicyVehicle() {
+    const vehiclesList = document.getElementById('vehiclesList');
+    if (!vehiclesList) {
+        console.error('vehiclesList not found');
+        return;
+    }
+
+    const vehicleCount = vehiclesList.children.length + 1;
+
+    const vehicleEntry = document.createElement('div');
+    vehicleEntry.className = 'vehicle-entry';
+    vehicleEntry.style.marginBottom = '20px';
+    vehicleEntry.style.padding = '15px';
+    vehicleEntry.style.border = '1px solid rgb(229, 231, 235)';
+    vehicleEntry.style.borderRadius = '8px';
+    vehicleEntry.style.background = 'rgb(249, 250, 251)';
+
+    vehicleEntry.innerHTML = `
+        <h4>Vehicle ${vehicleCount}</h4>
+        <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+            <input type="text" class="form-control vehicle-year" placeholder="Year" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+            <input type="text" class="form-control vehicle-make" placeholder="Make" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+            <input type="text" class="form-control vehicle-model" placeholder="Model" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+        </div>
+        <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+            <select class="form-control vehicle-radius" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                <option value="">Select Mile Radius</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+                <option value="300">300</option>
+                <option value="500">500</option>
+                <option value="unlimited">Unlimited</option>
+            </select>
+            <input type="number" class="form-control vehicle-value" placeholder="Value ($)" step="1000" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+        </div>
+        <div class="form-grid" style="display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 10px;">
+            <input type="text" class="form-control vehicle-vin" placeholder="VIN" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" oninput="checkVINLength(this)">
+        </div>
+        <button type="button" onclick="this.parentElement.remove()" style="margin-top: 10px; background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Remove Vehicle</button>
+    `;
+
+    vehiclesList.appendChild(vehicleEntry);
+}
+
+function addTrailer(leadId) {
+    // Check if we're in a policy modal context
+    const isPolicyModal = document.getElementById('policyModal') !== null;
+
+    if (isPolicyModal) {
+        // Policy context - add trailer to policy form
+        addPolicyTrailer();
+    } else if (leadId) {
+        // Lead context - use the lead function
+        if (window.addTrailerToLead) {
+            window.addTrailerToLead(leadId);
+        }
+    } else {
+        // Default to policy context if no leadId provided
+        addPolicyTrailer();
+    }
+}
+
+function addPolicyTrailer() {
+    const trailersList = document.getElementById('trailersList');
+    if (!trailersList) {
+        console.error('trailersList not found');
+        return;
+    }
+
+    const trailerCount = trailersList.children.length + 1;
+
+    const trailerEntry = document.createElement('div');
+    trailerEntry.className = 'trailer-entry';
+    trailerEntry.style.marginBottom = '20px';
+    trailerEntry.style.padding = '15px';
+    trailerEntry.style.border = '1px solid rgb(229, 231, 235)';
+    trailerEntry.style.borderRadius = '8px';
+    trailerEntry.style.background = 'rgb(249, 250, 251)';
+
+    trailerEntry.innerHTML = `
+        <h4>Trailer ${trailerCount}</h4>
+        <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
+            <input type="text" class="form-control trailer-year" placeholder="Year" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+            <input type="text" class="form-control trailer-make" placeholder="Make" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+            <div style="position: relative;">
+                <select class="form-control trailer-type" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" onchange="handleTrailerTypeChange(this, ${trailerCount})">
+                    <option value="">Select Type</option>
+                    <option>Dry Freight</option>
+                    <option>Reefer</option>
+                    <option>Flatbed</option>
+                    <option>Dump</option>
+                    <option>Gooseneck</option>
+                    <option>Other</option>
+                </select>
+                <input type="text" class="form-control trailer-type-text-${trailerCount}" style="display: none; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" placeholder="Enter trailer type">
+                <button type="button" class="trailer-type-arrow-${trailerCount}" onclick="switchBackToTrailerTypeDropdown(${trailerCount})" style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 16px;">▼</button>
+            </div>
+        </div>
+        <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 10px;">
+            <select class="form-control trailer-radius" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                <option value="">Select Mile Radius</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+                <option value="300">300</option>
+                <option value="500">500</option>
+                <option value="unlimited">Unlimited</option>
+            </select>
+            <input type="number" class="form-control trailer-value" placeholder="Value ($)" step="1000" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+        </div>
+        <div class="form-grid" style="display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 10px;">
+            <input type="text" class="form-control trailer-vin" placeholder="VIN" style="padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;" oninput="checkTrailerVINLength(this)">
+        </div>
+        <button type="button" onclick="this.parentElement.remove()" style="margin-top: 10px; background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Remove Trailer</button>
+    `;
+
+    trailersList.appendChild(trailerEntry);
+}
+
+function addDriver(leadId) {
+    // Check if we're in a policy modal context
+    const isPolicyModal = document.getElementById('policyModal') !== null;
+
+    if (isPolicyModal) {
+        // Policy context - add driver to policy form
+        addPolicyDriver();
+    } else if (leadId) {
+        // Lead context - use the lead function
+        if (window.addDriverToLead) {
+            window.addDriverToLead(leadId);
+        }
+    } else {
+        // Default to policy context if no leadId provided
+        addPolicyDriver();
+    }
+}
+
+function addPolicyDriver() {
+    const driversList = document.getElementById('driversList');
+    if (!driversList) {
+        console.error('driversList not found');
+        return;
+    }
+
+    const driverCount = driversList.children.length + 1;
+
+    const driverEntry = document.createElement('div');
+    driverEntry.className = 'driver-entry';
+    driverEntry.innerHTML = `
+        <h4>Driver ${driverCount}</h4>
+        <div class="form-grid">
+            <input type="text" class="form-control" placeholder="Full Name">
+            <input type="date" class="form-control" placeholder="Date of Birth">
+            <input type="text" class="form-control" placeholder="License Number">
+            <select class="form-control">
+                <option>Primary</option>
+                <option>Occasional</option>
+                <option>Excluded</option>
+            </select>
+            <button type="button" class="btn-danger" onclick="this.parentElement.parentElement.remove()">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+        ${currentPolicyData.policyType === 'commercial-auto' ? `
+        <div class="form-group">
+            <label>CDL Endorsements:</label>
+            <div class="checkbox-group">
+                <label><input type="checkbox"> Hazmat</label>
+                <label><input type="checkbox"> Tanker</label>
+                <label><input type="checkbox"> Doubles/Triples</label>
+                <label><input type="checkbox"> Passenger</label>
+            </div>
+        </div>
+        ` : ''}
+    `;
+    
+    driversList.appendChild(driverEntry);
+}
+
+function addAdditionalInsured() {
+    const list = document.getElementById('additionalInsuredList');
+    const count = list.children.length + 1;
+    
+    const entry = document.createElement('div');
+    entry.className = 'additional-insured-entry';
+    entry.innerHTML = `
+        <h4>Additional Insured ${count}</h4>
+        <div class="form-grid">
+            <input type="text" class="form-control" placeholder="Name/Business">
+            <input type="text" class="form-control" placeholder="Relationship">
+            <input type="text" class="form-control" placeholder="Address">
+            <button type="button" class="btn-danger" onclick="this.parentElement.parentElement.remove()">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    `;
+    
+    list.appendChild(entry);
+}
+
+function closePolicyModal() {
+    const modal = document.getElementById('policyModal');
+    if (modal) {
+        modal.remove();
+    }
+
+    // Clear any editing flags and client associations
+    delete window.editingPolicyId;
+    delete window.currentPolicyData;
+    // Don't clear client associations here as they may be needed after save
+    // delete window.currentClientId;
+    // delete window.currentClientInfo;
+}
+
+function updateFieldsBasedOnType() {
+    const policyType = document.getElementById('policyType').value;
+    // This can be expanded to show/hide specific fields based on policy type
+    console.log('Policy type changed to:', policyType);
+}
+
+// Auto-fill policy number
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(() => {
+        const policyNumberField = document.getElementById('policyNumber');
+        if (policyNumberField && !policyNumberField.value) {
+            const date = new Date();
+            const year = date.getFullYear();
+            const random = Math.floor(Math.random() * 9999).toString().padStart(4, '0');
+            policyNumberField.value = `POL-${year}-${random}`;
+        }
+    }, 100);
+});
+
+function showNotification(message, type = 'info') {
+    // Notification disabled - just log to console
+    console.log(`${type.toUpperCase()}: ${message}`);
+
+    // Create notification element - DISABLED
+    // const notification = document.createElement('div');
+    // notification.className = `notification ${type}`;
+    // notification.style.cssText = `
+    //     position: fixed;
+    //     top: 20px;
+    //     right: 20px;
+    //     padding: 15px 20px;
+    //     background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+    //     color: white;
+    //     border-radius: 8px;
+    //     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    //     z-index: 10000;
+    //     animation: slideIn 0.3s ease;
+    // `;
+    // notification.textContent = message;
+    //
+    // document.body.appendChild(notification);
+    //
+    // // Remove after 3 seconds
+    // setTimeout(() => {
+    //     notification.style.animation = 'slideOut 0.3s ease';
+    //     setTimeout(() => notification.remove(), 300);
+    // }, 3000);
+}
+
+// Add animation styles
+if (!document.getElementById('policy-modal-animations')) {
+    const styles = document.createElement('style');
+    styles.id = 'policy-modal-animations';
+    styles.textContent = `
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+    `;
+    document.head.appendChild(styles);
+}
+
+// Save policy to server
+async function saveToServer(policyData, isEditing) {
+    console.log('=== saveToServer called with data ===');
+    console.log('Full policyData:', JSON.stringify(policyData, null, 2));
+    console.log('Carrier value:', policyData.carrier);
+    console.log('ClientId value:', policyData.clientId);
+    console.log('ClientName value:', policyData.clientName);
+
+    try {
+        // Try PolicySyncManager first (newer, more reliable)
+        if (window.PolicySyncManager && window.PolicySyncManager.savePolicy) {
+            const success = await window.PolicySyncManager.savePolicy(policyData);
+            if (success) {
+                console.log('Policy saved to server via PolicySyncManager');
+                return true;
+            }
+        }
+
+        // Fallback to DataSync if available
+        if (window.DataSync && window.DataSync.savePolicy) {
+            const success = await window.DataSync.savePolicy(policyData);
+            if (success) {
+                console.log('Policy saved to server via DataSync');
+                return true;
+            }
+        }
+
+        // Direct API call as fallback
+        const API_URL = window.location.hostname.includes('nip.io')
+            ? `http://${window.location.hostname.split('.')[0]}:3001/api`
+            : window.location.hostname === 'localhost'
+            ? 'http://localhost:3001/api'
+            : 'http://162.220.14.239:3001/api';
+
+        const response = await fetch(`${API_URL}/policies`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(policyData)
+        });
+
+        if (response.ok) {
+            console.log('Policy saved directly to server');
+            return true;
+        }
+    } catch (error) {
+        console.error('Error saving to server:', error);
+    }
+    return false;
+}
+
+async function savePolicy() {
+    // Disable the save button to prevent double-clicks
+    const saveButtons = document.querySelectorAll('button[onclick*="savePolicy"]');
+    saveButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    });
+
+    try {
+        console.log('Saving policy...');
+        
+        // Gather all policy data from the form
+        // Check if we're editing an existing policy (not creating new)
+        const isEditing = window.editingPolicyId !== undefined &&
+                        window.editingPolicyId !== 'new' &&
+                        window.editingPolicyId !== '' &&
+                        window.editingPolicyId !== null;
+
+        console.log('🔧 POLICY-MODAL DEBUG: editingPolicyId =', window.editingPolicyId);
+        console.log('🔧 POLICY-MODAL DEBUG: isEditing =', isEditing);
+
+        // Start with the existing policy data as base (if editing) OR the initial data (if creating new)
+        let policyData = isEditing ? {...currentPolicyData} : {...currentPolicyData, ...window.currentPolicyData};
+
+        // Debug: Check if policyData is empty or missing key fields
+        console.log('DEBUG: Initial policyData:', policyData);
+        console.log('DEBUG: currentPolicyData:', currentPolicyData);
+        console.log('DEBUG: window.currentPolicyData:', window.currentPolicyData);
+        console.log('DEBUG: isEditing:', isEditing);
+
+        // If policyData is empty or missing essential fields, try to reconstruct from form
+        if (!policyData || Object.keys(policyData).length === 0 || !policyData.policyNumber) {
+            console.log('DEBUG: Policy data is empty, reconstructing from current form state');
+
+            // Get basic fields from overview tab if it exists
+            const overviewTab = document.getElementById('overview-content');
+            if (overviewTab) {
+                policyData = {
+                    policyNumber: document.getElementById('overview-policy-number')?.value || `POL-${Date.now()}`,
+                    carrier: document.getElementById('overview-carrier')?.value || '',
+                    policyStatus: document.getElementById('overview-status')?.value || 'Active',
+                    effectiveDate: document.getElementById('overview-effective-date')?.value || '',
+                    expirationDate: document.getElementById('overview-expiration-date')?.value || '',
+                    premium: document.getElementById('overview-premium')?.value || '',
+                    agent: document.getElementById('overview-agent')?.value || '',
+                    united: document.getElementById('overview-united')?.checked || false,
+                    dotNumber: document.getElementById('overview-dot-number')?.value || '',
+                    mcNumber: document.getElementById('overview-mc-number')?.value || ''
+                };
+
+                // Get policy type from dropdown
+                const policyTypeField = document.getElementById('overview-policy-type');
+                if (policyTypeField && policyTypeField.value) {
+                    const typeMap = {
+                        'Commercial Auto': 'commercial-auto',
+                        'Personal Auto': 'personal-auto',
+                        'Homeowners': 'homeowners',
+                        'Commercial Property': 'commercial-property',
+                        'General Liability': 'general-liability',
+                        'Professional Liability': 'professional-liability',
+                        'Workers Comp': 'workers-comp',
+                        'Umbrella': 'umbrella',
+                        'Life': 'life',
+                        'Health': 'health'
+                    };
+                    policyData.policyType = typeMap[policyTypeField.value] || policyTypeField.value.toLowerCase().replace(/\s+/g, '-');
+                }
+            }
+
+            console.log('DEBUG: Reconstructed policyData:', policyData);
+        }
+
+        // Capture Named Insured information from the insured tab
+        const insuredTab = document.getElementById('insured-content');
+        if (insuredTab) {
+            policyData.insured = {
+                'Name/Business Name': document.getElementById('insured-name')?.value || '',
+                'Primary Named Insured': document.getElementById('insured-name')?.value || '',
+                'DBA': document.getElementById('insured-dba')?.value || '',
+                'Tax ID/SSN': document.getElementById('insured-taxid')?.value || '',
+                'Date of Birth/Inception': document.getElementById('insured-dob')?.value || ''
+            };
+            console.log('DEBUG: Captured insured data:', policyData.insured);
+        }
+
+        // Capture Contact information from the contact tab
+        // Merge with existing contact data so fields not in the form are preserved
+        const contactTab = document.getElementById('contact-content');
+        if (contactTab) {
+            const _existingContact = (currentPolicyData && currentPolicyData.contact) || {};
+            const _getContact = (id, fallbackKey) => {
+                const v = document.getElementById(id)?.value;
+                return (v !== undefined && v !== '') ? v : (_existingContact[fallbackKey] || _existingContact[id.replace('contact-', '')] || '');
+            };
+            policyData.contact = {
+                ..._existingContact,                                         // preserve all existing keys
+                'Owner Name':    _getContact('contact-owner-name', 'Owner Name'),
+                'Date of Birth': _getContact('contact-dob',        'Date of Birth'),
+                'Phone':         _getContact('contact-phone',       'Phone'),
+                'Email':         _getContact('contact-email',       'Email'),
+                'Address':       _getContact('contact-address',     'Address'),
+                'City':          _getContact('contact-city',        'City'),
+                'State':         _getContact('contact-state',       'State'),
+                'ZIP Code':      _getContact('contact-zip',         'ZIP Code'),
+            };
+            console.log('DEBUG: Captured contact data:', policyData.contact);
+        }
+
+        // IMPORTANT: Get client name from Named Insured tab FIRST, then fallback to client profile
+        const namedInsuredName = document.getElementById('insured-name')?.value?.trim();
+        if (namedInsuredName) {
+            policyData.clientName = namedInsuredName;
+            console.log('Using Named Insured name as client name:', policyData.clientName);
+        } else if (!policyData.clientName && policyData.clientId) {
+            // Fallback to client profile name only if Named Insured is empty
+            const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+            const client = clients.find(c => c.id === policyData.clientId);
+            if (client) {
+                policyData.clientName = client.name || client.companyName || client.businessName || 'N/A';
+                console.log('Using client profile name as fallback:', policyData.clientName);
+            }
+        }
+
+        // Ensure client association is preserved
+        if (!policyData.clientId && (window.currentClientId || window.currentViewingClientId)) {
+            policyData.clientId = window.currentClientId || window.currentViewingClientId;
+            console.log('Adding missing clientId:', policyData.clientId);
+        }
+
+        // Add/update core fields
+        policyData.timestamp = new Date().toISOString();
+        policyData.id = isEditing ? window.editingPolicyId : generatePolicyId();
+
+        // Store the initial policyType to ensure it's not lost
+        const initialPolicyType = policyData.policyType || currentPolicyData.policyType;
+
+        // If we have a current client ID (from client profile), add it to the policy
+        console.log('Checking for client association:');
+        console.log('window.currentClientId:', window.currentClientId);
+        console.log('window.currentViewingClientId:', window.currentViewingClientId);
+        console.log('window.currentClientInfo:', window.currentClientInfo);
+
+        if (window.currentClientId || window.currentViewingClientId) {
+            policyData.clientId = window.currentClientId || window.currentViewingClientId;
+            console.log('Assigning policy to client:', policyData.clientId);
+
+            // PRIORITY 1: Use Named Insured name from form if available
+            const namedInsuredNameFromForm = document.getElementById('insured-name')?.value?.trim();
+            if (namedInsuredNameFromForm && !policyData.clientName) {
+                policyData.clientName = namedInsuredNameFromForm;
+                console.log('Client name from Named Insured form field:', policyData.clientName);
+            } else if (!policyData.clientName) {
+                // PRIORITY 2: Fallback to client info if Named Insured is empty
+                if (window.currentClientInfo) {
+                    policyData.clientName = window.currentClientInfo.name || window.currentClientInfo.companyName || window.currentClientInfo.businessName || 'N/A';
+                    console.log('Client name from currentClientInfo:', policyData.clientName);
+                } else {
+                    // PRIORITY 3: Try to get client name from localStorage
+                    const clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+                    const client = clients.find(c => c.id === policyData.clientId);
+                    if (client) {
+                        policyData.clientName = client.name || client.companyName || client.businessName || 'N/A';
+                        console.log('Client name from localStorage:', policyData.clientName);
+                    }
+                }
+            }
+        } else {
+            console.log('No client ID found - policy not associated with any client');
+        }
+
+        // Get data from each tab
+        const tabs = document.querySelectorAll('.tab-content');
+        tabs.forEach(tab => {
+            const tabId = tab.id.replace('-content', '');
+            const inputs = tab.querySelectorAll('input, select, textarea');
+
+            if (!policyData[tabId]) {
+                policyData[tabId] = {};
+            }
+            
+            inputs.forEach(input => {
+                const label = input.closest('.form-group')?.querySelector('label')?.textContent.replace(' *', '').replace(':', '').trim();
+                if (label && input.id) {
+                    // Store in tab-specific data
+                    if (input.type === 'checkbox') {
+                        if (!policyData[tabId][label]) policyData[tabId][label] = [];
+                        if (input.checked) policyData[tabId][label].push(input.parentElement.textContent.trim());
+                    } else {
+                        policyData[tabId][label] = input.value;
+                    }
+                    
+                    // Also store key fields at root level for easier access
+                    if (tabId === 'overview') {
+                        if (input.id === 'overview-policy-number' && input.value) {
+                            policyData.policyNumber = input.value;
+                        }
+                        if (input.id === 'overview-policy-type' && input.value) {
+                            // Convert display type back to system type
+                            const typeMap = {
+                                'Commercial Auto': 'commercial-auto',
+                                'Personal Auto': 'personal-auto',
+                                'Homeowners': 'homeowners',
+                                'Commercial Property': 'commercial-property',
+                                'General Liability': 'general-liability',
+                                'Professional': 'professional-liability',
+                                'Professional Liability': 'professional-liability',
+                                'Workers Comp': 'workers-comp',
+                                'Umbrella': 'umbrella',
+                                'Life': 'life',
+                                'Health': 'health'
+                            };
+                            policyData.policyType = typeMap[input.value] || input.value.toLowerCase().replace(/\s+/g, '-');
+                        }
+                        if (input.id === 'overview-carrier') {
+                            console.log('Capturing carrier from overview:', input.value);
+                            policyData.carrier = input.value;
+                        }
+                        if (input.id === 'overview-status') policyData.policyStatus = input.value;
+                        if (input.id === 'overview-effective-date') policyData.effectiveDate = formatDateForStorage(input.value);
+                        if (input.id === 'overview-expiration-date') policyData.expirationDate = formatDateForStorage(input.value);
+                        if (input.id === 'overview-premium') {
+                            console.log('Setting premium from overview-premium field:', input.value);
+                            policyData.premium = input.value;
+                        }
+                        if (input.id === 'overview-agent') {
+                            console.log('Capturing agent from overview dropdown:', input.value);
+                            policyData.agent = input.value;
+                        }
+                        if (input.id === 'overview-dot-number') policyData.dotNumber = input.value;
+                        if (input.id === 'overview-mc-number') policyData.mcNumber = input.value;
+                        if (input.id === 'overview-united') policyData.united = input.checked;
+                    }
+                    
+                    // Store financial data at root level too
+                    if (tabId === 'financial') {
+                        if (label === 'Annual Premium' && input.value) {
+                            policyData.premium = input.value;
+                            policyData.annualPremium = input.value;
+                            // Also ensure it's in the financial object
+                            if (!policyData.financial) policyData.financial = {};
+                            policyData.financial['Annual Premium'] = input.value;
+                            console.log('Setting premium from financial Annual Premium field:', input.value);
+                        }
+                        if (label === 'Premium' && input.value) {
+                            policyData.premium = input.value;
+                            console.log('Setting premium from financial Premium field:', input.value);
+                        }
+                        if (label === 'Monthly Premium' && input.value) {
+                            policyData.monthlyPremium = input.value;
+                        }
+                    }
+                }
+            });
+        });
+        
+        // Collect vehicle and trailer data
+        policyData.vehicles = [];
+
+        // Collect vehicles
+        const vehicleEntries = document.querySelectorAll('.vehicle-entry');
+        // If vehicles tab was never opened, the DOM has no entries — preserve existing data
+        const vehiclesTabRendered = !!document.getElementById('vehiclesList');
+        vehicleEntries.forEach(entry => {
+            const vehicle = {};
+            const inputs = entry.querySelectorAll('input, select');
+            
+            inputs.forEach(field => {
+                if (field.value) {
+                    // Map placeholders to proper field names
+                    let fieldName = field.placeholder || '';
+                    
+                    if (fieldName.includes('Year')) fieldName = 'Year';
+                    else if (fieldName.includes('Make')) fieldName = 'Make';
+                    else if (fieldName.includes('Model')) fieldName = 'Model';
+                    else if (fieldName.includes('VIN')) fieldName = 'VIN';
+                    else if (fieldName.includes('Value')) fieldName = 'Value';
+                    else if (fieldName.includes('Deductible')) fieldName = 'Deductible';
+                    else if (field.tagName === 'SELECT') fieldName = 'Coverage';
+                    
+                    vehicle[fieldName] = field.value;
+                }
+            });
+            
+            if (Object.keys(vehicle).length > 0) {
+                vehicle.Type = 'Vehicle';
+                policyData.vehicles.push(vehicle);
+            }
+        });
+        
+        // Collect trailers
+        const trailerEntries = document.querySelectorAll('.trailer-entry');
+        trailerEntries.forEach(entry => {
+            const trailer = {};
+            const inputs = entry.querySelectorAll('input');
+
+            inputs.forEach(field => {
+                if (field.value) {
+                    // Map placeholders to proper field names
+                    let fieldName = field.placeholder || '';
+
+                    if (fieldName.includes('Year')) fieldName = 'Year';
+                    else if (fieldName.includes('Make')) fieldName = 'Make';
+                    else if (fieldName.includes('Type')) fieldName = 'Trailer Type';
+                    else if (fieldName.includes('VIN')) fieldName = 'VIN';
+                    else if (fieldName.includes('Length')) fieldName = 'Length';
+                    else if (fieldName.includes('Value')) fieldName = 'Value';
+                    else if (fieldName.includes('Deductible')) fieldName = 'Deductible';
+
+                    trailer[fieldName] = field.value;
+                }
+            });
+
+            if (Object.keys(trailer).length > 0) {
+                trailer.Type = 'Trailer';
+                policyData.vehicles.push(trailer);
+            }
+        });
+
+        // If the vehicles tab was never opened (no DOM entries), preserve existing vehicle/trailer data
+        if (!vehiclesTabRendered && policyData.vehicles.length === 0 && currentPolicyData.vehicles?.length > 0) {
+            policyData.vehicles = currentPolicyData.vehicles;
+            console.log('Vehicles tab not opened — preserving existing vehicles:', policyData.vehicles.length);
+        }
+
+        // Collect drivers data — merge with original driver to preserve fields not in the form
+        policyData.drivers = [];
+        const driverEntries = document.querySelectorAll('.driver-entry');
+        driverEntries.forEach((entry, driverIdx) => {
+            // Start from the original driver data so keys like licenseState, etc. are preserved
+            const originalDriver = (currentPolicyData && currentPolicyData.drivers || [])[driverIdx] || {};
+            const driver = { ...originalDriver };
+            entry.querySelectorAll('input, select').forEach(field => {
+                if (field.value) {
+                    const ph = (field.placeholder || '').toLowerCase();
+                    // Map form placeholders back to canonical keys, merging into original
+                    if (ph.includes('full name') || ph.includes('name')) {
+                        driver.name = field.value;
+                        driver['Full Name'] = field.value;
+                    } else if (field.type === 'date' || ph.includes('birth') || ph.includes('dob')) {
+                        driver['Date of Birth'] = field.value;
+                        driver.dateOfBirth = field.value;
+                    } else if (ph.includes('license')) {
+                        driver['License Number'] = field.value;
+                        driver.licenseNumber = field.value;
+                    } else if (field.tagName === 'SELECT') {
+                        driver['Driver Type'] = field.value;
+                        driver.driverType = field.value;
+                    } else {
+                        driver[field.placeholder || 'unknown'] = field.value;
+                    }
+                }
+            });
+            if (Object.keys(driver).length > 0) {
+                policyData.drivers.push(driver);
+            }
+        });
+
+        // If drivers tab was never opened, preserve existing driver data
+        if (!document.getElementById('driversList') && policyData.drivers.length === 0 && currentPolicyData.drivers?.length > 0) {
+            policyData.drivers = currentPolicyData.drivers;
+            console.log('Drivers tab not opened — preserving existing drivers:', policyData.drivers.length);
+        }
+
+        // Collect Additional Coverages checkboxes (they're in .checkbox-group, not .form-group)
+        const additionalCoverageMap = {
+            'coverage-hired': 'Hired Auto Physical Damage',
+            'coverage-non-owned': 'Non-Owned Auto Liability',
+            'coverage-towing': 'Towing & Labor',
+            'coverage-rental': 'Rental Reimbursement',
+            'coverage-general-liability': 'General Liability'
+        };
+        const additionalCoverages = [];
+        Object.entries(additionalCoverageMap).forEach(([id, name]) => {
+            const el = document.getElementById(id);
+            if (el && el.checked) additionalCoverages.push(name);
+        });
+        if (!policyData.coverage) policyData.coverage = {};
+        policyData.coverage.additionalCoverages = additionalCoverages;
+
+        // Ensure policyType is not lost - use initial type if current is empty
+        if (!policyData.policyType || policyData.policyType === '') {
+            policyData.policyType = initialPolicyType;
+        }
+        
+        console.log('Policy data collected:', policyData);
+        console.log('Policy type being saved:', policyData.policyType);
+        console.log('Premium being saved:', policyData.premium);
+        console.log('Vehicles being saved:', policyData.vehicles);
+        console.log('Carrier being saved:', policyData.carrier);
+        console.log('Client ID being saved:', policyData.clientId);
+        console.log('Client Name being saved:', policyData.clientName);
+
+        // Always try to save to server first
+        let savedSuccessfully = false;
+        try {
+            savedSuccessfully = await saveToServer(policyData, isEditing);
+            console.log('Server save result:', savedSuccessfully);
+        } catch (error) {
+            console.error('Error during server save:', error);
+            savedSuccessfully = false;
+        }
+
+        if (savedSuccessfully) {
+            if (isEditing) {
+                showNotification(`Policy ${policyData.policyNumber} has been updated successfully!`, 'success');
+            } else {
+                showNotification(`Policy ${policyData.policyNumber} has been created successfully!`, 'success');
+            }
+        } else {
+            // Fallback to localStorage if server save fails
+            let policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+
+            console.log('📊 POLICY-MODAL DEBUG: Policies before save:', policies.length);
+            console.log('📊 POLICY-MODAL DEBUG: Looking for policy ID:', policyData.id);
+            console.log('📊 POLICY-MODAL DEBUG: Is editing mode:', isEditing);
+
+            if (isEditing) {
+                const index = policies.findIndex(p => String(p.id) === String(window.editingPolicyId));
+                console.log('📊 POLICY-MODAL DEBUG: Existing index found:', index);
+                if (index !== -1) {
+                    policies[index] = policyData;
+                    console.log('📊 POLICY-MODAL DEBUG: Updated existing policy at index', index);
+                } else {
+                    policies.push(policyData);
+                    console.log('📊 POLICY-MODAL DEBUG: Policy ID not found, adding as new');
+                }
+            } else {
+                policies.push(policyData);
+                console.log('📊 POLICY-MODAL DEBUG: Added new policy, total count now:', policies.length);
+            }
+
+            localStorage.setItem('insurance_policies', JSON.stringify(policies));
+
+            // Verify the save worked
+            const savedPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            console.log('✅ POLICY-MODAL DEBUG: Verified save - total policies now:', savedPolicies.length);
+            console.log('✅ POLICY-MODAL DEBUG: Verified policy IDs:', savedPolicies.map(p => p.id));
+            console.log('✅ POLICY-MODAL DEBUG: Saved policy clientId:', policyData.clientId);
+            console.log('✅ POLICY-MODAL DEBUG: Policy data:', policyData);
+            showNotification(`Policy ${policyData.policyNumber} saved locally (server sync pending)`, 'warning');
+        }
+        
+        console.log('Policy saved to localStorage');
+        console.log('Saved policy with type:', policyData.policyType);
+
+        // If policy is linked to a client, update the client's policies array
+        if (policyData.clientId) {
+            let clients = JSON.parse(localStorage.getItem('insurance_clients') || '[]');
+            const clientIndex = clients.findIndex(c => c.id === policyData.clientId);
+            if (clientIndex >= 0) {
+                if (!clients[clientIndex].policies || !Array.isArray(clients[clientIndex].policies)) {
+                    clients[clientIndex].policies = [];
+                }
+                if (!clients[clientIndex].policies.includes(policyData.id)) {
+                    clients[clientIndex].policies.push(policyData.id);
+                    localStorage.setItem('insurance_clients', JSON.stringify(clients));
+                    console.log('Updated client policies array for client:', policyData.clientId);
+
+                    // Also update client on server
+                    if (window.DataSync && window.DataSync.saveClient) {
+                        window.DataSync.saveClient(clients[clientIndex]).then(() => {
+                            console.log('Client updated on server with new policy');
+                        }).catch(err => {
+                            console.error('Failed to update client on server:', err);
+                        });
+                    }
+                }
+            }
+        }
+
+        // Update the policies count in the dashboard
+        updatePoliciesCount();
+        
+        // Clear editing flag
+        delete window.editingPolicyId;
+
+        // Close modal immediately
+        closePolicyModal();
+
+        // If we have a client ID (from client profile), refresh the client view
+        if (policyData.clientId || window.currentClientId || window.currentViewingClientId) {
+            const clientId = policyData.clientId || window.currentClientId || window.currentViewingClientId;
+            console.log('Refreshing client view for:', clientId);
+
+            // Clear client variables after successful save
+            delete window.currentClientId;
+            delete window.currentClientInfo;
+            delete window.currentViewingClientId;
+
+            // Use setTimeout to allow modal to close first
+            setTimeout(() => {
+                // Try the same approach as fix-policy-server-save.js
+                if (window.loadClientProfile) {
+                    console.log('🔄 Refreshing client profile after policy save...');
+                    window.loadClientProfile(clientId);
+                } else if (typeof window.viewClient === 'function') {
+                    window.viewClient(clientId);
+                } else {
+                    console.error('viewClient function not found, trying to reload view');
+                    // Try to find and click the client's view button
+                    const viewBtn = document.querySelector(`button[onclick*="viewClient('${clientId}')"]`);
+                    if (viewBtn) {
+                        viewBtn.click();
+                    } else {
+                        // Last resort - reload the page
+                        location.reload();
+                    }
+                }
+            }, 100);
+        } else if (document.querySelector('.dashboard-content h1')?.textContent === 'Policy Management' ||
+                   window.location.hash === '#policies') {
+            // If in policies view, refresh it
+            if (typeof window.loadPoliciesView === 'function') {
+                window.loadPoliciesView();
+            }
+        } else {
+            // Try to detect if we're in a client profile view
+            const clientProfileView = document.querySelector('.client-profile-view');
+            if (clientProfileView) {
+                // Try to find the client ID from the view
+                const clientIdMatch = clientProfileView.innerHTML.match(/viewClient\(['"](\w+)['"]\)/);
+                if (clientIdMatch && clientIdMatch[1]) {
+                    setTimeout(() => {
+                        window.viewClient(clientIdMatch[1]);
+                    }, 100);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error saving policy:', error);
+        showNotification('Error saving policy. Please try again.', 'error');
+
+        // Re-enable the save button on error
+        const saveButtons = document.querySelectorAll('button[onclick*="savePolicy"]');
+        saveButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Save Policy';
+        });
+    }
+}
+
+function generatePolicyId() {
+    return 'POL-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+}
+
+function updatePoliciesCount() {
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const activeCount = policies.filter(p => p.policyStatus === 'active' || p.policyStatus === 'in-force').length;
+
+    // Update dashboard if visible
+    const policyCard = document.querySelector('.stat-card:nth-child(2) .stat-number');
+    if (policyCard) {
+        policyCard.textContent = policies.length.toLocaleString();
+    }
+
+    // Update active policies count
+    const activeCard = document.querySelector('.dashboard-header .badge-success');
+    if (activeCard) {
+        activeCard.textContent = `${activeCount} Active`;
+    }
+
+    // Also update full dashboard stats if available
+    if (window.updateDashboardStats && document.querySelector('.dashboard-content .stat-card')) {
+        window.updateDashboardStats();
+    }
+}
+
+function savePolicyDraft() {
+    try {
+        console.log('Saving policy as draft...');
+        
+        // Gather all policy data from the form
+        const policyData = {
+            ...currentPolicyData,
+            timestamp: new Date().toISOString(),
+            id: generatePolicyId(),
+            isDraft: true
+        };
+        
+        // Get data from each tab
+        const tabs = document.querySelectorAll('.tab-content');
+        tabs.forEach(tab => {
+            const tabId = tab.id.replace('-content', '');
+            const inputs = tab.querySelectorAll('input, select, textarea');
+            
+            if (!policyData[tabId]) {
+                policyData[tabId] = {};
+            }
+            
+            inputs.forEach(input => {
+                const label = input.closest('.form-group')?.querySelector('label')?.textContent.replace(' *', '').replace(':', '').trim();
+                if (label && input.id) {
+                    // Store in tab-specific data
+                    if (input.type === 'checkbox') {
+                        if (!policyData[tabId][label]) policyData[tabId][label] = [];
+                        if (input.checked) policyData[tabId][label].push(input.parentElement.textContent.trim());
+                    } else {
+                        policyData[tabId][label] = input.value;
+                    }
+                    
+                    // Also store key fields at root level for easier access
+                    if (tabId === 'overview') {
+                        if (input.id === 'overview-policy-number' && input.value) {
+                            policyData.policyNumber = input.value;
+                        }
+                        if (input.id === 'overview-policy-type' && input.value) {
+                            // Convert display type back to system type
+                            const typeMap = {
+                                'Commercial Auto': 'commercial-auto',
+                                'Personal Auto': 'personal-auto',
+                                'Homeowners': 'homeowners',
+                                'Commercial Property': 'commercial-property',
+                                'General Liability': 'general-liability',
+                                'Professional': 'professional-liability',
+                                'Professional Liability': 'professional-liability',
+                                'Workers Comp': 'workers-comp',
+                                'Umbrella': 'umbrella',
+                                'Life': 'life',
+                                'Health': 'health'
+                            };
+                            policyData.policyType = typeMap[input.value] || input.value.toLowerCase().replace(/\s+/g, '-');
+                        }
+                        if (input.id === 'overview-carrier') {
+                            console.log('Capturing carrier from overview:', input.value);
+                            policyData.carrier = input.value;
+                        }
+                        if (input.id === 'overview-status') policyData.policyStatus = input.value;
+                        if (input.id === 'overview-effective-date') policyData.effectiveDate = formatDateForStorage(input.value);
+                        if (input.id === 'overview-expiration-date') policyData.expirationDate = formatDateForStorage(input.value);
+                        if (input.id === 'overview-premium') {
+                            console.log('Setting premium from overview-premium field:', input.value);
+                            policyData.premium = input.value;
+                        }
+                        if (input.id === 'overview-agent') {
+                            console.log('Capturing agent from overview dropdown:', input.value);
+                            policyData.agent = input.value;
+                        }
+                        if (input.id === 'overview-dot-number') policyData.dotNumber = input.value;
+                        if (input.id === 'overview-mc-number') policyData.mcNumber = input.value;
+                        if (input.id === 'overview-united') policyData.united = input.checked;
+                    }
+                    
+                    // Store financial data at root level too
+                    if (tabId === 'financial') {
+                        if (label === 'Annual Premium' && input.value) {
+                            policyData.premium = input.value;
+                            policyData.annualPremium = input.value;
+                            // Also ensure it's in the financial object
+                            if (!policyData.financial) policyData.financial = {};
+                            policyData.financial['Annual Premium'] = input.value;
+                            console.log('Setting premium from financial Annual Premium field:', input.value);
+                        }
+                        if (label === 'Premium' && input.value) {
+                            policyData.premium = input.value;
+                            console.log('Setting premium from financial Premium field:', input.value);
+                        }
+                        if (label === 'Monthly Premium' && input.value) {
+                            policyData.monthlyPremium = input.value;
+                        }
+                    }
+                }
+            });
+        });
+        
+        // Store drafts separately
+        let drafts = JSON.parse(localStorage.getItem('policyDrafts') || '[]');
+        drafts.push(policyData);
+        localStorage.setItem('policyDrafts', JSON.stringify(drafts));
+        
+        showNotification('Policy saved as draft!', 'success');
+    } catch (error) {
+        console.error('Error saving draft:', error);
+        showNotification('Error saving draft. Please try again.', 'error');
+    }
+}
+
+// Add some basic styles for the policy modal
+if (!document.getElementById('policy-modal-styles')) {
+    const styles = document.createElement('style');
+    styles.id = 'policy-modal-styles';
+    styles.textContent = `
+        .success-banner {
+            background: #10b981;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .policy-tabs {
+            display: flex;
+            gap: 5px;
+            border-bottom: 2px solid #e5e7eb;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .tab-btn {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            color: #6b7280;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.3s;
+        }
+        
+        .tab-btn:hover {
+            color: #3b82f6;
+            background: #f3f4f6;
+        }
+        
+        .tab-btn.active {
+            color: #3b82f6;
+            border-bottom-color: #3b82f6;
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .vehicle-entry, .driver-entry, .additional-insured-entry, .trailer-entry {
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #f9fafb;
+        }
+        
+        .vehicle-entry h4, .driver-entry h4, .additional-insured-entry h4, .trailer-entry h4 {
+            margin: 0 0 15px 0;
+            color: #374151;
+            font-size: 16px;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 10px;
+        }
+        
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        
+        .checkbox-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        
+        .document-upload {
+            border: 2px dashed #d1d5db;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .document-upload:hover {
+            border-color: #007bff;
+            background: #f0f8ff;
+        }
+        
+        .document-upload i {
+            font-size: 48px;
+            color: #007bff;
+            margin-bottom: 10px;
+        }
+    `;
+    document.head.appendChild(styles);
+}
+
+// Function to populate form fields when editing
+function populatePolicyForm(policyData) {
+    console.log('Populating form with policy data:', policyData);
+
+    // Convert MM/DD/YYYY → YYYY-MM-DD for <input type="date">
+    function toISODate(str) {
+        if (!str) return '';
+        const m = String(str).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        return m ? `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}` : String(str);
+    }
+
+    // Helper function to find field value from various possible keys
+    function findFieldValue(data, possibleKeys) {
+        for (const key of possibleKeys) {
+            if (data[key] !== undefined && data[key] !== null) {
+                return data[key];
+            }
+        }
+        return null;
+    }
+    
+    // Helper function to set field value
+    function setFieldValue(field, value) {
+        if (value === null || value === undefined) return;
+
+        if (field.type === 'checkbox') {
+            if (Array.isArray(value)) {
+                const checkboxLabel = field.parentElement.textContent.trim();
+                field.checked = value.some(v => v.includes(checkboxLabel));
+            } else {
+                field.checked = !!value;
+            }
+        } else if (field.type === 'radio') {
+            field.checked = field.value === value;
+        } else if (field.tagName === 'SELECT') {
+            // Normalize IVANS-formatted strings (e.g. "$1,000,000 ($100/yr)") to plain numeric
+            let normalVal = String(value).trim();
+            normalVal = normalVal.replace(/\s*\(\$[\d,]+\/yr\)/gi, '').trim(); // strip ($X/yr) suffix
+            normalVal = normalVal.replace(/[$,\s]/g, '');                       // strip $, commas, spaces
+            // Try setting the normalized value
+            field.value = normalVal;
+            if (field.value !== normalVal && normalVal !== '') {
+                // Value not in any existing option — inject it dynamically so it can be selected
+                const opt = document.createElement('option');
+                opt.value = normalVal;
+                const parts = normalVal.split('/');
+                opt.textContent = parts.every(p => /^\d+$/.test(p))
+                    ? parts.map(p => '$' + parseInt(p).toLocaleString()).join('/')
+                    : normalVal;
+                field.appendChild(opt);
+                field.value = normalVal;
+            }
+        } else {
+            field.value = value;
+        }
+    }
+    
+    // Iterate through all form fields and populate them
+    document.querySelectorAll('.tab-content').forEach(tabContent => {
+        const tabId = tabContent.id.replace('-content', '');
+
+        // Check for data in various locations
+        const tabData = policyData[tabId] || policyData;
+
+        // For coverage tab: create a normalized copy that fixes IVANS key mismatches and compound values
+        let resolvedTabData = tabData;
+        if (tabId === 'coverage' && tabData && typeof tabData === 'object') {
+            resolvedTabData = Object.assign({}, tabData); // shallow copy — don't mutate real data
+
+            // Split "Motor Truck Cargo" ($limit/$deductible) into separate Cargo Limit + Cargo Deductible keys
+            const mtcRaw = resolvedTabData['Motor Truck Cargo'];
+            if (mtcRaw) {
+                const mtcClean = String(mtcRaw).replace(/\s*\(\$[\d,]+\/yr\)/gi, '').replace(/[$,\s]/g, '');
+                const [mtcLim, mtcDed] = mtcClean.split('/');
+                if (mtcLim && !resolvedTabData['Cargo Limit'])      resolvedTabData['Cargo Limit'] = mtcLim.trim();
+                if (mtcDed && !resolvedTabData['Cargo Deductible']) resolvedTabData['Cargo Deductible'] = mtcDed.trim();
+                delete resolvedTabData['Motor Truck Cargo'];
+            }
+
+            // Alias: "Uninsured Motorist CSL" / "Uninsured Motorist" → form label "Uninsured/Underinsured Motorist"
+            const umKey = resolvedTabData['Uninsured Motorist CSL'] ?? resolvedTabData['Uninsured Motorist'];
+            if (umKey !== undefined && resolvedTabData['Uninsured/Underinsured Motorist'] === undefined) {
+                resolvedTabData['Uninsured/Underinsured Motorist'] = umKey;
+            }
+
+            // Alias: IVANS codes that might still be stored as raw keys
+            const ivansCoverageAliases = {
+                'Combined Single Limit': 'Liability Limits',
+                'Comprehensive': 'Comprehensive Deductible',
+                'Collision': 'Collision Deductible',
+            };
+            Object.entries(ivansCoverageAliases).forEach(([alias, canonical]) => {
+                if (resolvedTabData[alias] !== undefined && resolvedTabData[canonical] === undefined) {
+                    resolvedTabData[canonical] = resolvedTabData[alias];
+                }
+            });
+
+            // Alias: if 'General Liability' (MTGL) is missing but 'General Liability BI' (GLCBI) exists,
+            // use the BI value to populate the coverage-general-aggregate dropdown
+            if (!resolvedTabData['General Liability'] && resolvedTabData['General Liability BI']) {
+                const glBiRaw = String(resolvedTabData['General Liability BI']).replace(/[$,\s]/g, '');
+                resolvedTabData['General Liability'] = glBiRaw;
+            }
+        }
+
+        // Populate regular input fields
+        tabContent.querySelectorAll('input, select, textarea').forEach(field => {
+            const label = field.closest('.form-group')?.querySelector('label')?.textContent.replace(' *', '').replace(':', '').trim();
+            const fieldId = field.id;
+            const fieldName = field.name;
+
+            // Try multiple key variations
+            const possibleKeys = [
+                label,
+                fieldId,
+                fieldName,
+                fieldId.replace(tabId + '-', ''),
+                label?.toLowerCase().replace(/\s+/g, '_'),
+                label?.toLowerCase().replace(/\s+/g, '-'),
+                label?.replace(/\s+/g, ''),
+                // Common variations for commercial auto fields
+                label?.replace('DOT Number', 'dotNumber'),
+                label?.replace('MC Number', 'mcNumber'),
+                label?.replace('USDOT', 'usdot'),
+                label?.replace('Motor Carrier', 'motorCarrier'),
+                label?.replace('Cargo Type', 'cargoType'),
+                label?.replace('Fleet Size', 'fleetSize'),
+                label?.replace('Operating Radius', 'operatingRadius'),
+                label?.replace('Vehicle Type', 'vehicleType')
+            ].filter(Boolean);
+
+            let value = findFieldValue(resolvedTabData, possibleKeys);
+
+            // Also check in the root policyData
+            if (value === null || value === undefined) {
+                value = findFieldValue(policyData, possibleKeys);
+            }
+
+            setFieldValue(field, value);
+        });
+    });
+
+    // Explicit contact field population — handles key-name mismatches between saved data
+    // (e.g. 'Phone' in data vs 'Phone Number' form label, 'Address' vs 'Mailing Address', etc.)
+    const _cd = policyData.contact || {};
+    const _setIfEmpty = (id, ...keys) => {
+        const el = document.getElementById(id);
+        if (!el || el.value) return;
+        for (const k of keys) {
+            const v = _cd[k] ?? policyData[k];
+            if (v !== undefined && v !== null && v !== '') { el.value = v; return; }
+        }
+    };
+    _setIfEmpty('contact-owner-name', 'Owner Name', 'ownerName', 'name');
+    _setIfEmpty('contact-dob',        'Date of Birth', 'dateOfBirth', 'dob');
+    _setIfEmpty('contact-phone',      'Phone', 'phone', 'phoneNumber', 'Phone Number');
+    _setIfEmpty('contact-email',      'Email', 'email', 'emailAddress', 'Email Address');
+    _setIfEmpty('contact-address',    'Address', 'address', 'streetAddress', 'Mailing Address');
+    _setIfEmpty('contact-city',       'City', 'city');
+    _setIfEmpty('contact-state',      'State', 'state');
+    _setIfEmpty('contact-zip',        'ZIP Code', 'zip', 'zipCode');
+    // Also fix date format for contact DOB
+    const _dobEl = document.getElementById('contact-dob');
+    if (_dobEl && _dobEl.value) _dobEl.value = toISODate(_dobEl.value);
+
+    // Handle special cases for vehicles and trailers
+    if (policyData.vehicles && Array.isArray(policyData.vehicles)) {
+        const vehiclesList = document.getElementById('vehiclesList');
+        const trailersList = document.getElementById('trailersList');
+
+        // Separate vehicles and trailers — check both capitalized and lowercase type keys
+        const isTrailer = v => (v.Type === 'Trailer' || v.type === 'Trailer' || v.type === 'trailer');
+        const vehicles = policyData.vehicles.filter(v => !isTrailer(v));
+        const trailers = policyData.vehicles.filter(v => isTrailer(v));
+
+        // Populate vehicles
+        if (vehiclesList && vehicles.length > 0) {
+            vehiclesList.innerHTML = ''; // Clear existing
+            vehicles.forEach((vehicle) => {
+                addVehicle();
+                const vehicleEntry = vehiclesList.lastElementChild;
+
+                // Get values from both capitalized (manual) and lowercase (IVANS) keys
+                const vYear  = vehicle.Year  || vehicle.year  || vehicle.modelYear  || '';
+                const vMake  = vehicle.Make  || vehicle.make  || '';
+                const vModel = vehicle.Model || vehicle.model || '';
+                const vVIN   = vehicle.VIN   || vehicle.vin   || vehicle.Vin || '';
+                const vValue = vehicle.Value || vehicle.value || '';
+                const vRadius = vehicle.Radius || vehicle.radius || vehicle.MileRadius || '';
+
+                // Prefer CSS class selectors (reliable across both addPolicyVehicle versions)
+                const yearEl   = vehicleEntry.querySelector('.vehicle-year');
+                const makeEl   = vehicleEntry.querySelector('.vehicle-make');
+                const modelEl  = vehicleEntry.querySelector('.vehicle-model');
+                const vinEl    = vehicleEntry.querySelector('.vehicle-vin');
+                const valueEl  = vehicleEntry.querySelector('.vehicle-value');
+                const radiusEl = vehicleEntry.querySelector('.vehicle-radius');
+
+                if (yearEl   && vYear)   yearEl.value   = vYear;
+                if (makeEl   && vMake)   makeEl.value   = vMake;
+                if (modelEl  && vModel)  modelEl.value  = vModel;
+                if (vinEl    && vVIN)    vinEl.value    = vVIN;
+                if (valueEl  && vValue)  valueEl.value  = vValue;
+                if (radiusEl && vRadius) radiusEl.value = vRadius;
+
+                // Fallback: placeholder-based matching for any remaining inputs
+                if (!yearEl || !makeEl || !modelEl || !vinEl) {
+                    vehicleEntry.querySelectorAll('input, select').forEach(input => {
+                        const ph = input.placeholder || '';
+                        if (!yearEl   && ph.includes('Year'))  { if (vYear)   input.value = vYear; }
+                        if (!makeEl   && ph.includes('Make'))  { if (vMake)   input.value = vMake; }
+                        if (!modelEl  && ph.includes('Model')) { if (vModel)  input.value = vModel; }
+                        if (!vinEl    && ph.includes('VIN'))   { if (vVIN)    input.value = vVIN; }
+                        if (!valueEl  && ph.includes('Value')) { if (vValue)  input.value = vValue; }
+                    });
+                }
+            });
+        }
+
+        // Populate trailers
+        if (trailersList && trailers.length > 0) {
+            trailersList.innerHTML = ''; // Clear existing
+            trailers.forEach((trailer) => {
+                addTrailer();
+                const trailerEntry = trailersList.lastElementChild;
+                const inputs = trailerEntry.querySelectorAll('input, select');
+
+                const tYear  = trailer.Year  || trailer.year  || '';
+                const tMake  = trailer.Make  || trailer.make  || '';
+                const tType  = trailer['Trailer Type'] || trailer.trailerType || trailer.type || trailer.Type || '';
+                const tVIN   = trailer.VIN   || trailer.vin   || '';
+                const tLen   = trailer.Length || trailer.length || '';
+                const tVal   = trailer.Value  || trailer.value  || '';
+
+                inputs.forEach((input) => {
+                    const placeholder = input.placeholder || '';
+                    if (placeholder.includes('Year')) {
+                        if (tYear) input.value = tYear;
+                    } else if (placeholder.includes('Make')) {
+                        if (tMake) input.value = tMake;
+                    } else if (input.classList.contains('trailer-type') && tType) {
+                        input.value = tType;
+                    } else if (placeholder.includes('VIN')) {
+                        if (tVIN) input.value = tVIN;
+                    } else if (placeholder.includes('Length')) {
+                        if (tLen) input.value = tLen;
+                    } else if (placeholder.includes('Value')) {
+                        if (tVal) input.value = tVal;
+                    }
+                });
+            });
+        }
+    }
+    
+    // Handle special cases for drivers
+    if (policyData.drivers && Array.isArray(policyData.drivers)) {
+        const driversList = document.getElementById('driversList');
+        if (driversList) {
+            driversList.innerHTML = ''; // Clear existing
+            policyData.drivers.forEach((driver, index) => {
+                addDriver();
+                // Populate the newly added driver fields
+                const driverEntry = driversList.lastElementChild;
+                const inputs = driverEntry.querySelectorAll('input, select');
+                
+                // Map driver data to fields
+                const driverName = driver.name || driver['Full Name'] || driver.fullName || '';
+                const driverDOB  = toISODate(driver.dob || driver['Date of Birth'] || driver.dateOfBirth || '');
+                const driverLic  = driver.license || driver['License Number'] || driver.licenseNumber || '';
+                const driverType = driver.type || driver.driverType || driver['Driver Type'] || '';
+                const driverExp  = driver.experience || driver.yearsExperience || driver['Years Experience'] || '';
+                const driverViol = driver.violations || driver.movingViolations || '';
+
+                // Use placeholder matching (works regardless of which addPolicyDriver version created the entry)
+                let nameSet = false, dobSet = false, licSet = false, typeSet = false;
+                inputs.forEach(input => {
+                    if (input.type === 'checkbox') return;
+                    const ph = (input.placeholder || '').toLowerCase();
+                    if (!nameSet && (ph.includes('full name') || ph.includes('name'))) {
+                        input.value = driverName; nameSet = true;
+                    } else if (!dobSet && (input.type === 'date' || ph.includes('birth') || ph.includes('dob'))) {
+                        input.value = driverDOB; dobSet = true;
+                    } else if (!licSet && ph.includes('license')) {
+                        input.value = driverLic; licSet = true;
+                    } else if (!typeSet && input.tagName === 'SELECT') {
+                        if (driverType) input.value = driverType; typeSet = true;
+                    } else if (ph.includes('experience') || ph.includes('years')) {
+                        input.value = driverExp;
+                    } else if (ph.includes('violation')) {
+                        input.value = driverViol;
+                    }
+                });
+                
+                // Handle CDL fields if present
+                const cdlCheckbox = driverEntry.querySelector('input[type="checkbox"][id*="cdl"]');
+                if (cdlCheckbox && (driver.cdl || driver.CDL || driver.hasCDL)) {
+                    cdlCheckbox.checked = true;
+                    // Trigger change event to show CDL fields
+                    cdlCheckbox.dispatchEvent(new Event('change'));
+                }
+                
+                // Handle CDL endorsements if present
+                if (driver.endorsements || driver.cdlEndorsements) {
+                    const endorsements = driver.endorsements || driver.cdlEndorsements;
+                    const checkboxes = driverEntry.querySelectorAll('.checkbox-group input[type="checkbox"]');
+                    checkboxes.forEach(cb => {
+                        const label = cb.parentElement.textContent.trim();
+                        cb.checked = Array.isArray(endorsements) ? 
+                            endorsements.some(e => e.includes(label)) : 
+                            endorsements.includes(label);
+                    });
+                }
+            });
+        }
+    }
+    
+    // Handle additional insureds
+    if (policyData.additionalInsureds && Array.isArray(policyData.additionalInsureds)) {
+        const list = document.getElementById('additionalInsuredList');
+        if (list) {
+            list.innerHTML = '';
+            policyData.additionalInsureds.forEach(insured => {
+                addAdditionalInsured();
+                const entry = list.lastElementChild;
+                const inputs = entry.querySelectorAll('input');
+                if (inputs[0]) inputs[0].value = insured.name || insured.Name || '';
+                if (inputs[1]) inputs[1].value = insured.relationship || insured.Relationship || '';
+                if (inputs[2]) inputs[2].value = insured.address || insured.Address || '';
+            });
+        }
+    }
+    
+    // Restore Additional Coverages checkboxes
+    const additionalCoverages = policyData.coverage?.additionalCoverages || [];
+    const coverageCheckboxMap = {
+        'coverage-hired': 'Hired Auto Physical Damage',
+        'coverage-non-owned': 'Non-Owned Auto Liability',
+        'coverage-towing': 'Towing & Labor',
+        'coverage-rental': 'Rental Reimbursement',
+        'coverage-general-liability': 'General Liability'
+    };
+    Object.entries(coverageCheckboxMap).forEach(([id, name]) => {
+        const el = document.getElementById(id);
+        if (el) el.checked = additionalCoverages.includes(name);
+    });
+
+    // Backward compat: if old policy had Reefer Breakdown in additionalCoverages,
+    // map it to the new dropdown as "Included / No Deductible"
+    const reeferSelect = document.getElementById('coverage-reefer');
+    if (reeferSelect && !reeferSelect.value && additionalCoverages.includes('Reefer Breakdown')) {
+        reeferSelect.value = 'included';
+    }
+
+    // Populate financial/coverage data from root level if not in tabs
+    const financialFields = ['premium', 'monthlyPremium', 'deductible', 'downPayment'];
+    financialFields.forEach(fieldName => {
+        if (policyData[fieldName]) {
+            const field = document.querySelector(`#financial-${fieldName}, [name="${fieldName}"]`);
+            if (field) field.value = policyData[fieldName];
+        }
+    });
+    
+    // Populate Overview tab fields immediately (no delay to prevent flashing)
+    if (document.getElementById('overview-policy-number')) {
+        document.getElementById('overview-policy-number').value = policyData.policyNumber || '';
+    }
+    if (document.getElementById('overview-policy-type')) {
+        const typeLabel = policyData.policyType === 'commercial-auto' ? 'Commercial Auto' :
+                         policyData.policyType === 'personal-auto' ? 'Personal Auto' :
+                         policyData.policyType === 'homeowners' ? 'Homeowners' :
+                         policyData.policyType === 'commercial-property' ? 'Commercial Property' :
+                         policyData.policyType === 'general-liability' ? 'General Liability' :
+                         policyData.policyType === 'professional-liability' ? 'Professional' :
+                         policyData.policyType === 'workers-comp' ? 'Workers Comp' :
+                         policyData.policyType === 'umbrella' ? 'Umbrella' :
+                         policyData.policyType === 'life' ? 'Life' :
+                         policyData.policyType === 'health' ? 'Health' :
+                         policyData.policyType ? policyData.policyType.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) : '';
+        document.getElementById('overview-policy-type').value = typeLabel;
+    }
+    const carrierSelect = document.getElementById('overview-carrier');
+    if (carrierSelect) {
+        const carrierVal = policyData.carrier || '';
+        carrierSelect.value = carrierVal;
+        if (carrierVal && carrierSelect.value !== carrierVal) {
+            // Try case-insensitive match against existing options first
+            const lc = carrierVal.toLowerCase();
+            const match = Array.from(carrierSelect.options).find(o => o.value.toLowerCase() === lc || o.text.toLowerCase() === lc);
+            if (match) {
+                carrierSelect.value = match.value;
+            } else {
+                // Carrier not in dropdown — inject a new option so it can be selected
+                const opt = document.createElement('option');
+                opt.value = carrierVal;
+                opt.textContent = carrierVal;
+                carrierSelect.appendChild(opt);
+                carrierSelect.value = carrierVal;
+            }
+        }
+    }
+    if (document.getElementById('overview-status')) {
+        const statusValue = policyData.policyStatus || policyData.status || 'Active';
+        // Format status for display
+        const formattedStatus = statusValue.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase());
+        document.getElementById('overview-status').value = formattedStatus;
+    }
+    if (document.getElementById('overview-effective-date')) {
+        document.getElementById('overview-effective-date').value = toISODate(policyData.effectiveDate || '');
+    }
+    if (document.getElementById('overview-expiration-date')) {
+        document.getElementById('overview-expiration-date').value = toISODate(policyData.expirationDate || '');
+    }
+    if (document.getElementById('overview-premium')) {
+        console.log('Setting premium field to:', policyData.premium);
+        document.getElementById('overview-premium').value = policyData.premium || policyData.monthlyPremium || '';
+    }
+    if (document.getElementById('overview-agent')) {
+        const agentSelect = document.getElementById('overview-agent');
+        const agentValue = policyData.agent || '';
+
+        // Set the dropdown value
+        agentSelect.value = agentValue;
+
+        // If the value doesn't match any option, log it for debugging
+        if (agentValue && agentSelect.value !== agentValue) {
+            console.log(`Agent value "${agentValue}" not found in dropdown options`);
+        }
+    }
+    
+    // Populate Commercial Auto specific fields in Overview
+    // Populate United toggle (Grant-only)
+    const unitedCheckbox = document.getElementById('overview-united');
+    if (unitedCheckbox) {
+        unitedCheckbox.checked = !!policyData.united;
+        const track = document.getElementById('overview-united-track');
+        const thumb = document.getElementById('overview-united-thumb');
+        if (track && thumb) {
+            track.style.background = policyData.united ? '#3b82f6' : '#cbd5e0';
+            thumb.style.left = policyData.united ? '25px' : '3px';
+        }
+        unitedCheckbox.addEventListener('change', function() {
+            const t = document.getElementById('overview-united-track');
+            const th = document.getElementById('overview-united-thumb');
+            if (t) t.style.background = this.checked ? '#3b82f6' : '#cbd5e0';
+            if (th) th.style.left = this.checked ? '25px' : '3px';
+        });
+    }
+
+    if (policyData.policyType === 'commercial-auto') {
+        if (document.getElementById('overview-dot-number')) {
+            document.getElementById('overview-dot-number').value = policyData.dotNumber || policyData['DOT Number'] || '';
+        }
+        if (document.getElementById('overview-mc-number')) {
+            document.getElementById('overview-mc-number').value = policyData.mcNumber || policyData['MC Number'] || '';
+        }
+        if (document.getElementById('overview-fleet-size')) {
+            document.getElementById('overview-fleet-size').value = policyData.fleetSize || policyData['Fleet Size'] || '';
+        }
+        if (document.getElementById('overview-operating-radius')) {
+            document.getElementById('overview-operating-radius').value = policyData.operatingRadius || policyData['Operating Radius'] || '';
+        }
+    }
+    
+    // Set policy type if available
+    if (policyData.policyType) {
+        const policyTypeField = document.querySelector('#policyType, [name="policyType"]');
+        if (policyTypeField) {
+            policyTypeField.value = policyData.policyType;
+            // Trigger change event to update UI based on policy type
+            policyTypeField.dispatchEvent(new Event('change'));
+        }
+    }
+    
+    console.log('Form population complete');
+
+    // Deferred re-apply: re-set overview fields 500ms later to handle any race conditions
+    // (e.g., other scripts that might clear fields after initial population)
+    const _pd = policyData;
+    setTimeout(() => {
+        const pnEl = document.getElementById('overview-policy-number');
+        if (pnEl && _pd.policyNumber) pnEl.value = _pd.policyNumber;
+
+        const carrierEl = document.getElementById('overview-carrier');
+        if (carrierEl && _pd.carrier) {
+            carrierEl.value = _pd.carrier;
+            if (carrierEl.value !== _pd.carrier) {
+                const opt = document.createElement('option');
+                opt.value = _pd.carrier; opt.textContent = _pd.carrier;
+                carrierEl.appendChild(opt);
+                carrierEl.value = _pd.carrier;
+            }
+        }
+
+        const statusEl = document.getElementById('overview-status');
+        if (statusEl && (_pd.policyStatus || _pd.status)) {
+            const sv = (_pd.policyStatus || _pd.status || '').replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase());
+            statusEl.value = sv;
+        }
+
+        const effEl = document.getElementById('overview-effective-date');
+        if (effEl && _pd.effectiveDate) effEl.value = toISODate(_pd.effectiveDate);
+
+        const expEl = document.getElementById('overview-expiration-date');
+        if (expEl && _pd.expirationDate) expEl.value = toISODate(_pd.expirationDate);
+
+        const premEl = document.getElementById('overview-premium');
+        if (premEl && (_pd.premium || _pd.monthlyPremium)) premEl.value = _pd.premium || _pd.monthlyPremium;
+
+        const dotEl = document.getElementById('overview-dot-number');
+        if (dotEl && (_pd.dotNumber || _pd['DOT Number'])) dotEl.value = _pd.dotNumber || _pd['DOT Number'];
+
+        const mcEl = document.getElementById('overview-mc-number');
+        if (mcEl && (_pd.mcNumber || _pd['MC Number'])) mcEl.value = _pd.mcNumber || _pd['MC Number'];
+
+        // Re-apply vehicle values using CSS class selectors
+        if (_pd.vehicles && Array.isArray(_pd.vehicles)) {
+            const vList = document.getElementById('vehiclesList');
+            if (vList) {
+                const entries = vList.querySelectorAll('.vehicle-entry');
+                const nonTrailers = _pd.vehicles.filter(v => !(v.Type === 'Trailer' || v.type === 'Trailer' || v.type === 'trailer'));
+                entries.forEach((entry, i) => {
+                    const v = nonTrailers[i];
+                    if (!v) return;
+                    const yr = v.Year || v.year || '';
+                    const mk = v.Make || v.make || '';
+                    const mo = v.Model || v.model || '';
+                    const vi = v.VIN || v.vin || '';
+                    const el = n => entry.querySelector(n);
+                    if (yr && el('.vehicle-year'))  el('.vehicle-year').value  = yr;
+                    if (mk && el('.vehicle-make'))  el('.vehicle-make').value  = mk;
+                    if (mo && el('.vehicle-model')) el('.vehicle-model').value = mo;
+                    if (vi && el('.vehicle-vin'))   el('.vehicle-vin').value   = vi;
+                });
+            }
+        }
+
+        // Re-apply driver values
+        if (_pd.drivers && Array.isArray(_pd.drivers)) {
+            const dList = document.getElementById('driversList');
+            if (dList) {
+                const entries = dList.querySelectorAll('.driver-entry');
+                entries.forEach((entry, i) => {
+                    const d = _pd.drivers[i];
+                    if (!d) return;
+                    const dn = d.name || d['Full Name'] || d.fullName || '';
+                    const dd = toISODate(d.dob || d['Date of Birth'] || d.dateOfBirth || '');
+                    const dl = d.license || d['License Number'] || d.licenseNumber || '';
+                    entry.querySelectorAll('input, select').forEach(input => {
+                        if (input.type === 'checkbox') return;
+                        const ph = (input.placeholder || '').toLowerCase();
+                        if (dn && (ph.includes('full name') || ph.includes('name'))) input.value = dn;
+                        else if (dd && (input.type === 'date' || ph.includes('birth'))) input.value = dd;
+                        else if (dl && ph.includes('license')) input.value = dl;
+                    });
+                });
+            }
+        }
+
+        console.log('✅ Deferred re-apply complete');
+    }, 500);
+}
+
+// Export policy-specific functions to global scope
+// These will override lead-specific functions when in policy context
+window.addVehicle = addVehicle;
+window.addTrailer = addTrailer;
+window.addDriver = addDriver;
+window.addPolicyVehicle = addPolicyVehicle;
+window.addPolicyTrailer = addPolicyTrailer;
+window.addPolicyDriver = addPolicyDriver;
+
+// Coverage input mode toggle function
+window.toggleCoverageMode = function(mode) {
+    console.log('Switching coverage input mode to:', mode);
+
+    const textInputs = document.querySelectorAll('.coverage-text-input');
+    const dropdowns = document.querySelectorAll('.coverage-dropdown');
+
+    if (mode === 'text') {
+        // Show text inputs, hide dropdowns
+        textInputs.forEach(input => {
+            input.style.display = 'block';
+        });
+        dropdowns.forEach(select => {
+            select.style.display = 'none';
+        });
+        console.log('✅ Switched to text input mode');
+    } else {
+        // Show dropdowns, hide text inputs
+        textInputs.forEach(input => {
+            input.style.display = 'none';
+        });
+        dropdowns.forEach(select => {
+            select.style.display = 'block';
+        });
+        console.log('✅ Switched to dropdown mode');
+    }
+};
+
+// Handle cargo limit change — auto-exclude deductible when no cargo coverage
+window.handleCargoLimitChange = function(select) {
+    const isExcluded = select.value === '0' || select.value === '';
+    const deductSelect = document.getElementById('coverage-cargo-deduct');
+    const deductTextInput = document.getElementById('coverage-cargo-deduct-text');
+    const deductGroup = deductSelect ? deductSelect.closest('.form-group') : null;
+
+    if (deductGroup) {
+        if (isExcluded && select.value === '0') {
+            deductGroup.style.opacity = '0.4';
+            deductGroup.style.pointerEvents = 'none';
+            deductSelect.value = '';
+            if (deductTextInput) deductTextInput.value = '';
+        } else {
+            deductGroup.style.opacity = '';
+            deductGroup.style.pointerEvents = '';
+        }
+    }
+};
+
+// Handle carrier dropdown change to "Other"
+function handleCarrierChange(selectElement) {
+    const selectId = selectElement.id;
+    const textInputId = selectId + '-text';
+    const arrowButtonId = selectId + '-arrow';
+
+    if (selectElement.value === 'Other') {
+        // Hide dropdown and show text input with arrow button
+        selectElement.style.display = 'none';
+        const textInput = document.getElementById(textInputId);
+        const arrowButton = document.getElementById(arrowButtonId);
+
+        if (textInput) {
+            textInput.style.display = 'block';
+            textInput.focus();
+        }
+        if (arrowButton) {
+            arrowButton.style.display = 'block';
+        }
+
+        console.log('✅ Switched carrier to text input mode');
+    }
+}
+
+// Switch carrier input back to dropdown
+function switchBackToDropdown(selectId) {
+    const selectElement = document.getElementById(selectId);
+    const textInputId = selectId + '-text';
+    const arrowButtonId = selectId + '-arrow';
+    const textInput = document.getElementById(textInputId);
+    const arrowButton = document.getElementById(arrowButtonId);
+
+    // Show dropdown and hide text input with arrow button
+    if (selectElement) {
+        selectElement.style.display = 'block';
+        selectElement.value = ''; // Reset to default
+    }
+    if (textInput) {
+        textInput.style.display = 'none';
+        textInput.value = ''; // Clear text input
+    }
+    if (arrowButton) {
+        arrowButton.style.display = 'none';
+    }
+
+    console.log('✅ Switched carrier back to dropdown mode');
+}
+
+// Handle premium change and auto-fill annual premium
+function handlePremiumChange(premiumInput) {
+    const premiumValue = premiumInput.value;
+    const annualPremiumField = document.getElementById('financial-annual-premium');
+
+    if (annualPremiumField && premiumValue && annualPremiumField.value !== premiumValue) {
+        // Auto-fill the annual premium field with the same value
+        annualPremiumField.value = premiumValue;
+        console.log('✅ Auto-filled annual premium from overview:', premiumValue);
+    }
+}
+
+// Handle annual premium change and auto-fill overview premium
+function handleAnnualPremiumChange(annualPremiumInput) {
+    const annualPremiumValue = annualPremiumInput.value;
+    const overviewPremiumField = document.getElementById('overview-premium');
+
+    if (overviewPremiumField && annualPremiumValue && overviewPremiumField.value !== annualPremiumValue) {
+        // Auto-fill the overview premium field with the same value
+        overviewPremiumField.value = annualPremiumValue;
+        console.log('✅ Auto-filled overview premium from annual:', annualPremiumValue);
+    }
+}
+
+// VIN Length checker - triggers decoder when 17 characters are entered
+function checkVINLength(vinInput) {
+    const vin = vinInput.value.trim();
+    if (vin.length === 17) {
+        decodeVIN(vinInput);
+    }
+}
+
+// Trailer VIN Length checker
+function checkTrailerVINLength(vinInput) {
+    const vin = vinInput.value.trim();
+    if (vin.length === 17) {
+        decodeTrailerVIN(vinInput);
+    }
+}
+
+// VIN Decoder for Vehicles
+function decodeVIN(vinInput) {
+    const vin = vinInput.value.trim().toUpperCase();
+
+    if (!vin || vin.length !== 17) {
+        console.log('VIN must be 17 characters long');
+        return;
+    }
+
+    // Find the parent vehicle entry
+    const vehicleEntry = vinInput.closest('.vehicle-entry');
+    if (!vehicleEntry) {
+        console.error('Could not find vehicle entry');
+        return;
+    }
+
+    // Get the input fields within this vehicle entry
+    const yearInput = vehicleEntry.querySelector('.vehicle-year');
+    const makeInput = vehicleEntry.querySelector('.vehicle-make');
+    const modelInput = vehicleEntry.querySelector('.vehicle-model');
+
+    // Show loading state
+    if (yearInput) yearInput.value = 'Loading...';
+    if (makeInput) makeInput.value = 'Loading...';
+    if (modelInput) modelInput.value = 'Loading...';
+
+    // Use NHTSA VIN decoder API (free)
+    const apiUrl = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`;
+
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            if (data.Results && data.Results.length > 0) {
+                const result = data.Results[0];
+
+                // Extract year, make, model
+                const year = result.ModelYear || '';
+                const make = result.Make || '';
+                const model = result.Model || '';
+
+                // Populate the fields
+                if (yearInput) yearInput.value = year;
+                if (makeInput) makeInput.value = make;
+                if (modelInput) modelInput.value = model;
+
+                console.log('✅ VIN decoded successfully:', { year, make, model });
+            } else {
+                // Clear loading state if no results
+                if (yearInput) yearInput.value = '';
+                if (makeInput) makeInput.value = '';
+                if (modelInput) modelInput.value = '';
+                console.log('❌ No vehicle data found for VIN');
+            }
+        })
+        .catch(error => {
+            console.error('Error decoding VIN:', error);
+            // Clear loading state on error
+            if (yearInput) yearInput.value = '';
+            if (makeInput) makeInput.value = '';
+            if (modelInput) modelInput.value = '';
+        });
+}
+
+// VIN Decoder for Trailers
+function decodeTrailerVIN(vinInput) {
+    const vin = vinInput.value.trim().toUpperCase();
+
+    if (!vin || vin.length !== 17) {
+        console.log('VIN must be 17 characters long');
+        return;
+    }
+
+    // Find the parent trailer entry
+    const trailerEntry = vinInput.closest('.trailer-entry');
+    if (!trailerEntry) {
+        console.error('Could not find trailer entry');
+        return;
+    }
+
+    // Get the input fields within this trailer entry
+    const yearInput = trailerEntry.querySelector('.trailer-year');
+    const makeInput = trailerEntry.querySelector('.trailer-make');
+
+    // Show loading state
+    if (yearInput) yearInput.value = 'Loading...';
+    if (makeInput) makeInput.value = 'Loading...';
+
+    // Use NHTSA VIN decoder API (free)
+    const apiUrl = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${vin}?format=json`;
+
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            if (data.Results && data.Results.length > 0) {
+                const result = data.Results[0];
+
+                // Extract year, make for trailers
+                const year = result.ModelYear || '';
+                const make = result.Make || '';
+
+                // Populate the fields
+                if (yearInput) yearInput.value = year;
+                if (makeInput) makeInput.value = make;
+
+                console.log('✅ Trailer VIN decoded successfully:', { year, make });
+            } else {
+                // Clear loading state if no results
+                if (yearInput) yearInput.value = '';
+                if (makeInput) makeInput.value = '';
+                console.log('❌ No trailer data found for VIN');
+            }
+        })
+        .catch(error => {
+            console.error('Error decoding trailer VIN:', error);
+            // Clear loading state on error
+            if (yearInput) yearInput.value = '';
+            if (makeInput) makeInput.value = '';
+        });
+}
+
+// Handle trailer type dropdown change to "Other"
+function handleTrailerTypeChange(selectElement, trailerCount) {
+    if (selectElement.value === 'Other') {
+        // Hide dropdown and show text input with arrow button
+        selectElement.style.display = 'none';
+        const textInput = document.querySelector(`.trailer-type-text-${trailerCount}`);
+        const arrowButton = document.querySelector(`.trailer-type-arrow-${trailerCount}`);
+
+        if (textInput) {
+            textInput.style.display = 'block';
+            textInput.focus();
+        }
+        if (arrowButton) {
+            arrowButton.style.display = 'block';
+        }
+
+        console.log('✅ Switched trailer type to text input mode');
+    }
+}
+
+// Switch trailer type input back to dropdown
+function switchBackToTrailerTypeDropdown(trailerCount) {
+    const selectElement = document.querySelector(`.trailer-entry:nth-child(${trailerCount}) .trailer-type`);
+    const textInput = document.querySelector(`.trailer-type-text-${trailerCount}`);
+    const arrowButton = document.querySelector(`.trailer-type-arrow-${trailerCount}`);
+
+    // Show dropdown and hide text input with arrow button
+    if (selectElement) {
+        selectElement.style.display = 'block';
+        selectElement.value = ''; // Reset to default
+    }
+    if (textInput) {
+        textInput.style.display = 'none';
+        textInput.value = ''; // Clear text input
+    }
+    if (arrowButton) {
+        arrowButton.style.display = 'none';
+    }
+
+    console.log('✅ Switched trailer type back to dropdown mode');
+}

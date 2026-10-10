@@ -168,30 +168,26 @@ async function loadLeadsFromServer() {
                     } else {
                         const localLead = smartMergedLeads[localIndex];
 
-                        // Check if lead has recent local changes (within 10 minutes)
+                        // Only preserve local data if the current user made changes in the last 3 minutes.
+                        // Intentionally NOT checking stage/notes divergence — those differences mean
+                        // another user updated the server, so server should win.
                         const hasRecentChanges = localLead.lastModified &&
-                            (now - new Date(localLead.lastModified).getTime()) < (10 * 60 * 1000);
+                            (now - new Date(localLead.lastModified).getTime()) < (3 * 60 * 1000);
 
-                        // Check for important field changes
-                        const hasStageChange = localLead.stage !== serverLead.stage;
-                        const hasNotesChange = localLead.notes !== serverLead.notes;
-
-                        if (hasRecentChanges || hasStageChange || hasNotesChange) {
+                        if (hasRecentChanges) {
                             console.log(`🛡️ loadLeadsFromServer: Preserving recent changes for lead ${localLead.id}`);
-                            // Preserve local changes, but allow some server updates
                             smartMergedLeads[localIndex] = {
                                 ...serverLead,  // Server data as base
-                                ...localLead,   // Local changes override
-                                // Keep local timestamp to track our changes
-                                lastModified: localLead.lastModified || new Date().toISOString()
+                                ...localLead,   // Local changes override (in-flight edits)
+                                lastModified: localLead.lastModified
                             };
                             preservedCount++;
                         } else {
-                            // No recent local changes - safe to update with server data
+                            // Server wins — ensures cross-user edits (stage, notes, etc.) are visible
                             smartMergedLeads[localIndex] = {
                                 ...localLead,
                                 ...serverLead,
-                                lastModified: new Date().toISOString()
+                                lastModified: serverLead.lastModified || new Date().toISOString()
                             };
                             updatedCount++;
                         }
@@ -199,12 +195,29 @@ async function loadLeadsFromServer() {
                 });
 
                 console.log(`🧠 loadLeadsFromServer SMART MERGE: Added ${addedCount}, Preserved ${preservedCount}, Updated ${updatedCount}`);
+
+                // Remove leads that are no longer on the server (archived/deleted) and have no recent local changes
+                const serverActiveIds = new Set(activeLeadsOnly.map(l => String(l.id)));
+                const removedCount = smartMergedLeads.length;
+                const finalMergedLeads = smartMergedLeads.filter(lead => {
+                    if (serverActiveIds.has(String(lead.id))) return true; // Server has it
+                    // Not on server — keep only if edited very recently (in-flight local change)
+                    const hasRecentChanges = lead.lastModified &&
+                        (now - new Date(lead.lastModified).getTime()) < (3 * 60 * 1000);
+                    if (hasRecentChanges) return true;
+                    console.log(`🗑️ loadLeadsFromServer: Removing locally-stale lead ${lead.id} (${lead.name}) — no longer on server`);
+                    return false;
+                });
+                if (finalMergedLeads.length < removedCount) {
+                    console.log(`🧹 loadLeadsFromServer: Pruned ${removedCount - finalMergedLeads.length} leads removed from server`);
+                }
+
                 // Try saving full data; if quota exceeded, slim down callLogs and retry
                 try {
-                    localStorage.setItem('insurance_leads', JSON.stringify(smartMergedLeads));
+                    localStorage.setItem('insurance_leads', JSON.stringify(finalMergedLeads));
                 } catch (quotaErr) {
                     console.warn('⚠️ localStorage quota exceeded - trimming callLogs and retrying...');
-                    const slimmed = smartMergedLeads.map(lead => {
+                    const slimmed = finalMergedLeads.map(lead => {
                         if (!lead.reachOut || !lead.reachOut.callLogs) return lead;
                         return {
                             ...lead,
@@ -646,7 +659,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load policies from server to ensure they're available for quote applications
     loadPoliciesFromServer().then(() => {
         console.log('✅ Policies loaded from server');
+        // Refresh nav badges after policies load (needed for renewals badge on non-renewals pages)
+        window._currentRenewalPolicies = null; // clear cache so badge function re-reads from localStorage
+        loadRenewalTaskBadges();
     });
+
+    // Initialize nav badges for CSR users on page load (after leads + policies data is ready)
+    setTimeout(() => {
+        updateLeadsNavBadge();
+        loadRenewalTaskBadges();
+    }, 2000);
+
+    // Refresh nav badges every 60 seconds so they stay current regardless of current page
+    setInterval(() => {
+        updateLeadsNavBadge();
+        window._currentRenewalPolicies = null; // force re-read from localStorage
+        loadRenewalTaskBadges();
+    }, 60000);
 
     // DISABLED: Cleanup was causing leads to reset every 5 minutes
     // setInterval(() => {
@@ -6114,7 +6143,7 @@ function loadFullDashboard() {
                     <div id="goals-annual-segments" style="display: flex; height: 100%; width: 100%; position: absolute; top: 0; left: 0;"></div>
                     <div id="goals-annual-pct-label" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 0.75rem; font-weight: 700; color: #92400e; white-space: nowrap; pointer-events: none; text-shadow: 0 0 4px #fff;"></div>
                 </div>
-                <div style="display: flex; margin-top: 3px;">
+                <div id="goals-annual-month-labels" style="display: flex; margin-top: 3px;">
                     <div style="flex:1;text-align:center;font-size:0.62rem;color:#9ca3af;">Jan</div>
                     <div style="flex:1;text-align:center;font-size:0.62rem;color:#9ca3af;">Feb</div>
                     <div style="flex:1;text-align:center;font-size:0.62rem;color:#9ca3af;">Mar</div>
@@ -6578,38 +6607,109 @@ function renderAnnualPremiumBar(policies, currentUser) {
     const ytdPct = Math.min(100, (totalYTD / ANNUAL_GOAL) * 100);
     const monthlyGoal = ANNUAL_GOAL / 12;
 
+    // Store data and user for re-renders triggered by click handlers
+    window._annualPremBarData = { monthlyPremium, monthlyGoal, ANNUAL_GOAL, totalYTD, ytdPct, currentMonth, currentUser };
+
     const segmentsEl = document.getElementById('goals-annual-segments');
     if (!segmentsEl) return;
 
-    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    let html = '';
-    monthlyPremium.forEach((prem, i) => {
-        const isFuture = i > currentMonth;
-        const fillFraction = Math.min(1, prem / monthlyGoal);
-        const fillPct = Math.round(fillFraction * 100);
-        const borderColor = isFuture ? 'rgba(251,191,36,0.2)' : 'rgba(245,158,11,0.4)';
-        const bg = isFuture ? '#fef9ee' : '#fef3c7';
-        const fillColor = isFuture ? 'transparent' : (fillFraction >= 1 ? '#f59e0b' : '#fbbf24');
-        html += '<div title="' + MONTHS[i] + ': $' + Math.round(prem).toLocaleString() + '" style="flex:1;position:relative;background:' + bg + ';border-right:1px solid ' + borderColor + ';overflow:hidden;">';
-        if (!isFuture && prem > 0) {
-            html += '<div style="position:absolute;bottom:0;left:0;width:100%;height:' + fillPct + '%;background:linear-gradient(180deg,' + fillColor + ',' + (fillFraction >= 1 ? '#d97706' : '#f59e0b') + ');transition:height 0.6s ease;"></div>';
-        }
-        html += '</div>';
-    });
-    segmentsEl.innerHTML = html;
-
     const dollar = n => '$' + Math.round(n).toLocaleString();
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+    const headingEl = document.getElementById('goals-annual-heading');
     const totalEl = document.getElementById('goals-annual-total');
     const goalEl = document.getElementById('goals-annual-goal-label');
     const ytdEl = document.getElementById('goals-annual-ytd');
     const pctLbl = document.getElementById('goals-annual-pct-label');
-    const headingEl = document.getElementById('goals-annual-heading');
-    if (headingEl) headingEl.textContent = (currentUser.charAt(0).toUpperCase() + currentUser.slice(1)) + "'s Total Premium";
-    if (totalEl) totalEl.textContent = dollar(totalYTD) + ' YTD';
-    if (goalEl) goalEl.textContent = 'My Annual Goal: ' + dollar(ANNUAL_GOAL);
-    if (ytdEl) ytdEl.textContent = ytdPct.toFixed(1) + '% of annual goal';
-    if (pctLbl) pctLbl.textContent = ytdPct.toFixed(1) + '% — ' + dollar(totalYTD) + ' of ' + dollar(ANNUAL_GOAL);
+    const labelsRow = document.getElementById('goals-annual-month-labels');
+
+    // Check persisted selected month
+    const storedMonth = localStorage.getItem('arp_selected_month');
+    const selectedMonth = storedMonth !== null ? parseInt(storedMonth) : null;
+
+    if (selectedMonth !== null && selectedMonth >= 0 && selectedMonth <= 11) {
+        // ── MONTH VIEW ──
+        const prem = monthlyPremium[selectedMonth];
+        const fillFraction = Math.min(1, prem / monthlyGoal);
+        const fillPct = Math.round(fillFraction * 100);
+        const isFuture = selectedMonth > currentMonth;
+        const fillColor = fillFraction >= 1 ? '#f59e0b' : '#fbbf24';
+
+        if (headingEl) headingEl.textContent = MONTHS_FULL[selectedMonth] + ' — ' + (currentUser.charAt(0).toUpperCase() + currentUser.slice(1)) + "'s Premium";
+        if (totalEl) totalEl.textContent = dollar(prem);
+        if (goalEl) goalEl.innerHTML = '<button onclick="window.resetAnnualPremiumView()" style="background:#1d4ed8;color:white;border:none;border-radius:6px;padding:3px 11px;font-size:0.75rem;cursor:pointer;font-weight:600;box-shadow:0 1px 4px rgba(29,78,216,.3);">← Year View</button>';
+        if (ytdEl) ytdEl.textContent = isFuture ? 'Future month — no data yet' : (fillPct + '% of monthly goal · ' + dollar(prem) + ' of ' + dollar(monthlyGoal));
+        if (pctLbl) pctLbl.textContent = isFuture ? '' : (fillPct + '%');
+
+        // Render expanded single-month bar (horizontal fill)
+        if (isFuture) {
+            segmentsEl.innerHTML = '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#d97706;font-size:0.8rem;font-weight:600;letter-spacing:.01em;">Future month — no data yet</div>';
+        } else {
+            segmentsEl.innerHTML = '<div style="height:100%;width:' + fillPct + '%;background:linear-gradient(90deg,' + fillColor + ',' + (fillFraction >= 1 ? '#d97706' : '#f59e0b') + ');transition:width 0.6s ease;border-radius:' + (fillPct >= 100 ? '0' : '0 6px 6px 0') + ';"></div>';
+        }
+        segmentsEl.style.background = '#fef3c7';
+        segmentsEl.style.flexDirection = 'row';
+        segmentsEl.style.alignItems = 'stretch';
+
+        // Highlight selected month label, dim others
+        if (labelsRow) {
+            Array.from(labelsRow.children).forEach((el, i) => {
+                el.style.color = i === selectedMonth ? '#92400e' : '#d1d5db';
+                el.style.fontWeight = i === selectedMonth ? '700' : '';
+            });
+        }
+    } else {
+        // ── YEAR VIEW ──
+        if (headingEl) headingEl.textContent = (currentUser.charAt(0).toUpperCase() + currentUser.slice(1)) + "'s Total Premium";
+        if (totalEl) totalEl.textContent = dollar(totalYTD) + ' YTD';
+        if (goalEl) goalEl.textContent = 'My Annual Goal: ' + dollar(ANNUAL_GOAL);
+        if (ytdEl) ytdEl.textContent = ytdPct.toFixed(1) + '% of annual goal';
+        if (pctLbl) pctLbl.textContent = ytdPct.toFixed(1) + '% — ' + dollar(totalYTD) + ' of ' + dollar(ANNUAL_GOAL);
+
+        let html = '';
+        monthlyPremium.forEach((prem, i) => {
+            const isFuture = i > currentMonth;
+            const fillFraction = Math.min(1, prem / monthlyGoal);
+            const fillPct = Math.round(fillFraction * 100);
+            const borderColor = isFuture ? 'rgba(251,191,36,0.2)' : 'rgba(245,158,11,0.4)';
+            const bg = isFuture ? '#fef9ee' : '#fef3c7';
+            const fillColor = isFuture ? 'transparent' : (fillFraction >= 1 ? '#f59e0b' : '#fbbf24');
+            html += '<div title="' + MONTHS[i] + ': $' + Math.round(prem).toLocaleString() + ' (' + fillPct + '% of monthly goal — click to expand)" onclick="window.selectPremiumMonth(' + i + ')" style="flex:1;position:relative;background:' + bg + ';border-right:1px solid ' + borderColor + ';overflow:hidden;cursor:pointer;transition:opacity 0.15s;" onmouseover="this.style.opacity=\'0.72\'" onmouseout="this.style.opacity=\'1\'">';
+            if (!isFuture && prem > 0) {
+                html += '<div style="position:absolute;bottom:0;left:0;width:100%;height:' + fillPct + '%;background:linear-gradient(180deg,' + fillColor + ',' + (fillFraction >= 1 ? '#d97706' : '#f59e0b') + ');transition:height 0.6s ease;"></div>';
+            }
+            html += '</div>';
+        });
+        segmentsEl.innerHTML = html;
+        segmentsEl.style.background = '';
+        segmentsEl.style.flexDirection = '';
+        segmentsEl.style.alignItems = '';
+
+        // Reset month label styles
+        if (labelsRow) {
+            Array.from(labelsRow.children).forEach(el => { el.style.color = '#9ca3af'; el.style.fontWeight = ''; });
+        }
+    }
 }
+
+window.selectPremiumMonth = function(monthIndex) {
+    localStorage.setItem('arp_selected_month', String(monthIndex));
+    const d = window._annualPremBarData;
+    if (!d) return;
+    const policies = window._goalsData?.policies || JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    renderAnnualPremiumBar(policies, d.currentUser);
+};
+
+window.resetAnnualPremiumView = function() {
+    localStorage.removeItem('arp_selected_month');
+    const d = window._annualPremBarData;
+    if (d && window._goalsData && window._goalsData.policies) {
+        renderAnnualPremiumBar(window._goalsData.policies, d.currentUser);
+    } else {
+        loadGoalsBar();
+    }
+};
 
 function _goalsFormatTime(secs) {
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
@@ -7955,7 +8055,7 @@ function generateSimpleLeadRows(leads) {
         const _isCsrRow = (_csrRowSess.role || '') === 'csr';
         let todoText;
         if (_isCsrRow) {
-            todoText = lead.csrTodoDone ? '' : (lead.csrTodo || '').trim();
+            todoText = (lead.csrTodoDone || lead.csrTodoCantComplete) ? '' : (lead.csrTodo || '').trim();
         } else {
             console.log(`🎯 TABLE GEN: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
             todoText = (typeof getNextAction === 'function' ? getNextAction(lead.stage || 'new', lead) :
@@ -8085,6 +8185,20 @@ function generateSimpleLeadRows(leads) {
             console.log(`🔵 Built-in highlighting: ${lead.name} -> BLUE (CSR task done, awaiting producer review)`);
         }
 
+        // OVERRIDE: CSR view — "Can't Complete" turns row GREEN (CSR did all they can)
+        if (_isCsrRow && lead.csrTodoCantComplete && !lead.csrTodoDone) {
+            rowStyle = 'style="background-color: rgba(16, 185, 129, 0.2) !important; border-left: 4px solid #10b981 !important; border-right: 2px solid #10b981 !important;"';
+            rowClass = 'reach-out-complete force-persistent-highlight';
+            console.log(`🟢 Built-in highlighting: ${lead.name} -> GREEN (CSR can't complete — done what they can)`);
+        }
+
+        // OVERRIDE: Producer/admin view — "Can't Complete" forces red row (needs producer attention)
+        if (!_isCsrRow && lead.csrTodoCantComplete && !lead.csrTodoDone) {
+            rowStyle = 'style="background-color: #fecaca !important; border-left: 4px solid #ef4444 !important; border-right: 2px solid #ef4444 !important;"';
+            rowClass = 'timestamp-red force-persistent-highlight';
+            console.log(`🔴 Built-in highlighting: ${lead.name} -> RED (CSR can't complete — needs producer attention)`);
+        }
+
         // SPECIAL: Apply gold border for leads with 60+ minutes call time (highest priority)
         let goldRowBorder = '';
         if (lead && lead.reachOut && lead.reachOut.callLogs && Array.isArray(lead.reachOut.callLogs)) {
@@ -8195,7 +8309,7 @@ function generateSimpleLeadRows(leads) {
                         // CSR users see only the CSR To Do text
                         const _csrSess1 = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
                         if ((_csrSess1.role || '') === 'csr') {
-                            const csrText = lead.csrTodoDone ? '' : (lead.csrTodo || '');
+                            const csrText = (lead.csrTodoDone || lead.csrTodoCantComplete) ? '' : (lead.csrTodo || '');
                             return csrText ? `<div style="font-weight: bold; color: #0284c7;">${csrText}</div>` : '';
                         }
                         console.log(`🎯 TO DO CELL: Getting next action for lead ${lead.id} - ${lead.name}, stage: ${lead.stage}`);
@@ -8323,9 +8437,20 @@ function generateSimpleLeadRowsWithDividers(leads) {
     });
 
     // Sort each user's group with priority: Gold High Value (60+ min) > Priority (High/Mid/Lower/Low)
+    const _csrSortSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsrSort = (_csrSortSess.role || '') === 'csr';
     Object.keys(groups).forEach(groupKey => {
         if (groupKey !== 'closed') { // Don't sort closed leads
             groups[groupKey].sort((a, b) => {
+                // CSR view: leads with active to-dos float to top
+                if (_isCsrSort) {
+                    const aActive = !!(a.csrTodo && !a.csrTodoDone && !a.csrTodoCantComplete);
+                    const bActive = !!(b.csrTodo && !b.csrTodoDone && !b.csrTodoCantComplete);
+                    if (aActive && !bActive) return -1;
+                    if (!aActive && bActive) return 1;
+                    return 0;
+                }
+
                 const aIsHighValue = isHighValueLead(a);
                 const bIsHighValue = isHighValueLead(b);
 
@@ -8551,6 +8676,111 @@ window.saveCsrTodo = async function(leadId, value) {
             body: JSON.stringify(lead)
         });
     } catch (e) { console.warn('Failed to save CSR todo to server:', e); }
+};
+
+// Toggle CSR "Can't Complete" state
+window.toggleCsrTodoCantComplete = async function(leadId, cantComplete) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead) return;
+    lead.csrTodoCantComplete = cantComplete;
+    if (cantComplete) {
+        // Mirror toggleCsrTodoDone: stash the text and clear it so every re-render sees empty
+        lead.csrTodoCantCompleteOriginal = lead.csrTodo || lead.csrTodoCantCompleteOriginal || '';
+        lead.csrTodo = '';
+    } else {
+        // Restore original text on uncheck
+        if (lead.csrTodoCantCompleteOriginal) lead.csrTodo = lead.csrTodoCantCompleteOriginal;
+        lead.csrTodoCantCompleteReason = '';
+    }
+    lead.updatedAt = new Date().toISOString();
+    lead.lastModified = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+    // Show/hide the reason textarea
+    const wrap = document.getElementById('csr-cant-reason-wrap-' + leadId);
+    if (wrap) wrap.style.display = cantComplete ? '' : 'none';
+
+    // Update container border/bg color
+    const cb = document.getElementById('csr-done-cb-' + leadId);
+    if (cb && cb.parentElement) {
+        cb.parentElement.style.borderColor = cantComplete ? '#fca5a5' : '#7dd3fc';
+        cb.parentElement.style.background  = cantComplete ? '#fef2f2' : '#f0f9ff';
+    }
+
+    // Focus textarea so CSR can type immediately
+    if (cantComplete) {
+        const ta = document.getElementById('csr-cant-reason-' + leadId);
+        if (ta) setTimeout(() => ta.focus(), 50);
+    }
+
+    // Immediately update the table row color
+    const tableBody = document.getElementById('leadsTableBody');
+    if (tableBody) {
+        tableBody.querySelectorAll('tr').forEach(row => {
+            const cbx = row.querySelector('.lead-checkbox');
+            if (cbx && String(cbx.value) === String(leadId)) {
+                if (cantComplete) {
+                    // CSR sees green — they did all they can
+                    row.setAttribute('style', 'background-color: rgba(16, 185, 129, 0.2) !important; border-left: 4px solid #10b981 !important; border-right: 2px solid #10b981 !important;');
+                    row.className = row.className.replace(/timestamp-\w+|force-persistent-highlight/g, '').trim() + ' reach-out-complete force-persistent-highlight';
+                    row.setAttribute('data-highlight', 'green');
+                    // Clear the blue To Do text immediately
+                    const cells = row.querySelectorAll('td');
+                    const todoCell = cells[7];
+                    if (todoCell) todoCell.innerHTML = '';
+                } else {
+                    // Un-checking: remove cant-complete green and restore To Do text
+                    row.className = row.className.replace(/reach-out-complete|force-persistent-highlight/g, '').trim();
+                    const cells = row.querySelectorAll('td');
+                    const todoCell = cells[7];
+                    const leads2 = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+                    const l2 = leads2.find(x => String(x.id) === String(leadId));
+                    if (todoCell && l2 && l2.csrTodo) todoCell.innerHTML = `<div style="font-weight: bold; color: #0284c7;">${l2.csrTodo}</div>`;
+                }
+            }
+        });
+    }
+
+    // Sync all relevant fields into in-memory arrays (mirrors toggleCsrTodoDone pattern)
+    if (window.allLeads) {
+        const memLead = window.allLeads.find(l => String(l.id) === String(leadId));
+        if (memLead) {
+            memLead.csrTodoCantComplete = lead.csrTodoCantComplete;
+            memLead.csrTodo = lead.csrTodo;
+            memLead.csrTodoCantCompleteOriginal = lead.csrTodoCantCompleteOriginal;
+            memLead.csrTodoCantCompleteReason = lead.csrTodoCantCompleteReason;
+        }
+    }
+    if (window.filteredLeads) {
+        const memLead2 = window.filteredLeads.find(l => String(l.id) === String(leadId));
+        if (memLead2) {
+            memLead2.csrTodoCantComplete = lead.csrTodoCantComplete;
+            memLead2.csrTodo = lead.csrTodo;
+            memLead2.csrTodoCantCompleteOriginal = lead.csrTodoCantCompleteOriginal;
+            memLead2.csrTodoCantCompleteReason = lead.csrTodoCantCompleteReason;
+        }
+    }
+
+    const apiUrl = window.location.hostname === 'localhost' ? 'https://localhost:3001' : `${window.location.protocol}//${window.location.host}`;
+    try {
+        await fetch(`${apiUrl}/api/leads`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead) });
+    } catch (e) { console.warn('Failed to save cant-complete state:', e); }
+};
+
+// Save the CSR "Can't Complete" reason text
+window.saveCsrTodoCantCompleteReason = function(leadId, reason) {
+    const leads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const lead = leads.find(l => String(l.id) === String(leadId));
+    if (!lead || !lead.csrTodoCantComplete) return;
+    lead.csrTodoCantCompleteReason = reason;
+    lead.updatedAt = new Date().toISOString();
+    lead.lastModified = new Date().toISOString();
+    localStorage.setItem('insurance_leads', JSON.stringify(leads));
+
+    const apiUrl = window.location.hostname === 'localhost' ? 'https://localhost:3001' : `${window.location.protocol}//${window.location.host}`;
+    fetch(`${apiUrl}/api/leads`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead) })
+        .catch(e => console.warn('Failed to save cant-complete reason:', e));
 };
 
 // Toggle CSR To Do done status (CSR checks off a task)
@@ -9638,10 +9868,10 @@ async function loadLeadsView() {
                             // Count To Do tasks from visible leads only
                             let todoCount = 0;
 
-                            // CSR users: count leads with non-empty csrTodo
+                            // CSR users: count leads with non-empty csrTodo (exclude done and can't-complete)
                             if (_isCsrTodo) {
                                 visibleLeads.forEach(lead => {
-                                    if (lead.csrTodo && lead.csrTodo.trim()) {
+                                    if (lead.csrTodo && lead.csrTodo.trim() && !lead.csrTodoDone && !lead.csrTodoCantComplete) {
                                         todoCount++;
                                     }
                                 });
@@ -10598,6 +10828,25 @@ function refreshLeadsTable() {
     // Apply current sorting if any
     const currentSort = window.currentSort || { field: 'name', direction: 'asc' };
 
+    // CSR view: sort so active to-dos come first, before any field sort
+    const _csrRefreshSess = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    if ((_csrRefreshSess.role || '') === 'csr') {
+        leads.sort((a, b) => {
+            const aActive = !!(a.csrTodo && !a.csrTodoDone && !a.csrTodoCantComplete);
+            const bActive = !!(b.csrTodo && !b.csrTodoDone && !b.csrTodoCantComplete);
+            if (aActive && !bActive) return -1;
+            if (!aActive && bActive) return 1;
+            return 0;
+        });
+        tableBody.innerHTML = generateSimpleLeadRows(leads);
+        setTimeout(() => {
+            if (window.applyReachOutCompleteHighlighting) window.applyReachOutCompleteHighlighting();
+            if (window.forceAllHighlighting) window.forceAllHighlighting();
+        }, 100);
+        updateLeadsNavBadge();
+        return;
+    }
+
     // Sort leads - closed leads always go to the bottom
     leads.sort((a, b) => {
         // First, check if either lead is closed - closed leads go to the bottom
@@ -10660,7 +10909,7 @@ function updateLeadsNavBadge() {
 
         let count = 0;
         if (isCsr) {
-            visibleLeads.forEach(l => { if (l.csrTodo && l.csrTodo.trim() && !l.csrTodoDone) count++; });
+            visibleLeads.forEach(l => { if (l.csrTodo && l.csrTodo.trim() && !l.csrTodoDone && !l.csrTodoCantComplete) count++; });
         } else {
             const actionMap = {
                 'new': 'Assign Stage', 'contact_attempted': 'Reach out',
@@ -13289,7 +13538,7 @@ function updatePolicyStats(totalPolicies, activePolicies, pendingRenewal, totalP
 }
 
 // Global variable to store current renewal view
-let currentRenewalView = 'month';
+let currentRenewalView = '30-45';
 let selectedRenewalPolicyId = null;
 
 async function loadRenewalsView() {
@@ -13492,8 +13741,35 @@ function getRealRenewalPolicies(policies, clients) {
 
     // Ensure clients is an array to prevent .find() errors
     const clientsArray = Array.isArray(clients) ? clients : [];
-    
+
+    // Build replaced set: per client, if 2+ policies share same LOB+effective+expiration,
+    // the oldest one(s) (lower timestamp in ID) were replaced by the newer import.
+    const _normLob = lob => {
+        const l = (lob || '').toLowerCase().replace(/\s+/g, '');
+        if (l.includes('auto') || l === 'autob' || l === 'autop') return 'auto';
+        return l || 'unknown';
+    };
+    const _policyTs = p => parseInt((p.id || '').split('-')[1] || '0', 10);
+    const _isStoredActive = p => {
+        const s = (p.policyStatus || p.status || '').toLowerCase();
+        return !s || s === 'active' || s === 'in-force' || s === 'in force';
+    };
+    const _rGroups = {};
+    for (const p of policies.filter(_isStoredActive)) {
+        const key = `${p.clientId || ''}|${_normLob(p.lob || p.policyType)}|${p.effectiveDate || ''}|${p.expirationDate || ''}`;
+        if (!_rGroups[key]) _rGroups[key] = [];
+        _rGroups[key].push(p);
+    }
+    const _replacedSet = new Set();
+    for (const group of Object.values(_rGroups)) {
+        if (group.length < 2) continue;
+        group.sort((a, b) => _policyTs(a) - _policyTs(b));
+        for (let i = 0; i < group.length - 1; i++) _replacedSet.add(group[i].id);
+    }
+
     policies.forEach(policy => {
+        // Skip policies that have been replaced by a newer import for the same client/LOB/dates
+        if (_replacedSet.has(policy.id)) return;
         if (!policy.expirationDate && !policy.endDate) return;
         
         const expirationDate = new Date(policy.expirationDate || policy.endDate);
@@ -13785,7 +14061,16 @@ async function loadRenewalTaskBadges() {
         return false;
     };
 
-    // Always compute button badges regardless of current view
+    // Always compute button badges regardless of current view.
+    // If _currentRenewalPolicies isn't set yet (user hasn't visited renewals view),
+    // compute it directly from localStorage so badges show on all pages.
+    if (!window._currentRenewalPolicies || window._currentRenewalPolicies.length === 0) {
+        try {
+            const _allPols = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const _allClients = JSON.parse(localStorage.getItem('clients') || '[]');
+            window._currentRenewalPolicies = getRealRenewalPolicies(_allPols, _allClients);
+        } catch(e) { window._currentRenewalPolicies = []; }
+    }
     const allRenewalPolicies = window._currentRenewalPolicies || [];
 
     const policies30to45 = allRenewalPolicies.filter(p => {
@@ -14138,7 +14423,7 @@ async function showRenewalProfile(policyId) {
                             <i class="fas fa-file-alt"></i> Submissions
                         </button>
                     </div>
-                    <button onclick="viewPolicy('${policyId}')" style="background: #0066cc; color: white; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; margin-right: 8px; transition: 0.2s; white-space: nowrap;">
+                    <button onclick="window._policyNavSource='renewals'; viewPolicy('${policyId}')" style="background: #0066cc; color: white; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; margin-right: 8px; transition: 0.2s; white-space: nowrap;">
                         <i class="fas fa-external-link-alt"></i> View Policy
                     </button>
                 </div>
@@ -14181,16 +14466,61 @@ function renderTasksTab() {
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
         { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
         { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
         { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' },
+        { id: 14, task: 'Renewal Prepared', completed: false, completedAt: '', notes: '' }
     ];
 
     let tasks = savedTasks || defaultTasks;
+
+    // Inject 'Quote Direct Market' (id=13) for existing saved tasks that predate this task
+    if (tasks && !tasks.find(t => t.id === 13)) {
+        const insertAfter = tasks.findIndex(t => t.id === 5);
+        const newTask = { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' };
+        if (insertAfter !== -1) {
+            tasks = [...tasks.slice(0, insertAfter + 1), newTask, ...tasks.slice(insertAfter + 1)];
+        } else {
+            tasks = [...tasks, newTask];
+        }
+        // Write back to cache so toggleTask reads the updated list (fixes checkbox not working)
+        if (currentPolicyId) {
+            window.currentPolicyTasks = window.currentPolicyTasks || {};
+            window.currentPolicyTasks[currentPolicyId] = tasks;
+            savePolicyTasksToServer(currentPolicyId, tasks);
+        }
+    }
+
+    // Inject 'Renewal Prepared' (id=14) for existing saved tasks that predate this task
+    if (tasks && !tasks.find(t => t.id === 14)) {
+        const insertAfter14 = tasks.findIndex(t => t.id === 12);
+        const newTask14 = { id: 14, task: 'Renewal Prepared', completed: false, completedAt: '', notes: '' };
+        if (insertAfter14 !== -1) {
+            tasks = [...tasks.slice(0, insertAfter14 + 1), newTask14, ...tasks.slice(insertAfter14 + 1)];
+        } else {
+            tasks = [...tasks, newTask14];
+        }
+        // Write back to cache so toggleTask reads the updated list
+        if (currentPolicyId) {
+            window.currentPolicyTasks = window.currentPolicyTasks || {};
+            window.currentPolicyTasks[currentPolicyId] = tasks;
+            savePolicyTasksToServer(currentPolicyId, tasks);
+        }
+    }
+
+    // CSR users only see their subset of tasks (producer-only tasks are hidden)
+    const _taskSessionUser = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isCsrTaskUser = (_taskSessionUser.role || '') === 'csr';
+    const CSR_HIDDEN_TASK_IDS = [6, 7, 8, 9, 10, 11, 12]; // producer-only tasks
+    const PRODUCER_HIDDEN_TASK_IDS = [14]; // CSR-only tasks
+    const visibleTasks = _isCsrTaskUser
+        ? tasks.filter(t => !CSR_HIDDEN_TASK_IDS.includes(t.id))
+        : tasks.filter(t => !PRODUCER_HIDDEN_TASK_IDS.includes(t.id));
 
     // Check if this policy is marked as completed (localStorage only — server state
     // is reflected in task 12's completed flag once tasks are loaded)
@@ -14224,7 +14554,7 @@ function renderTasksTab() {
                 </div>
             </div>
             <div class="tasks-list">
-                ${tasks.map((task, index) => `
+                ${visibleTasks.map((task, index) => `
                     <div class="task-item ${task.completed ? 'completed' : ''}" data-task-id="${task.id || index}">
                         <div class="task-checkbox">
                             <input type="checkbox"
@@ -14261,47 +14591,35 @@ function renderSubmissionsTab() {
     const rawPolicy = allPolicies.find(p => p.id === currentPolicyId) || {};
     const clientId = rawPolicy.clientId || rawPolicy._clientId || currentPolicyId;
 
-    // Load saved quote premiums for this policy
-    const savedQuotes = JSON.parse(localStorage.getItem(`renewalQuotes_${currentPolicyId}`) || '{}');
-    const progressivePremium = savedQuotes.progressive || '';
-    const geicoPremium = savedQuotes.geico || '';
+    const clientName = rawPolicy.clientName || rawPolicy.businessName || '';
+    const escapedClientName = clientName.replace(/'/g, "\'");
+
+    // Schedule quote placeholder refresh after DOM renders
+    setTimeout(() => {
+        if (typeof refreshQuotesDisplay === 'function') {
+            refreshQuotesDisplay(clientId);
+        }
+    }, 200);
 
     return `
         <div class="submissions-tab" style="padding: 5px 0;">
 
             <!-- Quote Submissions -->
-            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #e5e7eb;">
-                <h3 style="margin: 0 0 15px 0; color: #111827; font-size: 15px; font-weight: 600;">
-                    <i class="fas fa-file-alt" style="color: #0066cc; margin-right: 6px;"></i> Quote Submissions
-                </h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #e5e7eb;">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <div style="width: 32px; height: 32px; background: #0066cc; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                <i class="fas fa-car" style="color: white; font-size: 13px;"></i>
-                            </div>
-                            <span style="font-weight: 600; color: #111827; font-size: 14px;">Progressive</span>
-                        </div>
-                        <label style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Annual Premium</label>
-                        <input type="text" id="quote-progressive-${currentPolicyId}"
-                               value="${progressivePremium}"
-                               placeholder="$0.00"
-                               style="width: 100%; margin-top: 5px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
-                               onblur="saveRenewalQuote('${currentPolicyId}', 'progressive', this.value)">
+            <div class="profile-section" style="background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: #111827; font-size: 15px; font-weight: 600;"><i class="fas fa-file-contract" style="color: #0066cc; margin-right: 6px;"></i> Quote Submissions</h3>
+                    <div style="display: flex; gap: 10px;">
+                        <button onclick="addQuoteSubmission('${clientId}')" style="background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+                            <i class="fas fa-plus"></i> Add Quote
+                        </button>
+                        <button class="auto-import-market-btn" onclick="autoImportToMarket('${clientId}', '${escapedClientName}')" style="background: #10b981; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;">
+                            <i class="fas fa-arrow-right"></i> Auto-Import to Market
+                        </button>
                     </div>
-                    <div style="background: white; padding: 15px; border-radius: 8px; border: 2px solid #e5e7eb;">
-                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                            <div style="width: 32px; height: 32px; background: #00a651; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                                <i class="fas fa-shield-alt" style="color: white; font-size: 13px;"></i>
-                            </div>
-                            <span style="font-weight: 600; color: #111827; font-size: 14px;">GEICO</span>
-                        </div>
-                        <label style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; display: block;">Annual Premium</label>
-                        <input type="text" id="quote-geico-${currentPolicyId}"
-                               value="${geicoPremium}"
-                               placeholder="$0.00"
-                               style="width: 100%; margin-top: 5px; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;"
-                               onblur="saveRenewalQuote('${currentPolicyId}', 'geico', this.value)">
+                </div>
+                <div id="quote-submissions-container">
+                    <div id="quotes-container-${clientId}">
+                        <p style="color: #9ca3af; text-align: center; padding: 20px; margin: 0;">Loading quotes...</p>
                     </div>
                 </div>
             </div>
@@ -14584,17 +14902,42 @@ function toggleTask(taskId, policyId) {
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
         { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
         { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
         { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' },
+        { id: 14, task: 'Renewal Prepared', completed: false, completedAt: '', notes: '' }
     ];
 
     const cached = window.currentPolicyTasks && window.currentPolicyTasks[policyId];
-    const tasks = cached ? [...cached] : defaultTasks;
+    let tasks = cached ? [...cached] : defaultTasks;
+
+    // Inject task 13 if missing from cached tasks (tasks saved before it was added)
+    if (!tasks.find(t => t.id === 13)) {
+        const insertAfter = tasks.findIndex(t => t.id === 5);
+        const newTask = { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' };
+        if (insertAfter !== -1) {
+            tasks = [...tasks.slice(0, insertAfter + 1), newTask, ...tasks.slice(insertAfter + 1)];
+        } else {
+            tasks = [...tasks, newTask];
+        }
+    }
+
+    // Inject task 14 if missing from cached tasks (tasks saved before it was added)
+    if (!tasks.find(t => t.id === 14)) {
+        const insertAfter14 = tasks.findIndex(t => t.id === 12);
+        const newTask14 = { id: 14, task: 'Renewal Prepared', completed: false, completedAt: '', notes: '' };
+        if (insertAfter14 !== -1) {
+            tasks = [...tasks.slice(0, insertAfter14 + 1), newTask14, ...tasks.slice(insertAfter14 + 1)];
+        } else {
+            tasks = [...tasks, newTask14];
+        }
+    }
+
     const taskIndex = tasks.findIndex(t => t.id === taskId);
 
     if (taskIndex !== -1) {
@@ -14603,6 +14946,53 @@ function toggleTask(taskId, policyId) {
     }
 
     savePolicyTasksToServer(policyId, tasks);
+
+    // Check if "Renewal Prepared" task (ID 14) was completed — CSR users only
+    const _toggleSessionUser = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isToggleCsr = (_toggleSessionUser.role || '') === 'csr';
+    if (taskId === 14 && _isToggleCsr) {
+        const preparedTask = tasks.find(t => t.id === 14);
+        const _csrKey = policyId + ':csr';
+        const _csrApiBase = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+        const _csrCard = document.getElementById(`renewal-card-${policyId}`);
+        if (preparedTask && preparedTask.completed) {
+            if (_csrCard) {
+                _csrCard.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
+                _csrCard.style.borderLeft = '4px solid #10b981';
+                _csrCard.style.boxShadow = '0 2px 4px rgba(16, 185, 129, 0.1)';
+            }
+            fetch(`${_csrApiBase}/api/renewal-completions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ policyKey: _csrKey, completed: true })
+            }).catch(() => {});
+            showNotification('🎉 Renewal prepared! Policy highlighted in green.', 'success');
+
+            // Send producer notification email
+            const _preparedPolicies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+            const _preparedPol = _preparedPolicies.find(p => p.id === policyId);
+            const _preparedClientId = _preparedPol?.clientId || _preparedPol?._clientId || null;
+            const _allLocalQuotes = JSON.parse(localStorage.getItem('lead_quotes') || '[]');
+            const _clientQuotes = _preparedClientId
+                ? _allLocalQuotes.filter(q => String(q.leadId) === String(_preparedClientId))
+                : [];
+            fetch('/api/renewal-prepared-notify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ policyId, clientId: _preparedClientId, policyData: _preparedPol || {}, quotes: _clientQuotes })
+            })
+            .then(r => r.json())
+            .then(d => { if (d.success && !d.skipped) showNotification(`📧 Notification sent to ${d.to}`, 'success'); })
+            .catch(e => console.error('Failed to send prepared notification:', e));
+        } else {
+            if (_csrCard) {
+                _csrCard.style.background = '';
+                _csrCard.style.borderLeft = '';
+                _csrCard.style.boxShadow = '';
+            }
+            fetch(`${_csrApiBase}/api/renewal-completions/${encodeURIComponent(_csrKey)}`, { method: 'DELETE' }).catch(() => {});
+        }
+    }
 
     // Check if "Finalize Renewal" task (ID 12) was completed
     if (taskId === 12) {
@@ -14745,6 +15135,9 @@ async function restoreRenewalHighlighting() {
         console.error('Error loading completions:', error);
     }
 
+    const _restoreSessionUser = JSON.parse(sessionStorage.getItem('vanguard_user') || '{}');
+    const _isRestoreCsr = (_restoreSessionUser.role || '') === 'csr';
+
     // Check all renewal cards (month view)
     const renewalCards = document.querySelectorAll('.renewal-card');
     renewalCards.forEach(card => {
@@ -14752,9 +15145,13 @@ async function restoreRenewalHighlighting() {
         // Check server completions first, then localStorage as fallback
         let isCompleted = false;
 
-        // Try to find in server completions
-        // Server now uses policyId directly as the key
+        // Producer-finalized key (visible to all users)
         isCompleted = !!completions[policyId];
+
+        // CSR-prepared key (visible to CSR users only)
+        if (!isCompleted && _isRestoreCsr && completions[policyId + ':csr']) {
+            isCompleted = true;
+        }
 
         // Fall back to localStorage (legacy) and migrate to server if found
         if (!isCompleted) {
@@ -14811,7 +15208,9 @@ async function restoreRenewalHighlighting() {
             const match = onclickStr.match(/showRenewalProfile\('([^']+)'\)/);
             if (match) {
                 const policyId = match[1];
-                if (completions[policyId] || localStorage.getItem(`renewal_completed_${policyId}`) === 'true') {
+                const _miniCompleted = completions[policyId] || localStorage.getItem(`renewal_completed_${policyId}`) === 'true'
+                    || (_isRestoreCsr && completions[policyId + ':csr']);
+                if (_miniCompleted) {
                     card.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
                     card.style.borderColor = '#10b981';
                 }
@@ -14827,13 +15226,15 @@ function saveTaskNote(taskId, note, policyId) {
         { id: 3, task: 'Request Loss Runs', completed: false, completedAt: '', notes: '' },
         { id: 4, task: 'Loss Runs Received', completed: false, completedAt: '', notes: '' },
         { id: 5, task: 'Create Applications', completed: false, completedAt: '', notes: '' },
+        { id: 13, task: 'Quote Direct Market', completed: false, completedAt: '', notes: '' },
         { id: 6, task: 'Create Proposal', completed: false, completedAt: '', notes: '' },
         { id: 7, task: 'Send Proposal', completed: false, completedAt: '', notes: '' },
         { id: 8, task: 'Request Finance Agreement', completed: false, completedAt: '', notes: '' },
         { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
         { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
         { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+        { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' },
+        { id: 14, task: 'Renewal Prepared', completed: false, completedAt: '', notes: '' }
     ];
     const cached = window.currentPolicyTasks && window.currentPolicyTasks[policyId];
     const tasks = cached ? [...cached] : defaultTasks;
@@ -14879,7 +15280,8 @@ function addRenewalTask() {
             { id: 9, task: 'Finance Agreement Received', completed: false, completedAt: '', notes: '' },
             { id: 10, task: 'Signed Docs Received', completed: false, completedAt: '', notes: '' },
             { id: 11, task: 'Bind Order', completed: false, completedAt: '', notes: '' },
-            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' }
+            { id: 12, task: 'Finalize Renewal', completed: false, completedAt: '', notes: '' },
+            { id: 14, task: 'Renewal Prepared', completed: false, completedAt: '', notes: '' }
         ];
 
         const newId = Math.max(...tasks.map(t => t.id || 0)) + 1;
@@ -20580,7 +20982,20 @@ async function loadDownloadsView() {
                 type:       (row.fileType || '').trim(),
                 statusText: row.status || '',
                 date:       row.createdAt || '',
+                policies:   row.policies || [],
             }));
+
+            // Build most-recent-status map from ALL processed rows (Policy + EDoc + Message).
+            // Rows are newest-first from JenesisNow, so the first occurrence per policy number is the latest.
+            const latestStatusMap = {};
+            for (const row of allRows) {
+                if (row.statusText !== 'Processed') continue;
+                for (const p of row.policies) {
+                    const pNum = (p.polNo || '').replace(/\s/g, '').toLowerCase();
+                    if (!pNum || latestStatusMap[pNum]) continue;
+                    latestStatusMap[pNum] = p.purpose || '';
+                }
+            }
 
             const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
 
@@ -20629,6 +21044,12 @@ async function loadDownloadsView() {
                 return true;
             });
 
+            // Apply most-recent status from any download type (catches Message-type cancellations)
+            deduped.forEach(p => {
+                const pNum = (p.policyNumber || '').replace(/\s/g, '').toLowerCase();
+                if (pNum && latestStatusMap[pNum]) p.downloadPurpose = latestStatusMap[pNum];
+            });
+
             resetBtn();
 
             // Open IVANS review modal with JenesisNow data
@@ -20665,7 +21086,20 @@ async function loadDownloadsView() {
                 type:       (row.fileType || '').trim(),
                 statusText: row.status || '',
                 date:       row.createdAt || '',
+                policies:   row.policies || [],
             }));
+
+            // Build most-recent-status map from ALL processed rows (Policy + EDoc + Message).
+            // Rows are newest-first from JenesisNow, so the first occurrence per policy number is the latest.
+            const latestStatusMap = {};
+            for (const row of allRows) {
+                if (row.statusText !== 'Processed') continue;
+                for (const p of row.policies) {
+                    const pNum = (p.polNo || '').replace(/\s/g, '').toLowerCase();
+                    if (!pNum || latestStatusMap[pNum]) continue;
+                    latestStatusMap[pNum] = p.purpose || '';
+                }
+            }
 
             const policyRows = allRows.filter(r => (r.type === 'Policy' || r.type === 'EDoc') && r.statusText === 'Processed' && r.jobId);
 
@@ -20711,6 +21145,12 @@ async function loadDownloadsView() {
                 if (seen.has(key)) return false;
                 seen.add(key);
                 return true;
+            });
+
+            // Apply most-recent status from any download type (catches Message-type cancellations)
+            deduped.forEach(p => {
+                const pNum = (p.policyNumber || '').replace(/\s/g, '').toLowerCase();
+                if (pNum && latestStatusMap[pNum]) p.downloadPurpose = latestStatusMap[pNum];
             });
 
             resetBtn();
@@ -20902,6 +21342,9 @@ async function _ivansAddClientNote(clientId, noteText) {
         const ci = clients.findIndex(c => String(c.id) === String(clientId));
         if (ci < 0) return;
         if (!Array.isArray(clients[ci].notesLog)) clients[ci].notesLog = [];
+        // Deduplicate: skip if an identical note already exists (prevents duplicate notes on repeated IVANS imports)
+        const _noteExists = clients[ci].notesLog.some(n => n.text === noteText && n.source === 'ivans');
+        if (_noteExists) return;
         clients[ci].notesLog.push({ text: noteText, date: new Date().toISOString(), source: 'ivans' });
         localStorage.setItem('insurance_clients', JSON.stringify(clients));
         fetch('/api/clients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clients[ci]) }).catch(() => {});
@@ -21192,6 +21635,31 @@ function generateClientPoliciesList(policies) {
         `;
     }
     
+    // Detect policies replaced by a newer policy (same LOB + dates, different carrier/ID):
+    // Among active policies, if 2+ share the same LOB+effectiveDate+expirationDate, the older one(s) were replaced.
+    const _normLob = lob => {
+        const l = (lob || '').toLowerCase().replace(/\s+/g, '');
+        if (l.includes('auto') || l === 'autob' || l === 'autop') return 'auto';
+        return l || 'unknown';
+    };
+    const _policyTs = p => parseInt((p.id || '').split('-')[1] || '0', 10);
+    const _isStoredActive = p => {
+        const s = (p.policyStatus || p.status || '').toLowerCase();
+        return !s || s === 'active' || s === 'in-force' || s === 'in force';
+    };
+    const _groups = {};
+    for (const p of policies.filter(_isStoredActive)) {
+        const key = `${_normLob(p.lob || p.policyType)}|${p.effectiveDate || ''}|${p.expirationDate || ''}`;
+        if (!_groups[key]) _groups[key] = [];
+        _groups[key].push(p);
+    }
+    const replacedSet = new Set();
+    for (const group of Object.values(_groups)) {
+        if (group.length < 2) continue;
+        group.sort((a, b) => _policyTs(a) - _policyTs(b));
+        for (let i = 0; i < group.length - 1; i++) replacedSet.add(group[i].id);
+    }
+
     return policies.map((policy, index) => {
         // Get the policy type label
         const typeLabel = getPolicyTypeLabel(policy.policyType || policy.type || 'unknown');
@@ -21231,8 +21699,8 @@ function generateClientPoliciesList(policies) {
             }
         }
 
-        // Format status
-        const status = policy.policyStatus || policy.status || 'Active';
+        // Format status — override to "Replaced" if a newer policy supersedes this one
+        const status = replacedSet.has(policy.id) ? 'Replaced' : (policy.policyStatus || policy.status || 'Active');
         const statusClass = getStatusClass(status);
 
         return `
@@ -22379,13 +22847,17 @@ async function viewClient(id) {
     });
     
     // Format client data for display
+    const _clientBizName = client.businessName || client.companyName || client.company || '';
+    const _clientDisplayName = _clientBizName || client.name;
+    const _clientOwnerName = _clientBizName ? client.name : '';
     const clientData = {
-        name: client.name,
+        name: _clientDisplayName,
+        ownerName: _clientOwnerName,
         type: client.type || 'Personal',
         phone: client.phone,
         email: client.email,
         address: client.address || 'No address on file',
-        company: client.company || '',
+        company: _clientOwnerName,
         accountManager: client.accountManager || 'Unassigned',
         clientSince: client.createdAt ? new Date(client.createdAt).toLocaleDateString() : 'N/A',
         totalPremium: calculatedTotalPremium > 0 ? `$${calculatedTotalPremium.toLocaleString()}/yr` : '$0/yr',
@@ -22996,6 +23468,16 @@ function parseIvansFixed(content) {
         const trg = by['2TRG'][0];
         const lobCode    = trg.substring(24, 29).trim();
         const carrier    = trg.substring(47, 72).trim();
+        // Extract 2-char transaction code (e.g. NB, CN, XL, RI, RN) from 2TRG byte 10-11
+        const transactionCode = clean(trg.substring(10, 12));
+        // Map transaction code → human-readable download purpose (drives policyStatus logic)
+        const _TX_PURPOSE_MAP = {
+            CN:'Cancellation', XL:'Cancellation Confirmed', CX:'Cancellation Confirmed',
+            RI:'Reinstatement', NR:'Non-Renewal', EX:'Non-Renewal',
+            NB:'New Business', RN:'Renewal', EN:'Endorsement',
+            AU:'Audit', PC:'Policy Change', RW:'Rewrite',
+        };
+        const downloadPurpose = _TX_PURPOSE_MAP[transactionCode.toUpperCase()] || '';
 
         // ── 5BPI: policy number, dates, premium ─────────────────────────────
         let policyNumber = '', effectiveDate = '', expirationDate = '', premium = '';
@@ -23170,6 +23652,7 @@ function parseIvansFixed(content) {
                 address, city, state, zip,
                 effectiveDate, expirationDate, premium,
                 lob: _ivansLobLabel(lobCode), carrier,
+                transactionCode, downloadPurpose,
                 vehicles, drivers, coverages,
             });
         }
@@ -24454,8 +24937,8 @@ function showPolicyDetailsModal(policy) {
             <!-- Page Header -->
             <div class="pdp-header" style="background: linear-gradient(135deg, #0066cc 0%, #004999 100%); padding: 0 32px;">
                 <div class="pdp-header-inner" style="display: flex; align-items: center; gap: 16px; height: 64px;">
-                    <button class="pdp-back-btn" onclick="${(window.currentViewingClientId || policy.clientId) ? `window.location.hash='#clients/${encodeURIComponent(window.currentViewingClientId || policy.clientId)}'` : `window.location.hash='#policies'`}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
-                        <i class="fas fa-arrow-left"></i> ${(window.currentViewingClientId || policy.clientId) ? 'Back to Client' : 'Back to Policies'}
+                    <button class="pdp-back-btn" onclick="if(window._policyNavSource==='renewals'){window._policyNavSource=null;window.location.hash='#renewals';}else if(window.currentViewingClientId||'${policy.clientId}'){window.location.hash='#clients/'+encodeURIComponent(window.currentViewingClientId||'${policy.clientId}');}else{window.location.hash='#policies';}" style="display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.25)'" onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+                        <i class="fas fa-arrow-left"></i> ${window._policyNavSource==='renewals' ? 'Back to Renewals' : (window.currentViewingClientId || policy.clientId) ? 'Back to Client' : 'Back to Policies'}
                     </button>
                     ${policyTypeLabel ? `<span class="pdp-type-badge" style="background: rgba(255,255,255,0.2); color: white; padding: 5px 14px; border-radius: 20px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255,255,255,0.3);">${policyTypeLabel}</span>` : ''}
                     <h1 class="pdp-policy-num" style="margin: 0; color: white; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; flex: 1;">
@@ -24472,7 +24955,7 @@ function showPolicyDetailsModal(policy) {
                         ${policy.policyStatus || policy.status || 'Active'}
                     </span>
                     ${policy.carrier ? `<span class="pdp-carrier" style="color: #374151; font-size: 15px; font-weight: 600;"><i class="fas fa-building" style="color:#6b7280;margin-right:6px;"></i>${policy.carrier}</span>` : ''}
-                    ${policy.clientName ? `<span class="pdp-client" style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.clientName}</span>` : ''}
+                    ${(policy.insuredName || policy.client || policy.clientName) ? `<span class="pdp-client" style="color: #6b7280; font-size: 14px;"><i class="fas fa-user" style="margin-right:5px;"></i>${policy.insuredName || policy.client || policy.clientName}</span>` : ''}
                 </div>
                 <div class="pdp-actions" style="display: flex; gap: 10px;">
                     <button id="ov-save-btn" onclick="window.overviewSave('${policy.id}')" style="display:flex;align-items:center;gap:6px;background:#059669;color:white;border:none;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">
@@ -24726,6 +25209,13 @@ function generateViewTabContent(tabId, policy) {
             const producers = policy.producers || [];
             const prod1 = producers[0] || {}; const prod2 = producers[1] || {}; const prod3 = producers[2] || {};
             const statusOpts = ['','Pending Quote','Submitted Quote','Quoted','Quote Declined','Active','Pending Cancel','Expired','Cancelled','Pending Renewal','Renewal Quote','Prior Generation','Deleted'];
+            // Normalize stored policyStatus (may be lowercase or use different word order) to match option values
+            const _normPolStatus = (s) => {
+                if (!s) return '';
+                const lc = s.toLowerCase().replace(/[-_]/g, ' ').trim();
+                const MAP = {'active':'Active','cancelled':'Cancelled','canceled':'Cancelled','expired':'Expired','pending cancel':'Pending Cancel','cancel pending':'Pending Cancel','pending quote':'Pending Quote','submitted quote':'Submitted Quote','quoted':'Quoted','quote declined':'Quote Declined','pending renewal':'Pending Renewal','renewal quote':'Renewal Quote','prior generation':'Prior Generation','deleted':'Deleted'};
+                return MAP[lc] || statusOpts.find(o => o && o.toLowerCase() === lc) || s;
+            };
             const termOpts = ['','12 Months','6 Months','Custom'];
             const payTypeOpts = ['','Agency Bill','Company Pay Plan','Direct Bill','Mortgagee Bill','Paid In Full','Premium Finance','Other'];
             const payFreqOpts = ['','Annual','Semi-Annual','Quarterly','Bi-Monthly','Monthly'];
@@ -24758,7 +25248,7 @@ function generateViewTabContent(tabId, policy) {
                     <div class="pdp-card pdp-status-card" style="grid-column:1/-1;padding:16px 20px;background:#fff;border-radius:12px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
                         ${_hOV('Status')}
                         <div class="pdp-status-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:0 16px;">
-                            <div>${_sOV('policyStatus','Policy Status', policy.policyStatus||'', statusOpts)}</div>
+                            <div>${_sOV('policyStatus','Policy Status', _normPolStatus(policy.policyStatus||policy.status||''), statusOpts)}</div>
                             <div>${_sOV('newRenewal','New / Renewal', policy.newRenewal||'', newRenewalOpts)}</div>
                             <div>${_fOV('rewrite','Rewrite Policy #', policy.rewrite||'')}</div>
                             <div>${_sOV('source','Source', policy.source||'', sourceOpts)}</div>
@@ -24857,9 +25347,15 @@ function generateViewTabContent(tabId, policy) {
             const _vehDataAttrV = _allUnitsV.length > 0 ? `data-vehicles="${encodeURIComponent(JSON.stringify(_allUnitsV))}"` : '';
             const _TRL_MAKES_V = ['utility','wabash','great dane','hyundai','hyundai translead','stoughton','east','manac','fontaine','landoll','trail king','wilson','timpte','polar','transcraft','trailmobile','lufkin','trailstar','reinke','talbert','load king','rogers','dorsey','clement','dragon','fruehauf','heil','kentucky','travis','strick','ravens','beall','xl specialized','cimc','roadclipper','chaparral','cahp','benson','highway','globe','mac trailer','vanguard national','kruz','reitnouer','trail eze','talbert','jet','beal','tremcar','walker','brenner','polar tank','heil trailer'];
             const _TRL_VIN_V = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
+            const _decodeBodyType = (raw) => {
+                const IVANS_CODES = {'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','bk':'Bus','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};
+                const s = (raw || '').trim();
+                const lc = s.toLowerCase();
+                return IVANS_CODES[lc] || s;
+            };
             const _isTrailerV = (v) => {
                 const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
-                if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                if (bt === 'tr' || bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
                 const make = (v.make || v.Make || '').toLowerCase().trim();
                 if (_TRL_MAKES_V.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
                 if (make === 'mac') return true;
@@ -24876,6 +25372,7 @@ function generateViewTabContent(tabId, policy) {
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">Type</th>
                                         <th style="padding:7px 8px;width:36px;"></th>
                                     </tr>
                                 </thead>
@@ -24885,6 +25382,7 @@ function generateViewTabContent(tabId, policy) {
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${_decodeBodyType(v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type)||'—'}</td>
                                             <td style="padding:4px 6px;text-align:center;">
                                                 <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View details">
                                                     <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -24945,6 +25443,7 @@ function generateViewTabContent(tabId, policy) {
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
                                         <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                        <th style="padding:7px 8px;text-align:left;color:#374151;">State</th>
                                         <th style="padding:7px 8px;width:36px;"></th>
                                     </tr>
                                 </thead>
@@ -24954,6 +25453,7 @@ function generateViewTabContent(tabId, policy) {
                                             <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
                                             <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                            <td style="padding:7px 8px;color:#374151;">${d.licenseState||d['License State']||d.state||'—'}</td>
                                             <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
                                         </tr>
                                     `).join('')}
@@ -24965,6 +25465,20 @@ function generateViewTabContent(tabId, policy) {
         }
             
         case 'coverage': {
+            // Resolve ops fields: policy first, fallback to linked lead/client
+            const _opsClientId = policy.clientId || policy.leadId || '';
+            const _opsLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+            const _opsLead = _opsClientId ? _opsLeads.find(l => String(l.id) === String(_opsClientId)) : null;
+            const _opsCompany = policy.insuredName || policy.companyName || (_opsLead && (_opsLead.businessName || _opsLead.companyName || _opsLead.name)) || '';
+            const _opsDot = policy.dotNumber || policy.dot_number || (_opsLead && (_opsLead.dotNumber || _opsLead.dot_number || _opsLead.dot)) || '';
+            const _opsEmail = policy.email || policy.emailAddress || (_opsLead && (_opsLead.email || _opsLead.emailAddress)) || '';
+            const _opsPhone = policy.phone || policy.businessPhone || (_opsLead && (_opsLead.phone || _opsLead.phoneNumber || _opsLead.businessPhone)) || '';
+            const _opsYearsInBusiness = policy.yearsInBusiness || (_opsLead && (_opsLead.yearsInBusiness || _opsLead.years_in_business)) || '';
+            const _opsCommRaw = policy.commoditiesHauled || policy.commodities_hauled || '';
+            const _opsCommList = (() => { try { const p = JSON.parse(_opsCommRaw); if (Array.isArray(p)) return p; } catch(e) {} return _opsCommRaw.split(',').map(s => s.trim()).filter(Boolean); })();
+            const _opsCommHidden = _opsCommList.join(',');
+            const _opsEsc = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+            const _opsCommPillsHTML = _opsCommList.map(c => `<span class="ops-comm-pill" style="display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#3730a3;border-radius:20px;padding:3px 10px 3px 10px;font-size:12px;font-weight:500;"><span>${_opsEsc(c)}</span><button type="button" onclick="this.closest('.ops-comm-pill').remove();window._opsCommSync();" style="background:none;border:none;color:#6366f1;cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;">×</button></span>`).join('');
             const isCommercialAuto = policy.policyType === 'commercial-auto';
             const coverageData = policy.coverage || {};
             const alData = coverageData.automotiveLiability || {};
@@ -25147,7 +25661,7 @@ function generateViewTabContent(tabId, policy) {
                 const _TRAILER_VIN_PFX = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
                 const _isTrailerBT = (v) => {
                     const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
-                    if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+                    if (bt === 'tr' || bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
                     const make = (v.make || v.Make || '').toLowerCase().trim();
                     if (_TRAILER_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
                     if (make === 'mac') return true;
@@ -25169,6 +25683,8 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Type</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Value</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25178,6 +25694,8 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${(()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'';return _IC[_r.toLowerCase()]||_r||'—';})()}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View vehicle details">
                                                 <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -25197,6 +25715,8 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Year</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Make / Model</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">VIN</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Type</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Value</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25206,6 +25726,8 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${v.year||v.Year||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${[v.make||v.Make,v.model||v.Model].filter(Boolean).join(' ')||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${v.vin||v.VIN||v.id||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${(()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=v.bodyType||v.BodyType||v.body_type||v.vehicleType||v.type||'';return _IC[_r.toLowerCase()]||_r||'—';})()}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${v.value||v.Value||'—'}</td>
                                         <td style="padding:4px 6px;text-align:center;">
                                             <button onclick="showVehicleDetailModal(${v._origIdx})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View trailer details">
                                                 <i class="fas fa-eye" style="font-size:12px;"></i>
@@ -25229,6 +25751,10 @@ function generateViewTabContent(tabId, policy) {
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">Name</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">DOB</th>
                                     <th style="padding:7px 8px;text-align:left;color:#374151;">License #</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">State</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Date of Hire</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">CDL Length</th>
+                                    <th style="padding:7px 8px;text-align:left;color:#374151;">Yrs Exp</th>
                                     <th style="padding:7px 8px;width:36px;"></th>
                                 </tr>
                             </thead>
@@ -25238,6 +25764,10 @@ function generateViewTabContent(tabId, policy) {
                                         <td style="padding:7px 8px;color:#111827;font-weight:500;">${d['Full Name']||d.fullName||[d.firstName,d.lastName].filter(Boolean).join(' ')||d.name||d.Name||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;">${d['Date of Birth']||d.dateOfBirth||d.dob||'—'}</td>
                                         <td style="padding:7px 8px;color:#374151;font-family:monospace;font-size:12px;">${d['License Number']||d.licenseNumber||d.license||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.licenseState||d['License State']||d.state||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.dateOfHire||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.cdlLength||'—'}</td>
+                                        <td style="padding:7px 8px;color:#374151;">${d.yearsCommercialExperience||d.yearsExperience||'—'}</td>
                                         <td style="padding:4px 4px;"><button onclick="showDriverDetailModal(${i})" style="background:#e0e7ff;border:none;border-radius:6px;padding:4px 7px;cursor:pointer;color:#4f46e5;" title="View/edit driver"><i class="fas fa-eye"></i></button></td>
                                     </tr>
                                 `).join('')}
@@ -25259,6 +25789,21 @@ function generateViewTabContent(tabId, policy) {
 
                         <!-- Right: Vehicles + Trailers + Drivers -->
                         <div>
+                            <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="operationsViewSection" data-policy-id="${_eQ(_pId)}">
+                                <h3 style="margin:0 0 14px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
+                                    <span><i class="fas fa-route" style="margin-right:7px;color:#374151;"></i>Operations</span>
+                                    <button onclick="window.operationsSave('${_eQ(_pId)}')" style="background:#059669;color:white;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;font-weight:500;"><i class="fas fa-save" style="margin-right:4px;"></i>Save</button>
+                                </h3>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Company Name</label><input id="ops-company-name" value="${_eQ(_opsCompany)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">DOT Number</label><input id="ops-dot" value="${_eQ(_opsDot)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Email</label><input id="ops-email" value="${_eQ(_opsEmail)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Phone Number</label><input id="ops-phone" value="${_eQ(_opsPhone)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Years in Business</label><input id="ops-years-in-business" value="${_eQ(_opsYearsInBusiness)}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Operating Radius</label><input id="ops-radius" value="${_eQ(policy.operatingRadius||policy.radius||'')}" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;"></div>
+                                    <div style="grid-column:1/-1;"><label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;display:block;margin-bottom:3px;">Commodities Hauled</label><div style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;background:#fff;min-height:36px;"><div id="ops-comm-tags" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:${_opsCommList.length?'6px':'0'}">${_opsCommPillsHTML}</div><input id="ops-comm-text" type="text" placeholder="Type commodity, press Enter to add…" onkeydown="window._opsCommAddTag(event)" style="border:none;outline:none;width:100%;font-size:13px;color:#111827;padding:0;background:transparent;"></div><input id="ops-commodities" type="hidden" value="${_eQ(_opsCommHidden)}"></div>
+                                </div>
+                            </div>
                             <div class="form-section" style="margin-bottom:16px;padding:20px;border-radius:12px;" id="vehiclesViewSection" ${_vehDataAttr} data-policy-id="${_eQ(_pId)}">
                                 <h3 style="margin:0 0 12px 0;color:#111827;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:space-between;">
                                     <span><i class="fas fa-truck" style="margin-right:7px;color:#374151;"></i>Vehicles (${vehicles.length})</span>
@@ -26217,7 +26762,7 @@ window.showVehicleDetailModal = function(startIndex) {
 
     const _eH = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
-    const BODY_TYPES = ['','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Hopper-Bottom Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
+    const BODY_TYPES = ['','Dry Van','Two-Door Hardtop','Four-Door Hardtop','Four-Wheel Drive','Ambulance (emergency)','Ambulance (non emergency)','Antique Autos','Airport Bus','Airport Limousine','Box Truck','Box Van','Car Hauler','Commercial Driving School with Dual Controls','Commercial Driving School without Dual Controls','Commercial Driving School with Dual Controls (Trucks-Tractors-Trailers)','Commercial Driving School without Dual Controls (Trucks-Tractors-Trailers)','Church Bus','Charter Bus','Convertible','Coupe','Cargo Trailer','Dump Semi-Trailer','Dump Trailer','Dump Truck','Small Dump Truck','Large Dump Truck','Fire Departments (non-PPT)','Fire Departments (PPT)','Funeral (combination Hearse-Ambulance, Emergency)','Funeral (combination Hearse-Ambulance, non-Emergency)','Funeral Flower Car','Funeral Hearse','Funeral Limousine','Folding or Pop-up Campers','Golfmobile','Hatch Back','Inter City Bus','Limousine','Law Enforcement Agency (Motorcycle)','Law Enforcement Agency (PPT)','Law Enforcement Agency (non-PPT, non-Motorcycle)','Small Van','Medium Van','Large Van','Motorcycle','Mobile Home (22 feet or less)','Mobile Home (over 22 feet)','Mobile Home Trailer','Motorhome','Other','Buses Otherwise Not Classified','Other School Bus','Panel Van','Passenger Auto','Private Passenger Rated from CLM','Private Passenger Rated from CLM (Farm)','Rollback','School Bus Owned by Political Subdivision or School District','Pick Up Truck','Pick-up Truck (used solely to transport camper bodies)','Public Vehicle Not Otherwise Classified','School Driver Training with Dual Controls','School Driver Training without Dual Controls','Sedan','Showroom Trailer','Special or Mobile Equipment (Farm)','Special or Mobile Equipment (non-Farm)','Snowmobile','Sightseeing Bus','Social Services Auto (Employee Operated)','Social Services Auto (all other)','Semi-Trailer','Stationwagon','Step Van','Tractor','Trailer','Flatbed Trailer','Reefer Trailer','Hopper-Bottom Trailer','Taxi','Truck','Truck-Tractor','Transportation of Athletes and Entertainers','Transportation of Employees (all other)','Transportation of Employees (PPT)','Urban Bus','Utility Van','Van','Van Pools (Employer Furnished)','Van Pools (all other)','Window Van','Small Wrecker','Large Wrecker'];
     const STATES = ['','AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN','KS','KY','LA','MA','MD','ME','MI','MN','MO','MS','MT','NC','ND','NE','NH','NJ','NM','NV','NY','OH','OK','OR','PA','PR','RI','SC','SD','TN','TX','UT','VA','VT','WA','WI','WV','WY','INTL'];
 
     const IS = 'width:100%;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;box-sizing:border-box;color:#111827;';
@@ -26313,6 +26858,7 @@ window.showVehicleDetailModal = function(startIndex) {
                             ${_inp('year','Year', get('year','Year'))}
                             ${_inp('make','Make', get('make','Make'))}
                             ${_inp('model','Model', get('model','Model'))}
+                            ${_inp('value','Value', get('value','Value'))}
                             ${_sel('bodyType','Body Type', get('bodyType','body_type','Bodytype'), BODY_TYPES)}
                             ${_inp('territory','Territory', get('territory','Territory'))}
                             ${_inp('gvwGcw','GVW / GCW', get('gvwGcw','gvw','Gvwgcw'))}
@@ -26459,7 +27005,7 @@ window.showVehicleDetailModal = function(startIndex) {
 
         const updated = Object.assign({}, vehicles[currentIdx], {
             vin: g('vin'), vehicleType: g('vehicleType'), year: g('year'), make: g('make'),
-            model: g('model'), bodyType: g('bodyType'), territory: g('territory'),
+            model: g('model'), value: g('value'), bodyType: g('bodyType'), territory: g('territory'),
             gvwGcw: g('gvwGcw'), class: g('class'), use: g('use'), radius: g('radius'),
             symAge: g('symAge'), seatCapacity: g('seatCapacity'), costNew: g('costNew'),
             cargoLimit: g('cargoLimit'), comment: g('comment'),
@@ -26519,7 +27065,66 @@ window.showVehicleDetailModal = function(startIndex) {
 
     renderModal();
 };
+// ─── Commodity Tag Input Helpers ──────────────────────────────────────────────
+window._opsCommSync = function() {
+    const tags = document.querySelectorAll('#ops-comm-tags .ops-comm-pill span:first-child');
+    const val = Array.from(tags).map(s => s.textContent.trim()).filter(Boolean).join(',');
+    const hidden = document.getElementById('ops-commodities');
+    if (hidden) hidden.value = val;
+};
+
+window._opsCommAddTag = function(event) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const input = event.target;
+    const text = input.value.trim();
+    if (!text) return;
+    const container = document.getElementById('ops-comm-tags');
+    if (!container) return;
+    const pill = document.createElement('span');
+    pill.className = 'ops-comm-pill';
+    pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#3730a3;border-radius:20px;padding:3px 10px 3px 10px;font-size:12px;font-weight:500;';
+    pill.innerHTML = `<span>${text}</span><button type="button" onclick="this.closest('.ops-comm-pill').remove();window._opsCommSync();" style="background:none;border:none;color:#6366f1;cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 2px;">×</button>`;
+    container.appendChild(pill);
+    input.value = '';
+    window._opsCommSync();
+};
 // ─────────────────────────────────────────────────────────────────────────────
+
+window.operationsSave = async function(policyId) {
+    const companyName = (document.getElementById('ops-company-name')||{}).value || '';
+    const dotNumber = (document.getElementById('ops-dot')||{}).value || '';
+    const email = (document.getElementById('ops-email')||{}).value || '';
+    const phone = (document.getElementById('ops-phone')||{}).value || '';
+    const yearsInBusiness = (document.getElementById('ops-years-in-business')||{}).value || '';
+    const radius = (document.getElementById('ops-radius')||{}).value || '';
+    const commodities = (document.getElementById('ops-commodities')||{}).value || '';
+    const policies = JSON.parse(localStorage.getItem('insurance_policies') || '[]');
+    const idx = policies.findIndex(p => String(p.id) === String(policyId) || p.policyNumber === policyId);
+    if (idx !== -1) {
+        policies[idx].insuredName = companyName;
+        policies[idx].companyName = companyName;
+        policies[idx].dotNumber = dotNumber;
+        policies[idx].email = email;
+        policies[idx].phone = phone;
+        policies[idx].yearsInBusiness = yearsInBusiness;
+        policies[idx].operatingRadius = radius;
+        policies[idx].commoditiesHauled = commodities;
+        localStorage.setItem('insurance_policies', JSON.stringify(policies));
+        try {
+            const API = window.VANGUARD_API_URL || 'https://162-220-14-239.nip.io:3001';
+            const jwt = sessionStorage.getItem('vanguard_jwt') || '';
+            const r = await fetch(`${API}/api/policies/${policyId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}`, 'Bypass-Tunnel-Reminder': 'true' },
+                body: JSON.stringify(policies[idx])
+            });
+            if(typeof showNotification==='function') showNotification(r.ok ? 'Operations saved' : 'Saved locally (server error)', r.ok ? 'success' : 'warning');
+        } catch(e) {
+            if(typeof showNotification==='function') showNotification('Saved locally (offline)', 'warning');
+        }
+    }
+};
 
 // ─── Driver Detail Modal (Editable) ──────────────────────────────────────────
 window.showDriverDetailModal = function(startIndex) {
@@ -26630,6 +27235,8 @@ window.showDriverDetailModal = function(startIndex) {
                             ${_inp('licenseNumber','License #', get('licenseNumber','License Number','license','Licensenumber'))}
                             ${_inp('stateLicenseYear','State License Year', get('stateLicenseYear','Statelicenseyear','state_license_year'))}
                             ${_inp('originalLicenseDate','Orig. License Date', get('originalLicenseDate','Originallicensedate','original_license_date'))}
+                            ${_inp('dateOfHire','Date of Hire', get('dateOfHire','date_of_hire','Dateofhire'))}
+                            ${_inp('cdlLength','CDL Length (yrs)', get('cdlLength','cdl_length','Cdllength'))}
                             ${_sH('Other','16px 0')}
                             ${_inp('yearsCommercialExperience','Years Commercial Exp', get('yearsCommercialExperience','Yearscommercialexperience','years_commercial_experience'))}
                             ${_inp('percentUse','Percent Use', get('percentUse','Percentuse','percent_use'))}
@@ -26666,6 +27273,7 @@ window.showDriverDetailModal = function(startIndex) {
             vehicleId: g('vehicleId'), licenseState: g('licenseState'), licenseNumber: g('licenseNumber'),
             'License Number': g('licenseNumber'),
             stateLicenseYear: g('stateLicenseYear'), originalLicenseDate: g('originalLicenseDate'),
+            dateOfHire: g('dateOfHire'), cdlLength: g('cdlLength'),
             yearsCommercialExperience: g('yearsCommercialExperience'), percentUse: g('percentUse'),
             comment: g('comment'),
             dateAdded: g('dateAdded'), effectiveDateAdded: g('effectiveDateAdded'),
@@ -27105,7 +27713,7 @@ function getStatusClass(status) {
     if (s === 'active' || s === 'in-force' || s === 'in force') return 'active';
     if (s === 'pending') return 'pending';
     if (s === 'cancel-pending' || s === 'cancel pending') return 'pending';
-    if (s === 'expired' || s === 'cancelled' || s === 'non-renewed' || s === 'non renewed') return 'pending';
+    if (s === 'expired' || s === 'cancelled' || s === 'non-renewed' || s === 'non renewed' || s === 'replaced') return 'inactive';
     return 'active';
 }
 
@@ -35663,12 +36271,15 @@ async function generateLeadsFromForm() {
             phone: carrier.phone || 'N/A',
             email: carrier.email_address || carrier.email || 'N/A',
             fleet_size: carrier.powerUnits || carrier.power_units || 0,
+            drivers: carrier.drivers || carrier.total_drivers || 0,
             insurance_expiry: carrier.renewalDate || carrier.insurance_expiry_date || carrier.policy_renewal_date || carrier.expiry || 'N/A',
             insurance_company: carrier.insuranceCompany || carrier.insurance_company || carrier.insurance_carrier || 'Unknown',
             insurance_amount: carrier.premium || carrier.liability_insurance_amount || carrier.bipd_insurance_on_file_amount || carrier.insurance_on_file || 0,
             policy_number: carrier.policy_number || 'N/A',
             safety_rating: carrier.safety_rating || 'None',
-            operating_status: carrier.operating_status || carrier.status || 'Unknown'
+            operating_status: carrier.operating_status || carrier.status || 'Unknown',
+            commodities_hauled: carrier.commodities_hauled || '',
+            cargo_carried: carrier.cargo_carried || ''
         }));
         
         // Calculate statistics
@@ -40103,7 +40714,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
     const _QA_TRL_VIN = ['1UY','1JJ','1E1','5MA','5MC','1LH','1GR','1DW','3H3','3HA','5V8','13N','1TK','4WW','1RN','1TC','1TT','53C','534','46U','1WP','1S1','2AT','1K9','1EA','5VN','1W1'];
     const _isTrailerQA = (v) => {
         const bt = (v.bodyType || v.BodyType || v.body_type || '').toLowerCase().trim();
-        if (bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
+        if (bt === 'tr' || bt === 't' || bt === 'st' || bt === 'ct' || bt === 'dt' || bt === 'dst' || bt === 'ft' || bt === 'rt' || bt === 'trl' || bt === 'dmpt' || bt === 'dmst' || bt === 'smtl' || bt === 'crgt' || bt === 'shwt' || bt === 'mht' || bt === 'fltb' || bt === 'refr' || bt === 'hpbt' || bt.includes('trailer') || bt.includes('semi-trailer') || bt.includes('dump t') || bt.includes('dump s')) return true;
         const make = (v.make || v.Make || '').toLowerCase().trim();
         if (_QA_TRL_MAKES.some(tm => make === tm || make.startsWith(tm + ' '))) return true;
         if (make === 'mac') return true;
@@ -40118,7 +40729,8 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                 make: vehicle.Make || vehicle.make || '',
                 model: vehicle.Model || vehicle.model || '',
                 vin: vehicle.VIN || vehicle.vin || '',
-                type: vehicle.Type || vehicle.type || '',
+                bodyType: (()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=vehicle.bodyType||vehicle.BodyType||vehicle.body_type||'';return _IC[_r.toLowerCase()]||_r;})(),
+                type: vehicle.Type || vehicle.type || (()=>{const _IC={'tk':'Truck','tt':'Truck-Tractor','tr':'Trailer','st':'Semi-Trailer','pp':'Private Passenger','vn':'Van','pu':'Pick Up Truck','sp':'Special Equipment','ft':'Flatbed Trailer','rt':'Reefer Trailer','ct':'Cargo Trailer','dt':'Dump Trailer','ht':'Hopper-Bottom Trailer','bt':'Box Truck'};const _r=vehicle.bodyType||vehicle.BodyType||vehicle.body_type||'';return _IC[_r.toLowerCase()]||_r;})(),
                 value: vehicle.Value || vehicle.value || '',
                 radius: vehicle.Radius || vehicle.radius || ''
             };
@@ -40136,10 +40748,11 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         policy.drivers.forEach((driver, index) => {
             driverData.push({
                 name: driver.name || driver['Full Name'] || '',
-                dateOfBirth: driver.dateOfBirth || driver['Date of Birth'] || '',
-                licenseNumber: driver.licenseNumber || driver['License Number'] || '',
-                state: driver.state || '',
-                yearsExperience: driver.yearsExperience || '',
+                dateOfBirth: driver.dateOfBirth || driver.dob || driver['Date of Birth'] || '',
+                licenseNumber: driver.licenseNumber || driver.license || driver['License Number'] || '',
+                state: driver.state || driver.licenseState || '',
+                yearsCommercialExperience: driver.yearsCommercialExperience || driver.yearsExperience || '',
+                cdlLength: driver.cdlLength || '',
                 dateOfHire: driver.dateOfHire || '',
                 accidents: driver.accidents || driver['# Accidents/Violations'] || ''
             });
@@ -40183,6 +40796,11 @@ window.createQuoteApplicationForPolicy = function(policyId) {
     const foundContacts = findContactInfo(policy, ['phone', 'email', 'address']);
     console.log('🔍 Found contact information in policy:', foundContacts);
 
+    // Look up linked lead record as fallback source for contact/DOT info
+    const _qaLeads = JSON.parse(localStorage.getItem('insurance_leads') || '[]');
+    const _qaClientId = policy.clientId || policy.leadId || '';
+    const _qaLead = _qaClientId ? _qaLeads.find(l => String(l.id) === String(_qaClientId)) : null;
+
     // Extract contact information with multiple fallbacks
     const extractedPhone = policy.insured?.['Business Phone'] ||
                            policy.insured?.['Phone'] ||
@@ -40192,6 +40810,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                            policy.phone ||
                            policy.businessPhone ||
                            foundContacts.phone ||
+                           (_qaLead && (_qaLead.phone || _qaLead.phoneNumber || _qaLead.businessPhone)) ||
                            '';
 
     const extractedEmail = policy.insured?.['Email'] ||
@@ -40201,6 +40820,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                           policy.email ||
                           policy.emailAddress ||
                           foundContacts.email ||
+                          (_qaLead && (_qaLead.email || _qaLead.emailAddress)) ||
                           '';
 
     const extractedAddress = policy.insured?.['Mailing Address'] ||
@@ -40211,6 +40831,7 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                             policy.address ||
                             policy.mailingAddress ||
                             foundContacts.address ||
+                            (_qaLead && (_qaLead.address || _qaLead.mailingAddress)) ||
                             '';
 
     console.log('📞 Extracted contact info:', {
@@ -40225,13 +40846,20 @@ window.createQuoteApplicationForPolicy = function(policyId) {
                               policy.insured?.['DOT Number'] ||
                               policy.dot ||
                               policy.usdot ||
+                              (_qaLead && (_qaLead.dotNumber || _qaLead.dot || _qaLead.usdot)) ||
                               '';
 
     const extractedMcNumber = policy.mcNumber ||
                              policy.insured?.['MC #'] ||
                              policy.insured?.['MC Number'] ||
                              policy.mc ||
+                             (_qaLead && (_qaLead.mcNumber || _qaLead.mc)) ||
                              '';
+
+    const extractedYearsInBusiness = policy.yearsInBusiness ||
+                                    policy.insured?.['Years in Business'] ||
+                                    (_qaLead && (_qaLead.yearsInBusiness || _qaLead.years_in_business)) ||
+                                    '';
 
     console.log('🚛 Extracted DOT/MC info:', {
         dotNumber: extractedDotNumber,
@@ -40260,10 +40888,13 @@ window.createQuoteApplicationForPolicy = function(policyId) {
         dotNumber: extractedDotNumber,
         mcNumber: extractedMcNumber,
         usdot: extractedDotNumber, // Also set usdot for compatibility
+        yearsInBusiness: extractedYearsInBusiness,
         policyId: policyId,
         isPolicyQuote: true,
         agent: policy.agent || '',
         renewalDate: _renewalEffDate,
+        radiusOfOperation: policy.operatingRadius || policy.radius || '',
+        commodityHauled: (() => { const _cr = policy.commoditiesHauled || policy.commodities_hauled || policy.commodity_hauled || ''; try { const _cp = JSON.parse(_cr); if (Array.isArray(_cp)) return _cp.join(','); } catch(e) {} return _cr; })(),
         policyVehicles: vehicleData,
         policyTrailers: trailerData,
         policyDrivers: driverData

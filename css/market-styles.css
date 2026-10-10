@@ -1,3 +1,31 @@
+/* Market Period Tabs */
+.market-period-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.market-tab {
+    background: white;
+    border: 1.5px solid #e5e7eb;
+    color: #6b7280;
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.market-tab:hover {
+    border-color: #3b82f6;
+    color: #3b82f6;
+}
+.market-tab.active {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    border-color: #1d4ed8;
+    color: white;
+    box-shadow: 0 2px 6px rgba(29,78,216,0.25);
+}
+
 /* Market Table Layout Styles */
 .market-content {
     position: fixed;

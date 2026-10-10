@@ -533,13 +533,27 @@ class VanguardViciDialSelectiveSync:
         return policy_info
 
     def parse_enhanced_comments(self, comments):
-        """Parse enhanced comments format to extract owner name, lead stage, and callback info"""
+        """Parse enhanced comments format to extract owner name, lead stage, callback info, and additional fields"""
         parsed_info = {
             'owner_name': '',
+            'ownerDob': '',
+            'ownerDl': '',
+            'ownerCdlLength': '',
             'lead_stage': 'new',
             'callback_date': '',
             'callback_time': '',
-            'stage_selections': {}
+            'callback_notes': '',
+            'stage_selections': {},
+            'radiusOfOperation': '',
+            'docStatus_coi': '',
+            'docStatus_dec_page': '',
+            'docStatus_loss_runs': '',
+            'docStatus_iftas': '',
+            'drivers': [],
+            'commodityHauled': '',
+            'vehicles': [],
+            'trailers': [],
+            'mtcCoverage': '',
         }
 
         if not comments:
@@ -548,11 +562,29 @@ class VanguardViciDialSelectiveSync:
         logger.info(f"🔍 Parsing enhanced comments: {comments[:200]}...")
 
         try:
-            # Extract owner name from Name section
-            name_match = re.search(r'------------Name--------------\s*\n\s*([^\n\r-]+)', comments, re.IGNORECASE | re.MULTILINE)
-            if name_match:
-                parsed_info['owner_name'] = name_match.group(1).strip()
-                logger.info(f"✅ Owner name extracted: '{parsed_info['owner_name']}'")
+            # Extract OWNERS INFO section and parse all owner fields
+            owners_section_match = re.search(r'----OWNERS INFO[^\n]*\n(.*?)(?=\n---|\n-----|\Z)', comments, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            if owners_section_match:
+                owners_section = owners_section_match.group(1)
+                name_m = re.search(r'Name:\s*([^\n\r]+)', owners_section)
+                dob_m  = re.search(r'DOB:\s*([^\n\r]+)', owners_section)
+                dl_m   = re.search(r'DL#:\s*([^\n\r]+)', owners_section)
+                cdl_m  = re.search(r'CDL Length:\s*([^\n\r]+)', owners_section)
+                if name_m and name_m.group(1).strip():
+                    parsed_info['owner_name'] = name_m.group(1).strip()
+                    logger.info(f"✅ Owner name extracted: '{parsed_info['owner_name']}'")
+                if dob_m and dob_m.group(1).strip():
+                    parsed_info['ownerDob'] = dob_m.group(1).strip()
+                if dl_m and dl_m.group(1).strip():
+                    parsed_info['ownerDl'] = dl_m.group(1).strip()
+                if cdl_m and cdl_m.group(1).strip():
+                    parsed_info['ownerCdlLength'] = cdl_m.group(1).strip()
+
+            # Extract stage directly from "Stage: <value>" line (written by CRM comment builder)
+            direct_stage_match = re.search(r'^Stage:\s*(\S+)', comments, re.IGNORECASE | re.MULTILINE)
+            if direct_stage_match:
+                parsed_info['lead_stage'] = direct_stage_match.group(1).strip()
+                logger.info(f"✅ Direct stage extracted: '{parsed_info['lead_stage']}'")
 
             # Extract stage selections and determine current stage - updated for new format
             # Check for Custom stage first (Custom: followed by non-empty text)
@@ -578,14 +610,14 @@ class VanguardViciDialSelectiveSync:
             for stage_key, pattern, stage_value in stage_patterns:
                 if re.search(pattern, comments, re.IGNORECASE):
                     parsed_info['stage_selections'][stage_key] = True
-                    # Only override if no custom stage was already set
-                    if 'custom' not in parsed_info['stage_selections']:
+                    # Only override if no direct stage or custom stage was already set
+                    if 'custom' not in parsed_info['stage_selections'] and not direct_stage_match:
                         parsed_info['lead_stage'] = stage_value
                     logger.info(f"✅ Stage detected: {stage_value}")
 
-            # Extract callback information - updated for new format
-            # Try new format first: "NEXT CALL\nDate: MM/DD/YYYY Time: HH:MMAM/PM"
-            callback_match = re.search(r'NEXT CALL\s*\n\s*Date:\s*([^\s]+)\s+Time:\s*([^\n\r]+)', comments, re.IGNORECASE | re.MULTILINE)
+            # Extract callback information
+            # Handles both "-----NEXT CALL---------------\nDate:" and "NEXT CALL\nDate:" formats
+            callback_match = re.search(r'NEXT CALL[^\n]*\n\s*Date:\s*([^\s]+)\s+Time:\s*([^\n\r]+)', comments, re.IGNORECASE | re.MULTILINE)
 
             # Fallback to old format: "--scheduled next call---------\nDate: MM/DD/YYYY Time: HH:MMAM/PM"
             if not callback_match:
@@ -594,6 +626,12 @@ class VanguardViciDialSelectiveSync:
                 parsed_info['callback_date'] = callback_match.group(1).strip()
                 parsed_info['callback_time'] = callback_match.group(2).strip()
                 logger.info(f"✅ Callback scheduled: {parsed_info['callback_date']} at {parsed_info['callback_time']}")
+
+                # Extract callback notes if present
+                notes_match = re.search(r'Callback Notes:\s*([^\n\r]+)', comments, re.IGNORECASE)
+                if notes_match:
+                    parsed_info['callback_notes'] = notes_match.group(1).strip()
+                    logger.info(f"✅ Callback notes: '{parsed_info['callback_notes']}'")
 
                 # Compute highlight expiry timestamp from callback date/time
                 try:
@@ -623,8 +661,170 @@ class VanguardViciDialSelectiveSync:
             else:
                 parsed_info['has_callback'] = False
 
+            # Extract radius of operation from "Mile Radius: 300" (with or without space)
+            radius_match = re.search(r'Mile Radius:\s*(\S+)', comments, re.IGNORECASE)
+            if radius_match:
+                parsed_info['radiusOfOperation'] = radius_match.group(1).strip()
+                logger.info(f"✅ Radius of operation: {parsed_info['radiusOfOperation']}")
+
+            # Extract commodities hauled from "Commodities: ..." line
+            commodities_match = re.search(r'Commodities:\s*([^\n\r]+)', comments, re.IGNORECASE)
+            if commodities_match:
+                parsed_info['commodityHauled'] = commodities_match.group(1).strip()
+                logger.info(f"✅ Commodity hauled: {parsed_info['commodityHauled']}")
+
+            # Extract document status from DOCUMENTATION section
+            # Format: "COI (RQ)", "DEC PAGE (RC)", "LOSS RUNS (RQ)", "IFTAS ( )"
+            def parse_doc_status(marker):
+                if marker.strip().upper() == 'RC':
+                    return 'received'
+                elif marker.strip().upper() == 'RQ':
+                    return 'requested'
+                else:
+                    return ''
+
+            coi_match = re.search(r'COI\s*\(([^)]*)\)', comments, re.IGNORECASE)
+            if coi_match:
+                parsed_info['docStatus_coi'] = parse_doc_status(coi_match.group(1))
+                logger.info(f"✅ COI status: {parsed_info['docStatus_coi']}")
+
+            dec_match = re.search(r'DEC\s*PAGE\s*\(([^)]*)\)', comments, re.IGNORECASE)
+            if dec_match:
+                parsed_info['docStatus_dec_page'] = parse_doc_status(dec_match.group(1))
+                logger.info(f"✅ DEC PAGE status: {parsed_info['docStatus_dec_page']}")
+
+            lossruns_match = re.search(r'LOSS\s*RUNS\s*\(([^)]*)\)', comments, re.IGNORECASE)
+            if lossruns_match:
+                parsed_info['docStatus_loss_runs'] = parse_doc_status(lossruns_match.group(1))
+                logger.info(f"✅ LOSS RUNS status: {parsed_info['docStatus_loss_runs']}")
+
+            iftas_match = re.search(r'IFTAS\s*\(([^)]*)\)', comments, re.IGNORECASE)
+            if iftas_match:
+                parsed_info['docStatus_iftas'] = parse_doc_status(iftas_match.group(1))
+                logger.info(f"✅ IFTAS status: {parsed_info['docStatus_iftas']}")
+
+            # Extract drivers from DRIVERS INFO section
+            # Format: "--DRIVERS INFO(N)-----\nDriver 1\nName: ...\nDOB: ...\nDL#: ...\nCDL Length: ...\nHire Date: ..."
+            drivers_section_match = re.search(
+                r'--DRIVERS INFO\(\d+\)-+\s*\n(.*?)(?=\n-----|\Z)',
+                comments, re.IGNORECASE | re.DOTALL
+            )
+            if drivers_section_match:
+                drivers_section = drivers_section_match.group(1)
+                driver_blocks = re.split(r'\n?Driver\s+\d+\s*\n', drivers_section)
+                parsed_drivers = []
+                for block in driver_blocks:
+                    if not block.strip():
+                        continue
+                    driver = {}
+                    d_name = re.search(r'Name:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    d_dob = re.search(r'DOB:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    d_dl = re.search(r'DL[#]?:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    d_cdl = re.search(r'CDL\s*Length:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    d_hire = re.search(r'Hire\s*Date:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    if d_name:
+                        driver['name'] = d_name.group(1).strip()
+                    if d_dob:
+                        raw_dob = d_dob.group(1).strip()
+                        # Convert MM/DD/YYYY → YYYY-MM-DD for HTML date input compatibility
+                        try:
+                            from datetime import datetime as _dt
+                            driver['dob'] = _dt.strptime(raw_dob, "%m/%d/%Y").strftime("%Y-%m-%d")
+                        except Exception:
+                            driver['dob'] = raw_dob
+                    if d_dl:
+                        driver['license'] = d_dl.group(1).strip()
+                    if d_cdl:
+                        driver['cdlLength'] = d_cdl.group(1).strip()
+                    if d_hire:
+                        driver['hireDate'] = d_hire.group(1).strip()  # Keep as MM/YYYY text
+                    if driver.get('name') or driver.get('dob') or driver.get('license'):
+                        parsed_drivers.append(driver)
+                if parsed_drivers:
+                    parsed_info['drivers'] = parsed_drivers
+                    logger.info(f"✅ Parsed {len(parsed_drivers)} drivers from comments")
+
+            # Extract MTC coverage from "MTC: $100k" line
+            mtc_match = re.search(r'MTC:\s*(\S+)', comments, re.IGNORECASE)
+            if mtc_match:
+                parsed_info['mtcCoverage'] = mtc_match.group(1).strip()
+                logger.info(f"✅ MTC coverage: {parsed_info['mtcCoverage']}")
+
+            # Extract UNITS (vehicles) from the UNITS section
+            # Format: "-----UNITS(N)----------\nYear: XXXX\nMake: ...\nModel: ...\nType: ...\nVIN: ...\nValue: ..."
+            units_section_match = re.search(
+                r'-----UNITS\(\d+\)-+\s*\n(.*?)(?=\n-----|\Z)',
+                comments, re.IGNORECASE | re.DOTALL
+            )
+            if units_section_match:
+                units_section = units_section_match.group(1)
+                # Split into individual vehicle blocks by blank lines
+                unit_blocks = re.split(r'\n{2,}', units_section.strip())
+                parsed_vehicles = []
+                for block in unit_blocks:
+                    if not block.strip():
+                        continue
+                    v_year = re.search(r'Year:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    v_make = re.search(r'Make:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    v_model = re.search(r'Model:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    v_type = re.search(r'Type:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    v_vin = re.search(r'VIN:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    v_value = re.search(r'Value:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    vehicle = {}
+                    if v_year: vehicle['year'] = v_year.group(1).strip()
+                    if v_make: vehicle['make'] = v_make.group(1).strip()
+                    if v_model: vehicle['model'] = v_model.group(1).strip()
+                    if v_type: vehicle['type'] = v_type.group(1).strip()
+                    if v_vin: vehicle['vin'] = v_vin.group(1).strip()
+                    if v_value: vehicle['value'] = v_value.group(1).strip().lstrip('$')
+                    if vehicle.get('year') or vehicle.get('make') or vehicle.get('vin'):
+                        parsed_vehicles.append(vehicle)
+                if parsed_vehicles:
+                    parsed_info['vehicles'] = parsed_vehicles
+                    logger.info(f"✅ Parsed {len(parsed_vehicles)} vehicles from comments")
+
+            # Extract TRAILERS from the TRAILERS section
+            # Format: "-----TRAILERS(N)----------\nYear: XXXX\nMake: ...\nType: ...\nVIN: ...\nValue: ..."
+            trailers_section_match = re.search(
+                r'-----TRAILERS\(\d+\)-+\s*\n(.*?)(?=\n-----|\Z)',
+                comments, re.IGNORECASE | re.DOTALL
+            )
+            if trailers_section_match:
+                trailers_section = trailers_section_match.group(1)
+                trailer_blocks = re.split(r'\n{2,}', trailers_section.strip())
+                parsed_trailers = []
+                for block in trailer_blocks:
+                    if not block.strip():
+                        continue
+                    t_year = re.search(r'Year:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    t_make = re.search(r'Make:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    t_type = re.search(r'Type:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    t_vin = re.search(r'VIN:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    t_value = re.search(r'Value:\s*([^\n\r]+)', block, re.IGNORECASE)
+                    trailer = {}
+                    if t_year: trailer['year'] = t_year.group(1).strip()
+                    if t_make: trailer['make'] = t_make.group(1).strip()
+                    if t_type: trailer['type'] = t_type.group(1).strip()
+                    if t_vin: trailer['vin'] = t_vin.group(1).strip()
+                    if t_value: trailer['value'] = t_value.group(1).strip().lstrip('$')
+                    if trailer.get('year') or trailer.get('make') or trailer.get('vin'):
+                        parsed_trailers.append(trailer)
+                if parsed_trailers:
+                    parsed_info['trailers'] = parsed_trailers
+                    logger.info(f"✅ Parsed {len(parsed_trailers)} trailers from comments")
+
         except Exception as e:
             logger.warning(f"⚠️ Error parsing enhanced comments: {e}")
+
+        # Auto-detect full_info_received: if stage is still default "new" and all key info is populated
+        if parsed_info['lead_stage'] == 'new' and not direct_stage_match and 'custom' not in parsed_info.get('stage_selections', {}):
+            has_operation = bool(parsed_info.get('radiusOfOperation') or parsed_info.get('commodityHauled'))
+            has_drivers = bool(parsed_info.get('drivers')) and any(d.get('name') for d in parsed_info['drivers'])
+            has_vehicles = bool(parsed_info.get('vehicles'))
+            has_owner = bool(parsed_info.get('owner_name'))
+            if has_operation and has_drivers and has_vehicles and has_owner:
+                parsed_info['lead_stage'] = 'full_info_received'
+                logger.info(f"✅ Auto-detected stage: full_info_received (operation+drivers+vehicles+owner all populated)")
 
         return parsed_info
 
@@ -644,10 +844,12 @@ class VanguardViciDialSelectiveSync:
             callback_id = str(int(time.time() * 1000) + random.randint(1, 999))
 
             # Create callback data
+            callback_notes_text = enhanced_info.get('callback_notes', '')
+            notes_str = callback_notes_text if callback_notes_text else f'Imported from ViciDial — {lead_name}'
             callback_data = {
                 'id': callback_id,
                 'dateTime': callback_datetime,
-                'notes': f'Scheduled callback imported from ViciDial - {lead_name} (Original: {callback_date} at {callback_time})',
+                'notes': notes_str,
                 'completed': False,
                 'importedFromVicidial': True,
                 'originalComments': f'Date: {callback_date} Time: {callback_time}',
@@ -891,8 +1093,8 @@ class VanguardViciDialSelectiveSync:
                     r'(\w+.*INSURANCE.*)',  # Any text with INSURANCE
                 ]
 
-                # Check address1 first, then address2
-                for address_field in [address2, address1]:  # Check address2 first as it usually has insurance
+                # Check address2 first (usually has insurance), then address1
+                for address_field in [address2, address1]:
                     if address_field:
                         for pattern in insurance_patterns:
                             match = re.search(pattern, address_field, re.I)
@@ -902,6 +1104,11 @@ class VanguardViciDialSelectiveSync:
                                 break
                         if insurance_company:
                             break
+
+                # Fallback: if no pattern matched but address2 has content, use it directly
+                if not insurance_company and address2 and len(address2) > 2:
+                    insurance_company = address2.strip()
+                    logger.info(f"✓ Using raw address2 as insurance company: '{insurance_company}'")
 
                 # Extract renewal date from address3 field
                 renewal_date = ""
@@ -984,7 +1191,20 @@ class VanguardViciDialSelectiveSync:
                     "leadStatus": lead_info.get('status', 'SALE'),
                     "recordingPath": recording_path or "",
                     "hasRecording": bool(recording_path),
-                    "ownerName": enhanced_info['owner_name'] if enhanced_info['owner_name'] else '',  # Owner name from comments
+                    "ownerName": enhanced_info['owner_name'] if enhanced_info['owner_name'] else '',
+                    "ownerDob": enhanced_info.get('ownerDob', ''),
+                    "ownerDl": enhanced_info.get('ownerDl', ''),
+                    "ownerCdlLength": enhanced_info.get('ownerCdlLength', ''),
+                    "radiusOfOperation": enhanced_info.get('radiusOfOperation', ''),
+                    "commodityHauled": enhanced_info.get('commodityHauled', ''),
+                    "docStatus_coi": enhanced_info.get('docStatus_coi', ''),
+                    "docStatus_dec_page": enhanced_info.get('docStatus_dec_page', ''),
+                    "docStatus_loss_runs": enhanced_info.get('docStatus_loss_runs', ''),
+                    "docStatus_iftas": enhanced_info.get('docStatus_iftas', ''),
+                    "drivers": enhanced_info.get('drivers', []),
+                    "vehicles": enhanced_info.get('vehicles', []),
+                    "trailers": enhanced_info.get('trailers', []),
+                    "mtcCoverage": enhanced_info.get('mtcCoverage', ''),
                 }
 
                 # Initialize reachOut structure if it doesn't exist

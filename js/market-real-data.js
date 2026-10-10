@@ -6,6 +6,7 @@ class MarketDataCalculator {
     constructor() {
         this.quotes = [];
         this.currentMetric = localStorage.getItem('market_metric') || 'liability';
+        this.currentPeriod = parseInt(localStorage.getItem('market_period_days') || '365');
         this.carrierStats = {};
         this.initialized = false;
         this.initialize();
@@ -21,7 +22,7 @@ class MarketDataCalculator {
     // Load quotes from server
     async loadQuotes() {
         try {
-            const response = await fetch('/api/market-quotes');
+            const response = await fetch(`/api/market-quotes?days=${this.currentPeriod}`);
             if (!response.ok) {
                 throw new Error(`Server error: ${response.status}`);
             }
@@ -481,5 +482,37 @@ if (typeof originalLoadMarketView === 'function') {
 // Make functions globally available
 window.rebuildMarketTable = rebuildMarketTable;
 window.refreshMarketData = refreshMarketData;
+
+// Update active tab indicator
+function syncMarketTabUI(days) {
+    document.querySelectorAll('.market-tab').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.days) === days);
+    });
+}
+
+// Set time period and reload market data
+window.setMarketPeriod = async function(days) {
+    localStorage.setItem('market_period_days', String(days));
+    syncMarketTabUI(days);
+    if (window.marketDataCalculator) {
+        window.marketDataCalculator.currentPeriod = days;
+        await window.marketDataCalculator.refresh();
+        rebuildMarketTable();
+    }
+};
+
+// Apply persisted tab selection on load
+function initMarketPeriodTabs() {
+    const saved = parseInt(localStorage.getItem('market_period_days') || '365');
+    syncMarketTabUI(saved);
+}
+
+// Hook into existing init flow
+const _origInit = document.readyState;
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMarketPeriodTabs);
+} else {
+    setTimeout(initMarketPeriodTabs, 100);
+}
 
 console.log('✅ Market real data calculator loaded');

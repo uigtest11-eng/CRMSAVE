@@ -5,7 +5,7 @@ import json
 import os
 import requests
 
-DEEPGRAM_API_KEY = "19b5d4a1221a91a41bc415d5eefc955d94938962"
+DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
 
 def transcribe(audio_path):
     with open(audio_path, 'rb') as f:

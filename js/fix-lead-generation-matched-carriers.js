@@ -388,7 +388,10 @@ window.exportGeneratedLeads = function(format) {
             'Hazmat Status', 'Interstate Status',
 
             // Data Source
-            'Data Source'
+            'Data Source',
+
+            // Corgi Prequote
+            'Corgi Prequote ID', 'Corgi Eligible', 'Corgi Premium', 'Corgi Decline Reason'
         ];
 
         const csvContent = [
@@ -468,7 +471,13 @@ window.exportGeneratedLeads = function(format) {
                 `"${lead.interstate_status || ''}"`,
 
                 // Data Source
-                `"${lead.data_source || 'DB-V3-Comprehensive'}"`
+                `"${lead.data_source || 'DB-V3-Comprehensive'}"`,
+
+                // Corgi Prequote
+                `"${lead.corgi_prequote?.prequote_id || ''}"`,
+                `"${lead.corgi_prequote ? (lead.corgi_prequote.eligible ? 'Yes' : 'Not Eligible') : ''}"`,
+                `"${lead.corgi_prequote?.premium || ''}"`,
+                `"${lead.corgi_prequote?.reason || ''}"`
             ].join(','))
         ].join('\n');
 
@@ -515,20 +524,23 @@ window.viewGeneratedLeads = function() {
     `;
 
     const preview = window.generatedLeadsData.slice(0, 5); // Show first 5 leads
+    const hasCorgi = window.generatedLeadsData.some(l => l.corgi_prequote);
+    const eligibleCount = hasCorgi ? window.generatedLeadsData.filter(l => l.corgi_prequote?.eligible).length : 0;
 
     modal.innerHTML = `
         <div style="background: white; padding: 30px; border-radius: 10px; max-width: 90%; max-height: 90%; overflow: auto;">
-            <h2>Generated Leads Preview (${window.generatedLeadsData.length} total)</h2>
+            <h2>Generated Leads Preview (${window.generatedLeadsData.length} total${hasCorgi ? ` | 🐕 ${eligibleCount} Corgi eligible` : ''})</h2>
             <div style="margin: 20px 0;">
                 <strong>Sample leads (first 5):</strong>
                 <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px; font-size: 12px; overflow: auto;">
 ${preview.map((lead, i) => `${i+1}. ${lead.company_name} (${lead.usdot_number})
    📍 ${lead.city}, ${lead.state}
    📞 ${lead.phone}
-   📧 ${lead.email}
+   📧 ${lead.email_address || lead.email}
    🚛 Fleet: ${lead.fleet_size}
-   📅 Expires: ${lead.insurance_expiry}
-   🏢 Insurer: ${lead.insurance_company}
+   📅 Expires: ${lead.insurance_expiration || lead.insurance_expiry}
+   🏢 Insurer: ${lead.insurance_company}${lead.corgi_prequote ? `
+   🐕 Corgi: ${lead.corgi_prequote.eligible ? `ELIGIBLE — ID: ${lead.corgi_prequote.prequote_id || 'N/A'}${lead.corgi_prequote.premium ? ` | Premium: $${lead.corgi_prequote.premium}` : ''}` : `Not Eligible (${lead.corgi_prequote.reason || 'declined'})`}` : ''}
 `).join('\n')}
                 </pre>
             </div>
